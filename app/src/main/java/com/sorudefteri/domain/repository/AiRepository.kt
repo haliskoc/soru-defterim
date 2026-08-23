@@ -1,5 +1,6 @@
 package com.sorudefteri.domain.repository
 
+import com.sorudefteri.domain.model.AiProviderType
 import com.sorudefteri.domain.model.Soru
 
 /**
@@ -8,4 +9,5 @@ import com.sorudefteri.domain.model.Soru
 interface AiRepository {
     suspend fun getAiSolution(soru: Soru): Result<String>
     suspend fun hasApiKey(): Boolean
+    suspend fun fetchLiveModels(provider: AiProviderType): Result<List<Pair<String, String>>>
 }

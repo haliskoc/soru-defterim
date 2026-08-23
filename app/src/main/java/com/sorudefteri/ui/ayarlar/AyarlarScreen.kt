@@ -2,6 +2,8 @@ package com.sorudefteri.ui.ayarlar
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -25,18 +27,23 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
@@ -45,6 +52,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -112,8 +120,29 @@ fun AyarlarScreen(
     // Model dropdown açılır menü durumu
     var modelDropdownExpanded by remember { mutableStateOf(false) }
 
+    // Özel model girişi dialog durumu
+    var showCustomModelDialog by remember { mutableStateOf(false) }
+    var customModelInput by remember { mutableStateOf("") }
+
     // Veri sıfırlama onay dialogu
     var showResetDialog by remember { mutableStateOf(false) }
+
+    // Yedekleme Dışa Aktarma / İçe Aktarma Başlatıcıları
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) {
+            viewModel.exportBackup(uri)
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            viewModel.importBackup(uri)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -387,24 +416,97 @@ fun AyarlarScreen(
                         }
                     }
 
-                    // Model Selector Dropdown
+                    // Model Selector & Canlı Güncelleme
                     val currentModel = if (activeProvider == AiProviderType.GEMINI) uiState.geminiModel else uiState.groqModel
-                    val availableModels = activeProvider.supportedModels
+                    val dynamicModels = if (activeProvider == AiProviderType.GEMINI) uiState.fetchedGeminiModels else uiState.fetchedGroqModels
+                    val standardModels = activeProvider.supportedModels
+                    val combinedModels = if (dynamicModels.isNotEmpty()) {
+                        val dynamicIds = dynamicModels.map { it.first }.toSet()
+                        dynamicModels + standardModels.filter { it.first !in dynamicIds }
+                    } else {
+                        standardModels
+                    }
 
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = "Model Seçimi",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Model Seçimi",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+
+                            // Canlı Güncelle Butonu
+                            val hasKey = if (activeProvider == AiProviderType.GEMINI) uiState.geminiApiKey.isNotBlank() else uiState.groqApiKey.isNotBlank()
+                            TextButton(
+                                onClick = { viewModel.fetchLiveModels(activeProvider) },
+                                enabled = hasKey && !uiState.isFetchingModels,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                            ) {
+                                if (uiState.isFetchingModels) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(14.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Çekiliyor...", style = MaterialTheme.typography.labelSmall)
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Refresh,
+                                        contentDescription = "Modelleri Canlı Yenile",
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Canlı Modelleri Çek", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+
+                        // Canlı model çekme durumu bildirimi
+                        if (uiState.modelFetchStatus != null) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = if (uiState.isModelFetchError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f) else SuccessGreen.copy(alpha = 0.15f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = uiState.modelFetchStatus!!,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (uiState.isModelFetchError) MaterialTheme.colorScheme.error else SuccessGreen,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(
+                                        onClick = { viewModel.clearModelFetchStatus() },
+                                        modifier = Modifier.size(20.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Kapat",
+                                            modifier = Modifier.size(14.dp),
+                                            tint = if (uiState.isModelFetchError) MaterialTheme.colorScheme.error else SuccessGreen
+                                        )
+                                    }
+                                }
+                            }
+                        }
 
                         ExposedDropdownMenuBox(
                             expanded = modelDropdownExpanded,
                             onExpandedChange = { modelDropdownExpanded = it },
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            val selectedModelLabel = availableModels.firstOrNull { it.first == currentModel }?.second ?: currentModel
+                            val selectedModelLabel = combinedModels.firstOrNull { it.first == currentModel }?.second
+                                ?: "Özel Model: $currentModel"
 
                             OutlinedTextField(
                                 value = selectedModelLabel,
@@ -422,7 +524,7 @@ fun AyarlarScreen(
                                 expanded = modelDropdownExpanded,
                                 onDismissRequest = { modelDropdownExpanded = false }
                             ) {
-                                availableModels.forEach { (modelId, modelLabel) ->
+                                combinedModels.forEach { (modelId, modelLabel) ->
                                     DropdownMenuItem(
                                         text = { Text(modelLabel) },
                                         onClick = {
@@ -435,6 +537,35 @@ fun AyarlarScreen(
                                         }
                                     )
                                 }
+
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                                // Özel Model Girme Seçeneği
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Edit,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Text(
+                                                text = "✍️ Özel Model Adı Belirt...",
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    },
+                                    onClick = {
+                                        customModelInput = currentModel
+                                        showCustomModelDialog = true
+                                        modelDropdownExpanded = false
+                                    }
+                                )
                             }
                         }
                     }
@@ -491,7 +622,135 @@ fun AyarlarScreen(
                 }
             }
 
-            // 4) Veri Yönetimi
+            // 4) Yedekleme ve Dışa/İçe Aktarma (.sdefteri)
+            Card(
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FolderZip,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Column {
+                            Text(
+                                text = "Yedekleme & Arşiv Paketi",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = ".sdefteri veya .zip formatında tam yedek",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "Sorularınızı, fotoğraf ve AI çözüm açıklamalarını tek bir arşiv dosyasına paketleyip cihazınıza veya Google Drive'a yedekleyebilirsiniz.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    // Durum Bildirim Alanı
+                    if (uiState.isBackupLoading) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                Text(
+                                    text = uiState.backupMessage ?: "İşlem yapılıyor...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                    } else if (uiState.backupMessage != null) {
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (uiState.isBackupError) ErrorRed.copy(alpha = 0.15f) else SuccessGreen.copy(alpha = 0.15f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (uiState.isBackupError) Icons.Default.Warning else Icons.Default.CheckCircle,
+                                    contentDescription = null,
+                                    tint = if (uiState.isBackupError) ErrorRed else SuccessGreen,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = uiState.backupMessage ?: "",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (uiState.isBackupError) ErrorRed else SuccessGreen,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Dışa Aktar Butonu
+                        Button(
+                            onClick = {
+                                viewModel.clearBackupStatus()
+                                val defaultFilename = "soru_defteri_yedek_${System.currentTimeMillis()}.sdefteri"
+                                exportLauncher.launch(defaultFilename)
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f),
+                            enabled = !uiState.isBackupLoading
+                        ) {
+                            Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Dışa Aktar", fontWeight = FontWeight.Bold)
+                        }
+
+                        // İçe Aktar Butonu
+                        OutlinedButton(
+                            onClick = {
+                                viewModel.clearBackupStatus()
+                                importLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.weight(1f),
+                            enabled = !uiState.isBackupLoading
+                        ) {
+                            Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("İçe Aktar", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
+            // 5) Veri Yönetimi
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -640,6 +899,71 @@ fun AyarlarScreen(
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) {
                     Text("Vazgeç")
+                }
+            }
+        )
+    }
+
+    // Özel Model Girişi Dialogu
+    if (showCustomModelDialog) {
+        AlertDialog(
+            onDismissRequest = { showCustomModelDialog = false },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.Edit,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(36.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Özel Model Belirt",
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Sağlayıcının yeni çıkardığı veya kullanmak istediğiniz model kodunu girin (örn. gemini-2.5-flash, gemini-2.5-pro vb.):",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = customModelInput,
+                        onValueChange = { customModelInput = it },
+                        label = { Text("Model Kodu / ID") },
+                        placeholder = { Text("örn: gemini-2.5-flash") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val trimmed = customModelInput.trim()
+                        if (trimmed.isNotBlank()) {
+                            if (uiState.aiProvider == AiProviderType.GEMINI) {
+                                viewModel.setGeminiModel(trimmed)
+                            } else {
+                                viewModel.setGroqModel(trimmed)
+                            }
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("Model güncellendi: $trimmed")
+                            }
+                        }
+                        showCustomModelDialog = false
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text("Kaydet ve Kullan", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomModelDialog = false }) {
+                    Text("İptal")
                 }
             }
         )

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.ZoomIn
+import com.sorudefteri.ui.ortak.math.MathMarkdownText
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.Button
@@ -767,11 +768,9 @@ private fun QuestionResultItemCard(
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = aiSolution ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            lineHeight = 22.sp,
-                            color = MaterialTheme.colorScheme.onSurface
+                        MathMarkdownText(
+                            text = aiSolution.orEmpty(),
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }

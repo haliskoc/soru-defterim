@@ -12,11 +12,13 @@ enum class AiProviderType(
 ) {
     GEMINI(
         displayName = "Google Gemini",
-        defaultModel = "gemini-2.0-flash",
+        defaultModel = "gemini-2.5-flash",
         supportedModels = listOf(
-            "gemini-2.0-flash" to "Gemini 2.0 Flash (Önerilen - Hızlı & Güncel)",
-            "gemini-1.5-flash" to "Gemini 1.5 Flash (Hızlı & Dengeli)",
-            "gemini-1.5-pro" to "Gemini 1.5 Pro (Gelişmiş Akıl Yürütme)"
+            "gemini-2.5-flash" to "Gemini 2.5 Flash (En Yeni & Ultra Hızlı)",
+            "gemini-2.0-flash" to "Gemini 2.0 Flash (Kararlı & Hızlı)",
+            "gemini-2.5-pro" to "Gemini 2.5 Pro (İleri Düzey Akıl Yürütme)",
+            "gemini-1.5-flash" to "Gemini 1.5 Flash (Klasik Hızlı)",
+            "gemini-1.5-pro" to "Gemini 1.5 Pro (Klasik Pro)"
         ),
         consoleUrl = "https://aistudio.google.com/app/apikey",
         consoleName = "Google AI Studio"

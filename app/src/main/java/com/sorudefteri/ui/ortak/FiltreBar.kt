@@ -16,6 +16,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.FilterListOff
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -51,6 +53,10 @@ fun FiltreBar(
     onMistakeTypeSelected: (HataTipi?) -> Unit,
     onlyUnsolved: Boolean,
     onOnlyUnsolvedToggle: (Boolean) -> Unit,
+    onlyFavorites: Boolean = false,
+    onOnlyFavoritesToggle: (Boolean) -> Unit = {},
+    onlyDueReview: Boolean = false,
+    onOnlyDueReviewToggle: (Boolean) -> Unit = {},
     onResetFilters: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -61,7 +67,9 @@ fun FiltreBar(
     val hasActiveFilter = selectedExamType != null ||
             selectedSubjectId != null ||
             selectedMistakeType != null ||
-            onlyUnsolved
+            onlyUnsolved ||
+            onlyFavorites ||
+            onlyDueReview
 
     Row(
         modifier = modifier
@@ -296,6 +304,36 @@ fun FiltreBar(
                     )
                 }
             } else null
+        )
+
+        // Sadece Favoriler Toggle
+        FilterChip(
+            selected = onlyFavorites,
+            onClick = { onOnlyFavoritesToggle(!onlyFavorites) },
+            label = { Text("Favoriler") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Star,
+                    contentDescription = null,
+                    tint = if (onlyFavorites) Color(0xFFFFB300) else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        )
+
+        // Sadece Tekrar Zamanı Gelenler Toggle
+        FilterChip(
+            selected = onlyDueReview,
+            onClick = { onOnlyDueReviewToggle(!onlyDueReview) },
+            label = { Text("Tekrar Zamanı") },
+            leadingIcon = {
+                Icon(
+                    imageVector = Icons.Default.Schedule,
+                    contentDescription = null,
+                    tint = if (onlyDueReview) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp)
+                )
+            }
         )
     }
 }

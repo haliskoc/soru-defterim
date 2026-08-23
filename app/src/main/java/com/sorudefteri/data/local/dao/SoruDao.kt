@@ -94,6 +94,51 @@ interface SoruDao {
     @Query("SELECT mistakeType, COUNT(*) as count FROM sorular WHERE mistakeType IS NOT NULL AND mistakeType != '' GROUP BY mistakeType ORDER BY count DESC")
     fun getMistakeTypeDistribution(): Flow<List<MistakeCountTuple>>
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(sorular: List<SoruEntity>): List<Long>
+
+    @Query("UPDATE sorular SET isFavorite = :isFavorite, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun toggleFavorite(id: Long, isFavorite: Boolean, updatedAt: Long = System.currentTimeMillis())
+
+    @Query("UPDATE sorular SET reviewStage = :stage, nextReviewDate = :nextReviewDate, lastReviewedAt = :lastReviewedAt, updatedAt = :updatedAt WHERE id = :id")
+    suspend fun updateReviewStatus(
+        id: Long,
+        stage: Int,
+        nextReviewDate: Long?,
+        lastReviewedAt: Long,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
+    @Query("DELETE FROM sorular WHERE id IN (:ids)")
+    suspend fun deleteSorularByIds(ids: List<Long>)
+
+    @Query("UPDATE sorular SET isSolved = :isSolved, solvedAt = :solvedAt, updatedAt = :updatedAt WHERE id IN (:ids)")
+    suspend fun updateSolvedStatusBatch(
+        ids: List<Long>,
+        isSolved: Boolean,
+        solvedAt: Long?,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
+    @Query("UPDATE sorular SET isFavorite = :isFavorite, updatedAt = :updatedAt WHERE id IN (:ids)")
+    suspend fun updateFavoriteStatusBatch(
+        ids: List<Long>,
+        isFavorite: Boolean,
+        updatedAt: Long = System.currentTimeMillis()
+    )
+
+    @Query("SELECT * FROM sorular WHERE isFavorite = 1 ORDER BY createdAt DESC")
+    fun getFavoriteSorular(): Flow<List<SoruEntity>>
+
+    @Query("SELECT * FROM sorular WHERE nextReviewDate IS NOT NULL AND nextReviewDate <= :currentTime ORDER BY nextReviewDate ASC")
+    fun getDueReviewSorular(currentTime: Long = System.currentTimeMillis()): Flow<List<SoruEntity>>
+
+    @Query("SELECT COUNT(*) FROM sorular WHERE isFavorite = 1")
+    fun getFavoriteCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM sorular WHERE nextReviewDate IS NOT NULL AND nextReviewDate <= :currentTime")
+    fun getDueReviewCount(currentTime: Long = System.currentTimeMillis()): Flow<Int>
+
     @Query("DELETE FROM sorular")
     suspend fun clearAll()
 

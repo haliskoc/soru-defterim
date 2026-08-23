@@ -21,8 +21,10 @@ object DatabaseModule {
         return Room.databaseBuilder(
             context,
             SoruDatabase::class.java,
-            "soru_defteri.db"
-        ).fallbackToDestructiveMigration().build()
+            SoruDatabase.DATABASE_NAME
+        )
+            .addMigrations(SoruDatabase.MIGRATION_1_2)
+            .build()
     }
 
     @Provides

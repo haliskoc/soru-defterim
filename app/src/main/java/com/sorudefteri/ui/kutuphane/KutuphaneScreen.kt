@@ -24,12 +24,19 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.CollectionsBookmark
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -96,6 +103,7 @@ fun KutuphaneScreen(
 
     var showBottomSheet by remember { mutableStateOf(false) }
     var sortMenuExpanded by remember { mutableStateOf(false) }
+    var showBatchDeleteDialog by remember { mutableStateOf(false) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Fotoğraf Seçici (Photo Picker)
@@ -107,81 +115,189 @@ fun KutuphaneScreen(
         }
     }
 
+    if (showBatchDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showBatchDeleteDialog = false },
+            title = { Text("Seçili Soruları Sil") },
+            text = { Text("Seçtiğiniz ${uiState.selectedSoruIds.size} soruyu silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.batchDeleteSelected()
+                        showBatchDeleteDialog = false
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Evet, Sil")
+                }
+            },
+            dismissButton = {
+                Button(
+                    onClick = { showBatchDeleteDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                ) {
+                    Text("İptal", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        )
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
+            if (uiState.isSelectionMode) {
+                TopAppBar(
+                    title = {
                         Text(
-                            text = "Soru Defterim",
-                            style = MaterialTheme.typography.titleLarge,
+                            text = "${uiState.selectedSoruIds.size} Soru Seçildi",
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
-                        if (!uiState.isLoading && uiState.totalCount > 0) {
-                            Text(
-                                text = "${uiState.totalCount} Soru • ${uiState.solvedCount} Çözüldü",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    // Sıralama Menüsü
-                    Box {
-                        IconButton(onClick = { sortMenuExpanded = true }) {
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { viewModel.clearSelection() }) {
                             Icon(
-                                imageVector = Icons.Default.Sort,
-                                contentDescription = "Sıralama Seçenekleri"
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Seçimi Kapat"
                             )
                         }
-
-                        DropdownMenu(
-                            expanded = sortMenuExpanded,
-                            onDismissRequest = { sortMenuExpanded = false }
-                        ) {
-                            SortOrder.entries.forEach { order ->
-                                val isSelected = uiState.sortOrder == order
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = order.displayName,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    },
-                                    onClick = {
-                                        viewModel.onSortOrderChange(order)
-                                        sortMenuExpanded = false
-                                    },
-                                    leadingIcon = {
-                                        if (isSelected) {
-                                            Icon(
-                                                imageVector = Icons.Default.Check,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary
-                                            )
-                                        }
-                                    }
+                    },
+                    actions = {
+                        IconButton(onClick = {
+                            if (uiState.isAllSelected) viewModel.clearSelection() else viewModel.selectAll()
+                        }) {
+                            Icon(
+                                imageVector = Icons.Default.SelectAll,
+                                contentDescription = if (uiState.isAllSelected) "Seçimi Kaldır" else "Tümünü Seç",
+                                tint = if (uiState.isAllSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                    )
+                )
+            } else {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                text = "Soru Defterim",
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (!uiState.isLoading && uiState.totalCount > 0) {
+                                Text(
+                                    text = "${uiState.totalCount} Soru • ${uiState.solvedCount} Çözüldü",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
                         }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                    },
+                    actions = {
+                        // Sıralama Menüsü
+                        Box {
+                            IconButton(onClick = { sortMenuExpanded = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.Sort,
+                                    contentDescription = "Sıralama Seçenekleri"
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = sortMenuExpanded,
+                                onDismissRequest = { sortMenuExpanded = false }
+                            ) {
+                                SortOrder.entries.forEach { order ->
+                                    val isSelected = uiState.sortOrder == order
+                                    DropdownMenuItem(
+                                        text = {
+                                            Text(
+                                                text = order.displayName,
+                                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        },
+                                        onClick = {
+                                            viewModel.onSortOrderChange(order)
+                                            sortMenuExpanded = false
+                                        },
+                                        leadingIcon = {
+                                            if (isSelected) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Check,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.primary
+                                                )
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
                 )
-            )
+            }
+        },
+        bottomBar = {
+            if (uiState.isSelectionMode && uiState.selectedSoruIds.isNotEmpty()) {
+                Surface(
+                    tonalElevation = 8.dp,
+                    shadowElevation = 8.dp,
+                    color = MaterialTheme.colorScheme.surface
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceEvenly,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = { viewModel.batchMarkSolvedSelected(true) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Çözüldü")
+                        }
+                        Button(
+                            onClick = { viewModel.batchStarSelected(true) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300))
+                        ) {
+                            Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Black)
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Yıldızla", color = Color.Black)
+                        }
+                        Button(
+                            onClick = { showBatchDeleteDialog = true },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Sil")
+                        }
+                    }
+                }
+            }
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { showBottomSheet = true },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Soru Ekle", fontWeight = FontWeight.Bold) },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                shape = RoundedCornerShape(16.dp)
-            )
+            if (!uiState.isSelectionMode) {
+                ExtendedFloatingActionButton(
+                    onClick = { showBottomSheet = true },
+                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    text = { Text("Soru Ekle", fontWeight = FontWeight.Bold) },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
+                    shape = RoundedCornerShape(16.dp)
+                )
+            }
         }
     ) { innerPadding ->
         Column(
@@ -240,6 +356,10 @@ fun KutuphaneScreen(
                 onMistakeTypeSelected = { viewModel.onMistakeTypeSelected(it) },
                 onlyUnsolved = uiState.onlyUnsolved,
                 onOnlyUnsolvedToggle = { viewModel.onOnlyUnsolvedToggle(it) },
+                onlyFavorites = uiState.onlyFavorites,
+                onOnlyFavoritesToggle = { viewModel.onOnlyFavoritesToggle(it) },
+                onlyDueReview = uiState.onlyDueReview,
+                onOnlyDueReviewToggle = { viewModel.onOnlyDueReviewToggle(it) },
                 onResetFilters = { viewModel.resetFilters() }
             )
 
@@ -256,7 +376,9 @@ fun KutuphaneScreen(
                         uiState.selectedExamType != null ||
                         uiState.selectedSubjectId != null ||
                         uiState.selectedMistakeType != null ||
-                        uiState.onlyUnsolved
+                        uiState.onlyUnsolved ||
+                        uiState.onlyFavorites ||
+                        uiState.onlyDueReview
 
                 if (isFiltering) {
                     EmptyState(
@@ -284,7 +406,7 @@ fun KutuphaneScreen(
                         start = 16.dp,
                         end = 16.dp,
                         top = 8.dp,
-                        bottom = 88.dp // FAB arkasında kalmaması için
+                        bottom = if (uiState.isSelectionMode) 88.dp else 88.dp
                     ),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -296,8 +418,20 @@ fun KutuphaneScreen(
                     ) { soru ->
                         SoruKarti(
                             soru = soru,
-                            onClick = { handleSoruClick(soru.id) },
-                            onToggleSolved = { viewModel.toggleSolved(soru) }
+                            onClick = {
+                                if (uiState.isSelectionMode) {
+                                    viewModel.toggleSelectSoru(soru.id)
+                                } else {
+                                    handleSoruClick(soru.id)
+                                }
+                            },
+                            onLongClick = {
+                                viewModel.toggleSelectSoru(soru.id)
+                            },
+                            isSelected = uiState.selectedSoruIds.contains(soru.id),
+                            isSelectionMode = uiState.isSelectionMode,
+                            onToggleSolved = { viewModel.toggleSolved(soru) },
+                            onToggleFavorite = { viewModel.toggleFavorite(soru) }
                         )
                     }
                 }

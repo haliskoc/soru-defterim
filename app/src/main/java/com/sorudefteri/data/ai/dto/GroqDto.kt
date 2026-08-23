@@ -56,3 +56,21 @@ data class GroqError(
     val message: String? = null,
     val type: String? = null
 )
+
+/**
+ * Groq Models API yanıt gövdesi (GET https://api.groq.com/openai/v1/models)
+ */
+@Serializable
+data class GroqModelListResponse(
+    val `data`: List<GroqModelItem>? = null,
+    val error: GroqError? = null
+)
+
+@Serializable
+data class GroqModelItem(
+    val id: String,
+    @SerialName("owned_by")
+    val ownedBy: String? = null,
+    val active: Boolean? = true
+)
+

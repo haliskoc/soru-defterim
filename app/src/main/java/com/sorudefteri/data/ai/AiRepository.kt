@@ -47,6 +47,30 @@ class AiRepository @Inject constructor(
     }
 
     /**
+     * Sağlayıcıdan canlı güncel modelleri çeker.
+     */
+    override suspend fun fetchLiveModels(provider: AiProviderType): Result<List<Pair<String, String>>> {
+        return when (provider) {
+            AiProviderType.GEMINI -> {
+                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
+                if (apiKey.isBlank()) {
+                    Result.failure(IllegalArgumentException("Gemini API anahtarı girilmemiş."))
+                } else {
+                    geminiProvider.listModels(apiKey)
+                }
+            }
+            AiProviderType.GROQ -> {
+                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
+                if (apiKey.isBlank()) {
+                    Result.failure(IllegalArgumentException("Groq API anahtarı girilmemiş."))
+                } else {
+                    groqProvider.listModels(apiKey)
+                }
+            }
+        }
+    }
+
+    /**
      * Disk üzerindeki soru görseli dosya yolundan çözüm üretir.
      *
      * @param imagePath Soru görselinin cihazdaki mutlak dosya yolu.

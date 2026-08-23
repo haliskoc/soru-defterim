@@ -101,19 +101,17 @@ class SoruEklemeViewModel @Inject constructor(
         if (uriOrPath.isBlank()) return
         viewModelScope.launch {
             try {
-                if (uriOrPath.startsWith("content://") || uriOrPath.startsWith("file://")) {
+                val path = if (uriOrPath.startsWith("content://") || uriOrPath.startsWith("file://")) {
                     val uri = Uri.parse(uriOrPath)
-                    val path = gorselDepo.saveImageFromUri(uri, isSolution = false)
-                    _uiState.update { it.copy(soruImagePath = path, errorMessage = null) }
-                } else if (File(uriOrPath).exists() || uriOrPath.startsWith("/")) {
-                    _uiState.update { it.copy(soruImagePath = uriOrPath, errorMessage = null) }
+                    gorselDepo.saveImageFromUri(uri, isSolution = false)
+                } else if (File(uriOrPath).exists()) {
+                    gorselDepo.kaydetDosyadan(File(uriOrPath), isSolution = false)
                 } else {
                     val uri = Uri.parse(uriOrPath)
-                    val path = gorselDepo.saveImageFromUri(uri, isSolution = false)
-                    _uiState.update { it.copy(soruImagePath = path, errorMessage = null) }
+                    gorselDepo.saveImageFromUri(uri, isSolution = false)
                 }
+                _uiState.update { it.copy(soruImagePath = path, errorMessage = null) }
             } catch (e: Exception) {
-                // Hata durumunda dosya yolu olarak doğrudan kullanmayı dene
                 if (File(uriOrPath).exists()) {
                     _uiState.update { it.copy(soruImagePath = uriOrPath, errorMessage = null) }
                 } else {
@@ -127,17 +125,16 @@ class SoruEklemeViewModel @Inject constructor(
         if (uriOrPath.isBlank()) return
         viewModelScope.launch {
             try {
-                if (uriOrPath.startsWith("content://") || uriOrPath.startsWith("file://")) {
+                val path = if (uriOrPath.startsWith("content://") || uriOrPath.startsWith("file://")) {
                     val uri = Uri.parse(uriOrPath)
-                    val path = gorselDepo.saveImageFromUri(uri, isSolution = true)
-                    _uiState.update { it.copy(solutionImagePath = path, errorMessage = null) }
-                } else if (File(uriOrPath).exists() || uriOrPath.startsWith("/")) {
-                    _uiState.update { it.copy(solutionImagePath = uriOrPath, errorMessage = null) }
+                    gorselDepo.saveImageFromUri(uri, isSolution = true)
+                } else if (File(uriOrPath).exists()) {
+                    gorselDepo.kaydetDosyadan(File(uriOrPath), isSolution = true)
                 } else {
                     val uri = Uri.parse(uriOrPath)
-                    val path = gorselDepo.saveImageFromUri(uri, isSolution = true)
-                    _uiState.update { it.copy(solutionImagePath = path, errorMessage = null) }
+                    gorselDepo.saveImageFromUri(uri, isSolution = true)
                 }
+                _uiState.update { it.copy(solutionImagePath = path, errorMessage = null) }
             } catch (e: Exception) {
                 if (File(uriOrPath).exists()) {
                     _uiState.update { it.copy(solutionImagePath = uriOrPath, errorMessage = null) }

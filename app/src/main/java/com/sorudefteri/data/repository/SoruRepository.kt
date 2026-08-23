@@ -172,6 +172,90 @@ class SoruRepositoryImpl @Inject constructor(
         soruDao.updateSoru(updated)
     }
 
+    override val favoriteCount: Flow<Int> = soruDao.getFavoriteCount()
+
+    override val dueReviewCount: Flow<Int> = soruDao.getDueReviewCount()
+
+    override suspend fun toggleFavorite(id: Long, isFavorite: Boolean) = withContext(Dispatchers.IO) {
+        soruDao.toggleFavorite(id, isFavorite)
+    }
+
+    override suspend fun updateReviewStatus(
+        id: Long,
+        stage: Int,
+        nextReviewDate: Long?,
+        lastReviewedAt: Long
+    ) = withContext(Dispatchers.IO) {
+        soruDao.updateReviewStatus(id, stage, nextReviewDate, lastReviewedAt)
+    }
+
+    override suspend fun advanceReviewStage(id: Long) = withContext(Dispatchers.IO) {
+        val soru = soruDao.getSoruByIdDirect(id) ?: return@withContext
+        val currentStage = soru.reviewStage
+        val nextStage = (currentStage + 1).coerceAtMost(5)
+        val now = System.currentTimeMillis()
+
+        val intervalDays = when (nextStage) {
+            1 -> 1L
+            2 -> 3L
+            3 -> 7L
+            4 -> 14L
+            else -> 30L
+        }
+        val nextReviewTimestamp = now + (intervalDays * 24 * 60 * 60 * 1000L)
+
+        soruDao.updateReviewStatus(
+            id = id,
+            stage = nextStage,
+            nextReviewDate = nextReviewTimestamp,
+            lastReviewedAt = now
+        )
+    }
+
+    override suspend fun deleteSorularByIds(ids: List<Long>) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        ids.forEach { id ->
+            val soru = soruDao.getSoruByIdDirect(id)
+            if (soru != null) {
+                gorselDepo.gorselSil(soru.imagePath)
+                if (!soru.solutionImagePath.isNullOrBlank()) {
+                    gorselDepo.gorselSil(soru.solutionImagePath)
+                }
+            }
+        }
+        soruDao.deleteSorularByIds(ids)
+    }
+
+    override suspend fun updateSolvedStatusBatch(ids: List<Long>, isSolved: Boolean) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        val now = System.currentTimeMillis()
+        soruDao.updateSolvedStatusBatch(ids, isSolved, if (isSolved) now else null)
+    }
+
+    override suspend fun updateFavoriteStatusBatch(ids: List<Long>, isFavorite: Boolean) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        soruDao.updateFavoriteStatusBatch(ids, isFavorite)
+    }
+
+    override suspend fun insertAllSorular(sorular: List<Soru>): List<Long> = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val entities = sorular.map { s ->
+            s.copy(
+                createdAt = if (s.createdAt > 0) s.createdAt else now,
+                updatedAt = now
+            ).toEntity()
+        }
+        soruDao.insertAll(entities)
+    }
+
+    override fun getFavoriteSorular(): Flow<List<Soru>> {
+        return soruDao.getFavoriteSorular().map { list -> list.map { it.toDomain() } }
+    }
+
+    override fun getDueReviewSorular(): Flow<List<Soru>> {
+        return soruDao.getDueReviewSorular().map { list -> list.map { it.toDomain() } }
+    }
+
     override suspend fun tumVerileriTemizle(): Unit = withContext(Dispatchers.IO) {
         soruDao.clearAll()
         gorselDepo.tumGorselleriSil()

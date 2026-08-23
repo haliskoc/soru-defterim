@@ -49,3 +49,20 @@ data class GeminiError(
     val code: Int? = null,
     val message: String? = null
 )
+
+/**
+ * Gemini ListModels API yanıt gövdesi (GET https://generativelanguage.googleapis.com/v1beta/models?key={key})
+ */
+@Serializable
+data class GeminiModelListResponse(
+    val models: List<GeminiModelItem>? = null,
+    val error: GeminiError? = null
+)
+
+@Serializable
+data class GeminiModelItem(
+    val name: String,
+    val displayName: String? = null,
+    val description: String? = null,
+    val supportedGenerationMethods: List<String> = emptyList()
+)

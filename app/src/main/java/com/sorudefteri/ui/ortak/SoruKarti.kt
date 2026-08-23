@@ -24,10 +24,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -73,12 +77,16 @@ import java.util.Locale
 /**
  * Kütüphane listesindeki soru kartı bileşeni.
  */
-@OptIn(ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun SoruKarti(
     soru: Soru,
     onClick: () -> Unit,
     onToggleSolved: (() -> Unit)? = null,
+    onToggleFavorite: (() -> Unit)? = null,
+    isSelected: Boolean = false,
+    isSelectionMode: Boolean = false,
+    onLongClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isTyt = soru.examType.equals("TYT", ignoreCase = true)
@@ -88,11 +96,15 @@ fun SoruKarti(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
-            .clickable { onClick() },
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            ),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surface
         ),
+        border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
         elevation = CardDefaults.elevatedCardElevation(
             defaultElevation = 2.dp,
             pressedElevation = 6.dp
@@ -160,7 +172,7 @@ fun SoruKarti(
                     }
                 )
 
-                // Görsel Üzerindeki Rozetler (Top-Start: TYT/AYT, Top-End: AI Çözümü)
+                // Görsel Üzerindeki Rozetler (Top-Start: Seçim veya TYT/AYT, Top-End: Favori & AI)
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -168,39 +180,80 @@ fun SoruKarti(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // TYT / AYT Rozeti
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = if (isTyt) TytBadgeContainer else AytBadgeContainer,
-                        border = BorderStroke(
-                            1.dp,
-                            if (isTyt) TytBadgeColor.copy(alpha = 0.6f) else AytBadgeColor.copy(alpha = 0.6f)
-                        )
-                    ) {
-                        Text(
-                            text = if (isTyt) "TYT" else "AYT",
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isTyt) TytBadgeColor else AytBadgeColor,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-
-                    // AI Çözüm rozeti varsa göster
-                    if (!soru.aiExplanation.isNullOrBlank()) {
+                    if (isSelectionMode) {
                         Surface(
                             shape = CircleShape,
-                            color = MaterialTheme.colorScheme.primaryContainer,
-                            shadowElevation = 2.dp
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Black.copy(alpha = 0.6f)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.AutoAwesome,
-                                contentDescription = "AI Çözümü Mevcut",
-                                tint = MaterialTheme.colorScheme.primary,
+                                imageVector = if (isSelected) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                                contentDescription = if (isSelected) "Seçili" else "Seçilmedi",
+                                tint = Color.White,
                                 modifier = Modifier
                                     .padding(4.dp)
-                                    .size(14.dp)
+                                    .size(16.dp)
                             )
+                        }
+                    } else {
+                        // TYT / AYT Rozeti
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (isTyt) TytBadgeContainer else AytBadgeContainer,
+                            border = BorderStroke(
+                                1.dp,
+                                if (isTyt) TytBadgeColor.copy(alpha = 0.6f) else AytBadgeColor.copy(alpha = 0.6f)
+                            )
+                        ) {
+                            Text(
+                                text = if (isTyt) "TYT" else "AYT",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isTyt) TytBadgeColor else AytBadgeColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                            )
+                        }
+                    }
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // Favori butonu
+                        if (onToggleFavorite != null || soru.isFavorite) {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color.Black.copy(alpha = 0.5f),
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clickable(enabled = onToggleFavorite != null) { onToggleFavorite?.invoke() }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = if (soru.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                                        contentDescription = "Favori",
+                                        tint = if (soru.isFavorite) Color(0xFFFFB300) else Color.White,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // AI Çözüm rozeti varsa göster
+                        if (!soru.aiExplanation.isNullOrBlank()) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shadowElevation = 2.dp
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = "AI Çözümü Mevcut",
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .padding(4.dp)
+                                        .size(14.dp)
+                                    )
+                            }
                         }
                     }
                 }

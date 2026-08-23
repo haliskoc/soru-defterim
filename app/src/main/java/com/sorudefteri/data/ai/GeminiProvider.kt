@@ -3,6 +3,8 @@ package com.sorudefteri.data.ai
 import android.util.Base64
 import com.sorudefteri.data.ai.dto.GeminiContent
 import com.sorudefteri.data.ai.dto.GeminiInlineData
+import com.sorudefteri.data.ai.dto.GeminiModelItem
+import com.sorudefteri.data.ai.dto.GeminiModelListResponse
 import com.sorudefteri.data.ai.dto.GeminiPart
 import com.sorudefteri.data.ai.dto.GeminiRequest
 import com.sorudefteri.data.ai.dto.GeminiResponse
@@ -36,6 +38,78 @@ class GeminiProvider @Inject constructor(
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
+    companion object {
+        const val FALLBACK_MODEL = "gemini-2.5-flash"
+        const val SECONDARY_FALLBACK_MODEL = "gemini-2.0-flash"
+    }
+
+    /**
+     * Google Gemini API'sinden kullanıcının API anahtarına açık tüm güncel modelleri canlı çeker.
+     */
+    suspend fun listModels(apiKey: String): Result<List<Pair<String, String>>> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Gemini API anahtarı boş olamaz.")
+            )
+        }
+
+        try {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
+            val httpRequest = Request.Builder()
+                .url(url)
+                .get()
+                .build()
+
+            okHttpClient.newCall(httpRequest).execute().use { response ->
+                val responseBodyString = response.body?.string().orEmpty()
+
+                if (response.isSuccessful) {
+                    val listResponse = try {
+                        json.decodeFromString<GeminiModelListResponse>(responseBodyString)
+                    } catch (e: Exception) {
+                        return@withContext Result.failure(
+                            Exception("Model listesi çözümlenemedi: ${e.localizedMessage}", e)
+                        )
+                    }
+
+                    val models = listResponse.models.orEmpty()
+                        .filter { it.supportedGenerationMethods.contains("generateContent") }
+                        .filter {
+                            val id = it.name.removePrefix("models/").lowercase()
+                            id.contains("gemini") && !id.contains("embedding") && !id.contains("aqa")
+                        }
+                        .sortedWith(
+                            compareByDescending<GeminiModelItem> { it.name.contains("2.5") }
+                                .thenByDescending { it.name.contains("2.0") }
+                                .thenByDescending { it.name.contains("flash") }
+                                .thenByDescending { it.name.contains("pro") }
+                        )
+                        .map { item ->
+                            val modelId = item.name.removePrefix("models/")
+                            val display = item.displayName?.takeIf { it.isNotBlank() } ?: modelId
+                            modelId to "$display ($modelId)"
+                        }
+
+                    if (models.isEmpty()) {
+                        Result.failure(Exception("Kullanılabilir Gemini modeli bulunamadı."))
+                    } else {
+                        Result.success(models)
+                    }
+                } else {
+                    val parsedError = try {
+                        json.decodeFromString<GeminiResponse>(responseBodyString).error?.message
+                    } catch (_: Exception) {
+                        null
+                    }
+                    val errorDetail = parsedError ?: responseBodyString.take(200).ifBlank { "HTTP ${response.code}" }
+                    Result.failure(Exception("Model listesi alınamadı: $errorDetail"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     override suspend fun cozumIste(
         imageBytes: ByteArray,
         dersAdi: String,
@@ -50,8 +124,48 @@ class GeminiProvider @Inject constructor(
             )
         }
 
-        val effectiveModel = modelName.ifBlank { "gemini-2.0-flash" }
+        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
 
+        // İlk deneme: Seçili model ile çağrı
+        val primaryResult = executeGenerateContent(imageBytes, dersAdi, konu, correctAnswer, effectiveModel, apiKey)
+        if (primaryResult.isSuccess) {
+            return@withContext primaryResult
+        }
+
+        val throwable = primaryResult.exceptionOrNull()
+        val errorMsg = throwable?.message.orEmpty().lowercase()
+
+        // Eğer model bulunamadı (404 / deprecated) ve seçilen model zaten varsayılan değilse, fallback yap
+        val isModelNotFoundOrDeprecated = errorMsg.contains("not found") ||
+                errorMsg.contains("deprecated") ||
+                errorMsg.contains("is not supported") ||
+                errorMsg.contains("404")
+
+        if (isModelNotFoundOrDeprecated && effectiveModel != FALLBACK_MODEL) {
+            val fallbackResult = executeGenerateContent(imageBytes, dersAdi, konu, correctAnswer, FALLBACK_MODEL, apiKey)
+            if (fallbackResult.isSuccess) {
+                return@withContext fallbackResult
+            }
+            // İkincil fallback dene (örn. 2.0-flash)
+            if (FALLBACK_MODEL != SECONDARY_FALLBACK_MODEL) {
+                val secFallback = executeGenerateContent(imageBytes, dersAdi, konu, correctAnswer, SECONDARY_FALLBACK_MODEL, apiKey)
+                if (secFallback.isSuccess) {
+                    return@withContext secFallback
+                }
+            }
+        }
+
+        return@withContext primaryResult
+    }
+
+    private fun executeGenerateContent(
+        imageBytes: ByteArray,
+        dersAdi: String,
+        konu: String,
+        correctAnswer: String?,
+        modelName: String,
+        apiKey: String
+    ): Result<String> {
         val answerInfo = if (!correctAnswer.isNullOrBlank()) {
             "Öğrencinin belirttiği / Sorunun doğru cevap şıkkı: $correctAnswer"
         } else {
@@ -61,6 +175,7 @@ class GeminiProvider @Inject constructor(
         val prompt = """
             Sen Türkiye YKS (TYT / AYT) sınavlarına hazırlanan öğrenciler için alanında uzman, pedagojik formasyona sahip kıdemli bir öğretmensin.
             Görseldeki soruyu öğrencinin eksiksiz anlayacağı şekilde, adım adım ve pedagojik yöntemlerle açıkla.
+            Matematiksel formülleri ve ifadeleri standart LaTeX biçiminde (örn: ${'$'}x^2 + 5x + 6 = 0${'$'}, ${'$'}\\int_a^b f(x)dx${'$'}, ${'$'}\\frac{a}{b}${'$'}, ${'$'}\\sum_{i=1}^n${'$'}) sun.
 
             Ders: $dersAdi
             Konu: $konu
@@ -103,7 +218,8 @@ class GeminiProvider @Inject constructor(
             )
 
             val requestJson = json.encodeToString(GeminiRequest.serializer(), requestBody)
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$effectiveModel:generateContent?key=$apiKey"
+            val cleanModel = modelName.removePrefix("models/").trim()
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent?key=$apiKey"
 
             val httpRequest = Request.Builder()
                 .url(url)
@@ -118,13 +234,13 @@ class GeminiProvider @Inject constructor(
                         val geminiResponse = try {
                             json.decodeFromString<GeminiResponse>(responseBodyString)
                         } catch (e: Exception) {
-                            return@withContext Result.failure(
+                            return Result.failure(
                                 Exception("Gemini API yanıtı çözümlenemedi: ${e.localizedMessage}", e)
                             )
                         }
 
                         if (geminiResponse.error != null) {
-                            return@withContext Result.failure(
+                            return Result.failure(
                                 Exception(geminiResponse.error.message ?: "Google Gemini API hatası oluştu.")
                             )
                         }
@@ -144,8 +260,17 @@ class GeminiProvider @Inject constructor(
                         }
                     }
                     400 -> {
+                        val parsedError = try {
+                            json.decodeFromString<GeminiResponse>(responseBodyString).error?.message
+                        } catch (_: Exception) {
+                            null
+                        }
+                        val errorDetail = parsedError ?: "Geçersiz istek veya hatalı API parametresi (HTTP 400)."
+                        Result.failure(Exception("Gemini API Hatası ($errorDetail)"))
+                    }
+                    404 -> {
                         Result.failure(
-                            Exception("Geçersiz istek veya hatalı API parametresi (HTTP 400). Lütfen API anahtarınızı ve model ayarlarınızı kontrol edin.")
+                            Exception("Seçilen '$cleanModel' modeli Google tarafından bulunamadı veya kullanımdan kaldırılmış (HTTP 404).")
                         )
                     }
                     401, 403 -> {

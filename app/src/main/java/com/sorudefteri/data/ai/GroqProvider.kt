@@ -6,6 +6,7 @@ import com.sorudefteri.data.ai.dto.GroqChatResponse
 import com.sorudefteri.data.ai.dto.GroqContentPart
 import com.sorudefteri.data.ai.dto.GroqImageUrl
 import com.sorudefteri.data.ai.dto.GroqMessage
+import com.sorudefteri.data.ai.dto.GroqModelListResponse
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -35,6 +36,55 @@ class GroqProvider @Inject constructor(
     }
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+
+    /**
+     * Groq API'sinden güncel model listesini çeker.
+     */
+    suspend fun listModels(apiKey: String): Result<List<Pair<String, String>>> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                IllegalArgumentException("Groq API anahtarı boş olamaz.")
+            )
+        }
+
+        try {
+            val url = "https://api.groq.com/openai/v1/models"
+            val httpRequest = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $apiKey")
+                .get()
+                .build()
+
+            okHttpClient.newCall(httpRequest).execute().use { response ->
+                val responseBodyString = response.body?.string().orEmpty()
+
+                if (response.isSuccessful) {
+                    val listResponse = try {
+                        json.decodeFromString<GroqModelListResponse>(responseBodyString)
+                    } catch (e: Exception) {
+                        return@withContext Result.failure(
+                            Exception("Model listesi çözümlenemedi: ${e.localizedMessage}", e)
+                        )
+                    }
+
+                    val models = listResponse.data.orEmpty()
+                        .filter { it.active != false }
+                        .filter { it.id.contains("vision", ignoreCase = true) || it.id.contains("llama", ignoreCase = true) }
+                        .map { item -> item.id to item.id }
+
+                    if (models.isEmpty()) {
+                        Result.failure(Exception("Kullanılabilir Groq modeli bulunamadı."))
+                    } else {
+                        Result.success(models)
+                    }
+                } else {
+                    Result.failure(Exception("Groq modelleri alınamadı: HTTP ${response.code}"))
+                }
+            }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
 
     override suspend fun cozumIste(
         imageBytes: ByteArray,

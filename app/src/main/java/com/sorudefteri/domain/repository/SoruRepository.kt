@@ -75,6 +75,19 @@ interface SoruRepository {
 
     suspend fun deleteAllSorular() = tumVerileriTemizle()
 
+    val favoriteCount: Flow<Int>
+    val dueReviewCount: Flow<Int>
+
+    suspend fun toggleFavorite(id: Long, isFavorite: Boolean)
+    suspend fun updateReviewStatus(id: Long, stage: Int, nextReviewDate: Long?, lastReviewedAt: Long)
+    suspend fun advanceReviewStage(id: Long)
+    suspend fun deleteSorularByIds(ids: List<Long>)
+    suspend fun updateSolvedStatusBatch(ids: List<Long>, isSolved: Boolean)
+    suspend fun updateFavoriteStatusBatch(ids: List<Long>, isFavorite: Boolean)
+    suspend fun insertAllSorular(sorular: List<Soru>): List<Long>
+    fun getFavoriteSorular(): Flow<List<Soru>>
+    fun getDueReviewSorular(): Flow<List<Soru>>
+
     fun getDistinctTopics(subjectId: String): Flow<List<String>>
 
     fun getIstatistikler(): Flow<IstatistikOzetWrapper>

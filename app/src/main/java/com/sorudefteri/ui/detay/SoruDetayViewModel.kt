@@ -1,9 +1,11 @@
 package com.sorudefteri.ui.detay
 
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.ai.AiRepository
+import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.repository.SoruRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -11,8 +13,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 enum class DetayTab {
@@ -37,7 +41,8 @@ data class SoruDetayUiState(
 class SoruDetayViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val soruRepository: SoruRepository,
-    private val aiRepository: AiRepository
+    private val aiRepository: AiRepository,
+    private val gorselDepo: GorselDepo
 ) : ViewModel() {
 
     private val soruId: Long = savedStateHandle.get<Long>("soruId")
@@ -49,6 +54,22 @@ class SoruDetayViewModel @Inject constructor(
 
     init {
         loadSoru()
+        listenCameraCapture()
+    }
+
+    private fun listenCameraCapture() {
+        viewModelScope.launch {
+            savedStateHandle.getStateFlow<String?>("captured_image_path", null).collectLatest { path ->
+                if (!path.isNullOrBlank()) {
+                    val isSolution = savedStateHandle.get<Boolean>("is_solution_image") ?: true
+                    if (isSolution) {
+                        updateSolutionImage(path)
+                        savedStateHandle.remove<String>("captured_image_path")
+                        savedStateHandle.remove<Boolean>("is_solution_image")
+                    }
+                }
+            }
+        }
     }
 
     private fun loadSoru() {
@@ -62,7 +83,7 @@ class SoruDetayViewModel @Inject constructor(
                 .catch {
                     _uiState.update { state -> state.copy(isLoading = false) }
                 }
-                .collect { soru ->
+                .collectLatest { soru ->
                     _uiState.update { state ->
                         state.copy(
                             soru = soru,
@@ -73,19 +94,33 @@ class SoruDetayViewModel @Inject constructor(
         }
     }
 
+    fun toggleFavorite() {
+        val current = _uiState.value.soru ?: return
+        viewModelScope.launch {
+            soruRepository.toggleFavorite(current.id, !current.isFavorite)
+        }
+    }
+
+    fun advanceReviewStage() {
+        val current = _uiState.value.soru ?: return
+        viewModelScope.launch {
+            soruRepository.advanceReviewStage(current.id)
+        }
+    }
+
     fun setActiveTab(tab: DetayTab) {
         _uiState.update { it.copy(activeTab = tab) }
     }
 
-    fun toggleSolved() {
+    fun toggleCozumDurumu() {
         val currentSoru = _uiState.value.soru ?: return
         viewModelScope.launch {
-            val newSolvedState = !currentSoru.isSolved
-            val solvedAt = if (newSolvedState) System.currentTimeMillis() else null
+            val newStatus = !currentSoru.isSolved
+            val now = System.currentTimeMillis()
             val updated = currentSoru.copy(
-                isSolved = newSolvedState,
-                solvedAt = solvedAt,
-                updatedAt = System.currentTimeMillis()
+                isSolved = newStatus,
+                solvedAt = if (newStatus) now else null,
+                updatedAt = now
             )
             soruRepository.soruGuncelle(updated)
         }
@@ -103,17 +138,39 @@ class SoruDetayViewModel @Inject constructor(
         }
     }
 
-    fun updateSolutionImage(imagePath: String?) {
+    fun updateSolutionImage(imagePathOrUri: String?) {
         val currentSoru = _uiState.value.soru ?: return
+        if (imagePathOrUri == null) {
+            viewModelScope.launch {
+                val updated = currentSoru.copy(
+                    solutionImagePath = null,
+                    updatedAt = System.currentTimeMillis()
+                )
+                soruRepository.soruGuncelle(updated)
+            }
+            return
+        }
+
         viewModelScope.launch {
+            val permanentPath = try {
+                if (imagePathOrUri.startsWith("content://") || imagePathOrUri.startsWith("file://")) {
+                    val uri = Uri.parse(imagePathOrUri)
+                    gorselDepo.saveImageFromUri(uri, isSolution = true)
+                } else if (File(imagePathOrUri).exists()) {
+                    gorselDepo.kaydetDosyadan(File(imagePathOrUri), isSolution = true)
+                } else {
+                    imagePathOrUri
+                }
+            } catch (e: Exception) {
+                imagePathOrUri
+            }
+
             val updated = currentSoru.copy(
-                solutionImagePath = imagePath,
+                solutionImagePath = permanentPath,
                 updatedAt = System.currentTimeMillis()
             )
             soruRepository.soruGuncelle(updated)
-            if (imagePath != null) {
-                _uiState.update { it.copy(activeTab = DetayTab.COZUM) }
-            }
+            _uiState.update { it.copy(activeTab = DetayTab.COZUM) }
         }
     }
 
@@ -178,6 +235,36 @@ class SoruDetayViewModel @Inject constructor(
 
     fun clearAiError() {
         _uiState.update { it.copy(aiError = null, isApiKeyMissing = false) }
+    }
+
+    /**
+     * AI çözümünü onaylar, soruyu çözüldü olarak işaretler ve varsa belirlenen doğru şıkkı kaydeder.
+     * Böylece çözüm yerel veritabanında kalıcı kalır ve tekrar API isteği yapılması gerekmez.
+     */
+    fun onaylaCozumu(extractedAnswer: String? = null) {
+        val currentSoru = _uiState.value.soru ?: return
+        viewModelScope.launch {
+            val finalAnswer = if (currentSoru.correctAnswer.isNullOrBlank()) {
+                extractedAnswer ?: extractAnswerLetter(currentSoru.aiExplanation)
+            } else {
+                currentSoru.correctAnswer
+            }
+
+            val updated = currentSoru.copy(
+                isSolved = true,
+                solvedAt = currentSoru.solvedAt ?: System.currentTimeMillis(),
+                correctAnswer = finalAnswer,
+                updatedAt = System.currentTimeMillis()
+            )
+            soruRepository.soruGuncelle(updated)
+        }
+    }
+
+    fun extractAnswerLetter(explanation: String?): String? {
+        if (explanation.isNullOrBlank()) return null
+        val regex = Regex("""(?:Doğru Cevap|Doğru Seçenek|Cevap)\s*[:：*]*\s*([A-Ea-e])\b""")
+        val match = regex.find(explanation)
+        return match?.groupValues?.getOrNull(1)?.uppercase()
     }
 
     fun setShowDeleteDialog(show: Boolean) {

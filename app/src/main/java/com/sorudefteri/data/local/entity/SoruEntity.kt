@@ -23,6 +23,10 @@ data class SoruEntity(
     val isSolved: Boolean = false,
     val solvedAt: Long? = null,
     val aiExplanation: String? = null,
+    val isFavorite: Boolean = false,
+    val reviewStage: Int = 0,
+    val nextReviewDate: Long? = null,
+    val lastReviewedAt: Long? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 ) {
@@ -43,6 +47,10 @@ data class SoruEntity(
             isSolved = isSolved,
             solvedAt = solvedAt,
             aiExplanation = aiExplanation,
+            isFavorite = isFavorite,
+            reviewStage = reviewStage,
+            nextReviewDate = nextReviewDate,
+            lastReviewedAt = lastReviewedAt,
             createdAt = createdAt,
             updatedAt = updatedAt
         )
@@ -66,7 +74,12 @@ fun Soru.toEntity(): SoruEntity {
         isSolved = isSolved,
         solvedAt = solvedAt,
         aiExplanation = aiExplanation,
+        isFavorite = isFavorite,
+        reviewStage = reviewStage,
+        nextReviewDate = nextReviewDate,
+        lastReviewedAt = lastReviewedAt,
         createdAt = createdAt,
         updatedAt = updatedAt
     )
 }
+

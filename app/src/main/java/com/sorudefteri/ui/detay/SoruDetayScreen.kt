@@ -53,7 +53,10 @@ import androidx.compose.material.icons.filled.Notes
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -101,7 +104,10 @@ import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.sorudefteri.domain.DersTaksonomisi
+import com.sorudefteri.domain.model.HataTipi
+import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.ui.ortak.ZoomableImageDialog
+import com.sorudefteri.ui.ortak.math.MathMarkdownText
 import com.sorudefteri.ui.theme.AytBadgeColor
 import com.sorudefteri.ui.theme.AytBadgeContainer
 import com.sorudefteri.ui.theme.MistakeBadgeColor
@@ -185,8 +191,17 @@ fun SoruDetayScreen(
                 },
                 actions = {
                     if (soru != null) {
+                        // Favori Butonu
+                        IconButton(onClick = { viewModel.toggleFavorite() }) {
+                            Icon(
+                                imageVector = if (soru.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
+                                contentDescription = if (soru.isFavorite) "Favorilerden Çıkar" else "Favorilere Ekle",
+                                tint = if (soru.isFavorite) Color(0xFFFFB300) else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
                         // Çözüldü / Çözülmedi Durum Butonu
-                        IconButton(onClick = { viewModel.toggleSolved() }) {
+                        IconButton(onClick = { viewModel.toggleCozumDurumu() }) {
                             Icon(
                                 imageVector = if (soru.isSolved) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                                 contentDescription = if (soru.isSolved) "Çözüldü" else "Çözülmedi",
@@ -271,11 +286,11 @@ fun SoruDetayScreen(
                     )
                 }
 
-                // Aktif Görsel Alanı
+                // Aktif Görsel Alanı (Tablette ve telefonda uyumlu yükseklik)
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .aspectRatio(4f / 3f)
+                        .heightIn(min = 220.dp, max = 400.dp)
                         .background(MaterialTheme.colorScheme.surfaceVariant)
                 ) {
                     val activePath = if (uiState.activeTab == DetayTab.SORU) {
@@ -831,18 +846,96 @@ fun SoruDetayScreen(
                         }
                         // Durum 3: Çözüm Mevcut
                         else if (!soru.aiExplanation.isNullOrBlank()) {
+                            val extractedAnswer = remember(soru.aiExplanation) {
+                                viewModel.extractAnswerLetter(soru.aiExplanation)
+                            }
+
+                            // Math / LaTeX / Formülleri Zengin Renderla
+                            MathMarkdownText(
+                                text = soru.aiExplanation,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            Spacer(modifier = Modifier.height(12.dp))
+
+                            // Onay & Kalıcı Saklama Çubuğu
                             Surface(
-                                shape = RoundedCornerShape(14.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (soru.isSolved) Color(0xFF2E7D32).copy(alpha = 0.12f) else MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
+                                border = BorderStroke(1.dp, if (soru.isSolved) Color(0xFF2E7D32).copy(alpha = 0.4f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(
-                                    text = soru.aiExplanation,
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    lineHeight = 22.sp,
-                                    modifier = Modifier.padding(16.dp)
-                                )
+                                Column(
+                                    modifier = Modifier.padding(12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = if (soru.isSolved) Icons.Default.CheckCircle else Icons.Default.Check,
+                                                contentDescription = null,
+                                                tint = if (soru.isSolved) Color(0xFF2E7D32) else MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Text(
+                                                text = if (soru.isSolved) "✅ Çözüm Onaylandı (Kalıcı Kaydedildi)" else "Çözüm Doğru mu?",
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = if (soru.isSolved) Color(0xFF2E7D32) else MaterialTheme.colorScheme.onSurface
+                                            )
+                                        }
+
+                                        if (!soru.isSolved) {
+                                            Button(
+                                                onClick = {
+                                                    viewModel.onaylaCozumu(extractedAnswer)
+                                                    Toast.makeText(context, "Çözüm onaylandı ve soru 'Çözüldü' olarak kaydedildi ✓", Toast.LENGTH_SHORT).show()
+                                                },
+                                                shape = RoundedCornerShape(10.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                                            ) {
+                                                Text("Çözümü Onayla", fontWeight = FontWeight.Bold)
+                                            }
+                                        }
+                                    }
+
+                                    // Doğru şık eşitleme çipi (soruda şık boş ama AI bulduysa)
+                                    if (soru.correctAnswer.isNullOrBlank() && !extractedAnswer.isNullOrBlank()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "Tespit Edilen Cevap: $extractedAnswer Şıkkı",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                fontWeight = FontWeight.Medium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                            TextButton(
+                                                onClick = {
+                                                    viewModel.onaylaCozumu(extractedAnswer)
+                                                    Toast.makeText(context, "Doğru şık '$extractedAnswer' olarak güncellendi ✓", Toast.LENGTH_SHORT).show()
+                                                }
+                                            ) {
+                                                Text("Şıkkı Kaydet ($extractedAnswer)")
+                                            }
+                                        }
+                                    }
+
+                                    Text(
+                                        text = "💾 Bu çözüm cihazınızda kalıcıdır. Yeniden açtığınızda API çağrısı yapılmaz ve kotanız korunur.",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                                    )
+                                }
                             }
 
                             Spacer(modifier = Modifier.height(8.dp))

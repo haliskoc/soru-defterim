@@ -25,10 +25,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -302,19 +304,21 @@ fun KameraScreen(
             }
         )
 
-        // Kılavuz Çerçevesi (Ortada yumuşak hatlı çerçeve)
-        Box(
+        // Kılavuz Çerçevesi (Ortada yönelim ve ekran boyutuna uyumlu çerçeve)
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 24.dp, vertical = 96.dp),
             contentAlignment = Alignment.Center
         ) {
+            val isLandscape = maxWidth > maxHeight
+            val frameRatio = if (isLandscape) 4f / 3f else 3f / 4f
             Box(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(3f / 4f)
+                    .fillMaxHeight(if (isLandscape) 0.85f else 0.75f)
+                    .aspectRatio(frameRatio)
                     .border(
-                        BorderStroke(2.dp, Color.White.copy(alpha = 0.5f)),
+                        BorderStroke(2.dp, Color.White.copy(alpha = 0.6f)),
                         shape = RoundedCornerShape(16.dp)
                     )
             )

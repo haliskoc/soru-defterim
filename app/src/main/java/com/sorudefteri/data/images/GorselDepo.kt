@@ -60,6 +60,28 @@ class GorselDepo @Inject constructor(
     }
 
     /**
+     * Kalıcı depolama dizini (filesDir/images) dışındaki bir dosyayı (örn: cacheDir'den gelen kamera çekimi)
+     * kalıcı klasöre kopyalar ve sıkıştırır. Geçici dosya cache'te ise temizler.
+     * @return Kalıcı dosyanın mutlak yolu (absolute path)
+     */
+    suspend fun kaydetDosyadan(sourceFile: File, isSolution: Boolean): String = withContext(Dispatchers.IO) {
+        if (sourceFile.parentFile?.absolutePath == imagesDir.absolutePath && sourceFile.exists()) {
+            return@withContext sourceFile.absolutePath
+        }
+        val uri = Uri.fromFile(sourceFile)
+        val permanentPath = if (isSolution) kaydetCozumGorseli(uri) else kaydetSoruGorseli(uri)
+        // Eğer kaynak dosya cache dizinindeyse temizle
+        try {
+            if (sourceFile.absolutePath.contains(context.cacheDir.absolutePath) && sourceFile.exists()) {
+                sourceFile.delete()
+            }
+        } catch (_: Exception) {}
+        permanentPath
+    }
+
+    fun getImagesDirectory(): File = imagesDir
+
+    /**
      * Kamera vb. kaynaktan gelen Bitmap'i işleyip yerel depolamaya kaydeder.
      * @param isSolution true ise "cozum_", false ise "soru_" önekiyle kaydedilir.
      * @return Kaydedilen dosyanın mutlak yolu (absolute path)
