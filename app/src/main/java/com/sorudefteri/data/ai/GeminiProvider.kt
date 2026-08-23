@@ -198,7 +198,7 @@ class GeminiProvider @Inject constructor(
             - Hızlı çözüm için pratik ipucu veya pratik kontrol yöntemi.
         """.trimIndent()
 
-        try {
+        return try {
             val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
 
             val requestBody = GeminiRequest(
@@ -226,7 +226,7 @@ class GeminiProvider @Inject constructor(
                 .post(requestJson.toRequestBody(jsonMediaType))
                 .build()
 
-            return okHttpClient.newCall(httpRequest).execute().use { response ->
+            okHttpClient.newCall(httpRequest).execute().use { response ->
                 val responseBodyString = response.body?.string().orEmpty()
 
                 when (response.code) {
@@ -302,19 +302,19 @@ class GeminiProvider @Inject constructor(
                 }
             }
         } catch (e: SocketTimeoutException) {
-            Result.failure(
+            Result.failure<String>(
                 Exception("İstek zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.", e)
             )
         } catch (e: UnknownHostException) {
-            Result.failure(
+            Result.failure<String>(
                 Exception("İnternet bağlantısı kurulamadı. Lütfen ağ bağlantınızı kontrol edin.", e)
             )
         } catch (e: IOException) {
-            Result.failure(
+            Result.failure<String>(
                 Exception("Ağ iletişim hatası oluştu: ${e.localizedMessage ?: "Sunucuya bağlanılamadı."}", e)
             )
         } catch (e: Exception) {
-            Result.failure(
+            Result.failure<String>(
                 Exception("Çözüm alınırken beklenmeyen bir hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}", e)
             )
         }
