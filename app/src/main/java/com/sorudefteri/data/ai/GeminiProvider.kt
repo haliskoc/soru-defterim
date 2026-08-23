@@ -75,7 +75,7 @@ class GeminiProvider @Inject constructor(
                 }
 
                 val modelListResponse = json.decodeFromString<GeminiModelListResponse>(responseBodyString)
-                val supportedModels = modelListResponse.models
+                val supportedModels = modelListResponse.models.orEmpty()
                     .filter { item ->
                         item.supportedGenerationMethods.contains("generateContent") &&
                                 !item.name.contains("embedding", ignoreCase = true) &&
@@ -83,7 +83,7 @@ class GeminiProvider @Inject constructor(
                     }
                     .map { item ->
                         val cleanId = item.name.removePrefix("models/")
-                        val displayName = item.displayName.ifBlank { cleanId }
+                        val displayName = item.displayName?.ifBlank { cleanId } ?: cleanId
                         cleanId to "$displayName ($cleanId)"
                     }
                     .sortedByDescending { it.first }
@@ -106,7 +106,7 @@ class GeminiProvider @Inject constructor(
         }
     }
 
-    override suspend fun solveQuestion(
+    override suspend fun cozumIste(
         imageBytes: ByteArray,
         dersAdi: String,
         konu: String,

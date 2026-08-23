@@ -174,12 +174,12 @@ class GroqProvider @Inject constructor(
             - Hızlı çözüm için pratik ipucu veya pratik kontrol yöntemi.
         """.trimIndent()
 
-        try {
+        return try {
             val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
             val dataUrl = "data:image/jpeg;base64,$base64Image"
 
             val requestBody = GroqChatRequest(
-                model = effectiveModel,
+                model = modelName,
                 messages = listOf(
                     GroqMessage(
                         role = "user",
@@ -215,13 +215,13 @@ class GroqProvider @Inject constructor(
                         val groqResponse = try {
                             json.decodeFromString<GroqChatResponse>(responseBodyString)
                         } catch (e: Exception) {
-                            return@withContext Result.failure(
+                            return Result.failure<String>(
                                 Exception("Groq API yanıtı çözümlenemedi: ${e.localizedMessage}", e)
                             )
                         }
 
                         if (groqResponse.error != null) {
-                            return@withContext Result.failure(
+                            return Result.failure<String>(
                                 Exception(groqResponse.error.message ?: "Groq API hatası oluştu.")
                             )
                         }
@@ -233,28 +233,28 @@ class GroqProvider @Inject constructor(
                             ?.trim()
 
                         if (solutionText.isNullOrBlank()) {
-                            Result.failure(Exception("AI modelinden geçerli bir yanıt alınamadı. Lütfen soruyu tekrar göndermeyi deneyin."))
+                            Result.failure<String>(Exception("AI modelinden geçerli bir yanıt alınamadı. Lütfen soruyu tekrar göndermeyi deneyin."))
                         } else {
                             Result.success(solutionText)
                         }
                     }
                     400 -> {
-                        Result.failure(
+                        Result.failure<String>(
                             Exception("Geçersiz istek veya hatalı model parametresi (HTTP 400). Lütfen Groq model ayarlarınızı kontrol edin.")
                         )
                     }
                     401, 403 -> {
-                        Result.failure(
+                        Result.failure<String>(
                             Exception("Geçersiz Groq API Anahtarı veya yetkisiz erişim. Lütfen Ayarlar sayfasından anahtarınızı kontrol edin.")
                         )
                     }
                     429 -> {
-                        Result.failure(
+                        Result.failure<String>(
                             Exception("Groq API kullanım kotanız doldu veya istek sınırı aşıldı (Rate limit). Lütfen biraz bekleyip tekrar deneyin.")
                         )
                     }
                     500, 502, 503, 504 -> {
-                        Result.failure(
+                        Result.failure<String>(
                             Exception("Groq sunucularında geçici bir kesinti yaşanıyor (HTTP ${response.code}). Lütfen daha sonra tekrar deneyin.")
                         )
                     }
@@ -265,26 +265,26 @@ class GroqProvider @Inject constructor(
                             null
                         }
                         val errorDetail = parsedError ?: responseBodyString.take(200).ifBlank { "HTTP ${response.code}" }
-                        Result.failure(
+                        Result.failure<String>(
                             Exception("Groq API Hatası ($errorDetail). Lütfen ayarlarınızı ve internet bağlantınızı kontrol edin.")
                         )
                     }
                 }
             }
         } catch (e: SocketTimeoutException) {
-            Result.failure(
+            Result.failure<String>(
                 Exception("İstek zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.", e)
             )
         } catch (e: UnknownHostException) {
-            Result.failure(
+            Result.failure<String>(
                 Exception("İnternet bağlantısı yok veya sunucuya erişilemiyor. Lütfen ağ bağlantınızı kontrol edin.", e)
             )
         } catch (e: IOException) {
-            Result.failure(
+            Result.failure<String>(
                 Exception("Ağ iletişim hatası oluştu: ${e.localizedMessage ?: "Sunucuya bağlanılamadı."}", e)
             )
         } catch (e: Exception) {
-            Result.failure(
+            Result.failure<String>(
                 Exception("Çözüm alınırken beklenmeyen bir hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}", e)
             )
         }
