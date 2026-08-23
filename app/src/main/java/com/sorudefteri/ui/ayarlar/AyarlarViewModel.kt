@@ -35,6 +35,7 @@ class AyarlarViewModel @Inject constructor(
     private val soruRepository: SoruRepository
 ) : ViewModel() {
 
+    @Suppress("UNCHECKED_CAST")
     val uiState: StateFlow<AyarlarUiState> = combine(
         ayarlarDataStore.currentAlan,
         ayarlarDataStore.aiProvider,
@@ -43,7 +44,15 @@ class AyarlarViewModel @Inject constructor(
         ayarlarDataStore.geminiModel,
         ayarlarDataStore.groqModel,
         ayarlarDataStore.themeMode
-    ) { alan, provider, geminiKey, groqKey, geminiMod, groqMod, theme ->
+    ) { args: Array<Any?> ->
+        val alan = args[0] as? Alan ?: Alan.SAYISAL
+        val provider = args[1] as? AiProviderType ?: AiProviderType.GEMINI
+        val geminiKey = args[2] as? String ?: ""
+        val groqKey = args[3] as? String ?: ""
+        val geminiMod = args[4] as? String ?: AiProviderType.GEMINI.defaultModel
+        val groqMod = args[5] as? String ?: AiProviderType.GROQ.defaultModel
+        val theme = args[6] as? Int ?: 0
+
         AyarlarUiState(
             currentAlan = alan,
             aiProvider = provider,

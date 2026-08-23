@@ -671,12 +671,12 @@ fun SoruDetayScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // AI Çözüm Kartı
-                ElevatedCard(
+                OutlinedCard(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                     shape = RoundedCornerShape(20.dp),
-                    colors = CardDefaults.elevatedCardColors(
+                    colors = CardDefaults.outlinedCardColors(
                         containerColor = MaterialTheme.colorScheme.surface
                     ),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))

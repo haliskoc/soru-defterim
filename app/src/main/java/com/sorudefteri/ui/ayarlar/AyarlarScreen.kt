@@ -101,7 +101,7 @@ fun AyarlarScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val focusManager = LocalFocusManager()
+    val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
@@ -569,7 +569,7 @@ fun AyarlarScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.AutoStories,
+                            imageVector = Icons.Default.School,
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(28.dp)
