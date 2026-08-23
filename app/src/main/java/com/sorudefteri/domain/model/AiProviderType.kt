@@ -12,20 +12,21 @@ enum class AiProviderType(
 ) {
     GEMINI(
         displayName = "Google Gemini",
-        defaultModel = "gemini-2.5-flash",
+        defaultModel = "gemini-2.0-flash",
         supportedModels = listOf(
-            "gemini-2.5-flash" to "Gemini 2.5 Flash (Önerilen - Hızlı & Güçlü)",
-            "gemini-1.5-flash" to "Gemini 1.5 Flash (Standart)"
+            "gemini-2.0-flash" to "Gemini 2.0 Flash (Önerilen - Hızlı & Güncel)",
+            "gemini-1.5-flash" to "Gemini 1.5 Flash (Hızlı & Dengeli)",
+            "gemini-1.5-pro" to "Gemini 1.5 Pro (Gelişmiş Akıl Yürütme)"
         ),
         consoleUrl = "https://aistudio.google.com/app/apikey",
         consoleName = "Google AI Studio"
     ),
     GROQ(
         displayName = "Groq",
-        defaultModel = "meta-llama/llama-4-scout-17b-16e-instruct",
+        defaultModel = "llama-3.2-11b-vision-preview",
         supportedModels = listOf(
-            "meta-llama/llama-4-scout-17b-16e-instruct" to "Llama 4 Scout 17B (Görsel Destekli)",
-            "llama-3.2-11b-vision-preview" to "Llama 3.2 11B Vision (Önizleme)"
+            "llama-3.2-11b-vision-preview" to "Llama 3.2 11B Vision (Önerilen - Hızlı)",
+            "llama-3.2-90b-vision-preview" to "Llama 3.2 90B Vision (Gelişmiş Görsel)"
         ),
         consoleUrl = "https://console.groq.com/keys",
         consoleName = "Groq Console"

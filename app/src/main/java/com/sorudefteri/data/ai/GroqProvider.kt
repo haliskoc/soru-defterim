@@ -50,19 +50,38 @@ class GroqProvider @Inject constructor(
             )
         }
 
-        val effectiveModel = modelName.ifBlank { "meta-llama/llama-4-scout-17b-16e-instruct" }
+        val effectiveModel = modelName.ifBlank { "llama-3.2-11b-vision-preview" }
 
-        val answerText = if (!correctAnswer.isNullOrBlank()) {
-            "Sorunun doğru cevabı $correctAnswer şıkkıdır."
+        val answerInfo = if (!correctAnswer.isNullOrBlank()) {
+            "Öğrencinin belirttiği / Sorunun doğru cevap şıkkı: $correctAnswer"
         } else {
-            ""
+            "Doğru cevap şıkkı belirtilmemiş. Lütfen soruyu çözerek doğru şıkkı ve sonucu net olarak belirle."
         }
 
-        val prompt = "Sen uzman bir YKS öğretmenisin. Bu görseldeki soruyu incele. Ders: $dersAdi, Konu: $konu. $answerText\n" +
-                "Lütfen şu adımlarla öğretici ve net bir çözüm sun:\n" +
-                "1) Doğru Cevap Şıkkı ve Net Sonuç\n" +
-                "2) Adım Adım Ayrıntılı Çözüm\n" +
-                "3) Bu Soru Tipi İçin Önemli İpuçları ve Püf Noktaları."
+        val prompt = """
+            Sen Türkiye YKS (TYT / AYT) sınavlarına hazırlanan öğrenciler için alanında uzman, pedagojik formasyona sahip kıdemli bir öğretmensin.
+            Görseldeki soruyu öğrencinin eksiksiz anlayacağı şekilde, adım adım ve pedagojik yöntemlerle açıkla.
+
+            Ders: $dersAdi
+            Konu: $konu
+            $answerInfo
+
+            Lütfen çözümü aşağıdaki yapılandırılmış format ve başlıklarla sun:
+
+            🎯 **Doğru Cevap:** [Net doğru cevap şıkkı ve sonuç]
+
+            📚 **Temel Kavramlar & Formüller:**
+            - Soruyu çözmek için gereken temel kurallar, formüller veya kavramlar.
+
+            📝 **Adım Adım Ayrıntılı Çözüm:**
+            1. Soruda verilenler ve istenenlerin analizi.
+            2. Adım adım matematiksel/mantıksal işlem süreci (tüm adımları sade ve net göster).
+            3. Sonuca ulaşma ve doğru şıkla eşleştirme.
+
+            💡 **Püf Noktaları & Sınav Taktikleri (Önemli İpuçları):**
+            - YKS'de bu soru tipinde yapılan yaygın çeldirici hatalar.
+            - Hızlı çözüm için pratik ipucu veya pratik kontrol yöntemi.
+        """.trimIndent()
 
         try {
             val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
@@ -123,19 +142,29 @@ class GroqProvider @Inject constructor(
                             ?.trim()
 
                         if (solutionText.isNullOrBlank()) {
-                            Result.failure(Exception("AI modelinden geçerli bir yanıt alınamadı."))
+                            Result.failure(Exception("AI modelinden geçerli bir yanıt alınamadı. Lütfen soruyu tekrar göndermeyi deneyin."))
                         } else {
                             Result.success(solutionText)
                         }
+                    }
+                    400 -> {
+                        Result.failure(
+                            Exception("Geçersiz istek veya hatalı model parametresi (HTTP 400). Lütfen Groq model ayarlarınızı kontrol edin.")
+                        )
+                    }
+                    401, 403 -> {
+                        Result.failure(
+                            Exception("Geçersiz Groq API Anahtarı veya yetkisiz erişim. Lütfen Ayarlar sayfasından anahtarınızı kontrol edin.")
+                        )
                     }
                     429 -> {
                         Result.failure(
                             Exception("Groq API kullanım kotanız doldu veya istek sınırı aşıldı (Rate limit). Lütfen biraz bekleyip tekrar deneyin.")
                         )
                     }
-                    400, 401, 403 -> {
+                    500, 502, 503, 504 -> {
                         Result.failure(
-                            Exception("Geçersiz Groq API Anahtarı. Lütfen Ayarlar sayfasından anahtarınızı kontrol edin.")
+                            Exception("Groq sunucularında geçici bir kesinti yaşanıyor (HTTP ${response.code}). Lütfen daha sonra tekrar deneyin.")
                         )
                     }
                     else -> {
@@ -146,7 +175,7 @@ class GroqProvider @Inject constructor(
                         }
                         val errorDetail = parsedError ?: responseBodyString.take(200).ifBlank { "HTTP ${response.code}" }
                         Result.failure(
-                            Exception("Groq API Hatası ($errorDetail). Lütfen ayarlarınızı kontrol edin.")
+                            Exception("Groq API Hatası ($errorDetail). Lütfen ayarlarınızı ve internet bağlantınızı kontrol edin.")
                         )
                     }
                 }
@@ -157,11 +186,11 @@ class GroqProvider @Inject constructor(
             )
         } catch (e: UnknownHostException) {
             Result.failure(
-                Exception("İnternet bağlantısı kurulamadı. Lütfen ağ bağlantınızı kontrol edin.", e)
+                Exception("İnternet bağlantısı yok veya sunucuya erişilemiyor. Lütfen ağ bağlantınızı kontrol edin.", e)
             )
         } catch (e: IOException) {
             Result.failure(
-                Exception("Ağ iletişim hatası: ${e.localizedMessage ?: "Sunucuya bağlanılamadı."}", e)
+                Exception("Ağ iletişim hatası oluştu: ${e.localizedMessage ?: "Sunucuya bağlanılamadı."}", e)
             )
         } catch (e: Exception) {
             Result.failure(

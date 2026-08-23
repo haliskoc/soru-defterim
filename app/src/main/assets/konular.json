@@ -3,7 +3,7 @@
     "title": "YKS Konu Listesi (TYT + AYT Sayısal)",
     "version": "1.1",
     "created": "2026-08-22",
-    "kapsam": "2025/2026 YKS müfredatı — MEB/ÖSYM kapsamına dayalı dershane ve yayınevi konu listeleri (ÜniversiteGO, Başarı Sıralamaları, Unikazan, KR Akademi, Fizik Dersim, RehberPanda, Bilgenç, Cep Dershanesi vb. kaynaklar çapraz kontrol edildi)",
+    "kapsam": "TYT (9 ders) + AYT (Sayısal, Eşit Ağırlık, Sözel, Dil YDT tüm dersler) müfredatı",
     "notlar": [
       "TYT soruları 9. ve 10. sınıf; AYT soruları (Sayısal) 11. ve 12. sınıf ağırlıklı olmak üzere 9-12. sınıf müfredatını kapsar.",
       "Türkiye Yüzyılı Maarif Modeli (TYMM) kademeli uygulanmaktadır; 2026 (ve 2027) YKS'de klasik/mevcut konu listeleri geçerlidir. Yeni müfredatın sınav kapsamına yansıması en erken 2028 ve sonrası beklenmektedir.",
@@ -13,7 +13,7 @@
     ],
     "ders_sayisi": {
       "tyt": 9,
-      "ayt": 4
+      "ayt": 12
     }
   },
   "tyt": {
@@ -56,73 +56,137 @@
       "not": "40 sorunun yaklaşık 30'u matematik, 10'u geometri.",
       "uniteler": [
         {
-          "ad": "Sayılar ve İşlemler",
+          "ad": "Sayılar ve Temel İşlemler",
           "konular": [
-            "Temel Kavramlar",
-            "Sayı Basamakları",
-            "Bölme ve Bölünebilme",
-            "EBOB - EKOK",
-            "Rasyonel Sayılar",
-            "Üslü Sayılar",
-            "Köklü Sayılar",
-            "Mutlak Değer",
-            "Faktöriyel",
-            "Basit Eşitsizlikler"
+            "Temel Kavramlar ve Sayı Kümeleri",
+            "Tek ve Çift Sayılar",
+            "Pozitif ve Negatif Sayılar",
+            "Ardışık Sayılar ve Toplam Formülleri",
+            "Asal Sayılar ve Aralarında Asal Sayılar",
+            "Asal Çarpanlara Ayırma ve Bölen Sayısı",
+            "Faktöriyel Kavramı ve Sadeleştirme",
+            "Sayı Basamakları ve Basamak Çözümleme",
+            "Taban Aritmetiği",
+            "Bölme ve Bölünebilme Kuralları",
+            "EBOB - EKOK ve Özellikleri",
+            "EBOB - EKOK Problemleri ve Periyodik Tekrar Eden Durumlar"
           ]
         },
         {
-          "ad": "Cebir",
+          "ad": "Rasyonel, Üslü ve Köklü Sayılar",
           "konular": [
-            "Oran ve Orantı",
-            "Denklem Çözme",
-            "Çarpanlara Ayırma",
-            "Kümeler ve Kartezyen Çarpım",
-            "Mantık (önermeler ve bağlaçlar)"
+            "Rasyonel Sayılar ve Kesir Türleri",
+            "Rasyonel Sayılarda Dört İşlem ve Sıralama",
+            "Ondalık Sayılar ve Devirli Ondalık Açılımlar",
+            "Basit Eşitsizlikler ve Aralık Kavramı",
+            "Mutlak Değer Kavramı ve Özellikleri",
+            "Mutlak Değerli Denklemler ve Eşitsizlikler",
+            "Üslü İfadeler ve Üslü Sayıların Özellikleri",
+            "Üslü Denklemler ve Üslü Eşitsizlikler",
+            "Köklü İfadeler ve Kök Dışına Çıkarma",
+            "Köklü Sayılarda Dört İşlem ve Eşlenik ile Çarpma",
+            "İç İçe Kökler ve Özel Kök Durumları"
           ]
         },
         {
-          "ad": "Fonksiyonlar",
+          "ad": "Cebir ve Çarpanlara Ayırma",
           "konular": [
-            "Fonksiyon Kavramı",
-            "Fonksiyon Çeşitleri",
-            "Bileşke Fonksiyon",
-            "Ters Fonksiyon"
+            "Oran ve Orantı Kavramı (Doğru, Ters, Bileşik Orantı)",
+            "Aritmetik, Geometrik ve Harmonik Ortalama",
+            "Birinci Dereceden Bir Bilinmeyenli Denklemler",
+            "Birinci Dereceden İki Bilinmeyenli Denklem Sistemleri",
+            "Çarpanlara Ayırma: Ortak Çarpan Parantezine Alma",
+            "Çarpanlara Ayırma: İki Kare Farkı Özdeşliği",
+            "Çarpanlara Ayırma: Tam Kare Özdeşliği (İki Terimin Toplamı/Farkının Karesi)",
+            "Çarpanlara Ayırma: Küp Açılımları (İki Terimin Küpü ve Küpler Toplamı/Farkı)",
+            "Çarpanlara Ayırma: Gruplandırma Yöntemi",
+            "Rasyonel İfadelerin Sadeleştirilmesi"
           ]
         },
         {
-          "ad": "Problemler",
+          "ad": "Kümeler, Mantık ve Fonksiyonlar",
+          "konular": [
+            "Mantık: Önermeler, Doğruluk Değeri ve Bağlaçlar (Ve, Veya, İse, Ancak ve Ancak)",
+            "Mantık: Açık Önermeler ve Niceleyiciler (Her, Bazı)",
+            "Kümeler: Küme Kavramı, Gösterimi ve Alt Küme",
+            "Kümeler: Kümelerde Kesişim, Birleşim, Fark ve Tümleme İşlemleri",
+            "Küme Problemleri",
+            "Kartezyen Çarpım ve Bağıntı",
+            "Fonksiyon Kavramı, Tanım, Değer ve Görüntü Kümesi",
+            "Fonksiyon Türleri (Birebir, Örten, İçine, Sabit, Birim, Doğrusal, Tek ve Çift)",
+            "Parçalı ve Mutlak Değer Fonksiyonu",
+            "Bileşke Fonksiyon ve Fonksiyon Grafikleri",
+            "Ters Fonksiyon ve Grafiği",
+            "Polinom Kavramı ve Polinomlarda Derece",
+            "Polinomlarda Dört İşlem, Bölme ve Kalan Bulma",
+            "İkinci Dereceden Denklemler ve Kök Bulma (Diskriminant)"
+          ]
+        },
+        {
+          "ad": "Problemler (Yeni Nesil & Klasik)",
           "konular": [
             "Sayı Problemleri",
             "Kesir Problemleri",
             "Yaş Problemleri",
-            "Hareket (Hız) Problemleri",
-            "İşçi - Havuz Problemleri",
-            "Yüzde ve Faiz Problemleri",
-            "Kâr - Zarar Problemleri",
+            "İşçi ve Emek Problemleri",
+            "Havuz Problemleri",
+            "Yüzde ve İndirim Problemleri",
+            "Kâr ve Zarar Problemleri",
+            "Faiz Problemleri",
             "Karışım Problemleri",
-            "Grafik ve Tablo Problemleri",
-            "Rutin Olmayan Problemler"
+            "Hız ve Hareket Problemleri (Ortalama Hız, Zıt/Aynı Yön)",
+            "Grafik ve Tablo Okuma Problemleri",
+            "Rutin Olmayan (Yeni Nesil / Mantık - Muhakeme) Problemleri",
+            "Periyodik Durum ve Sayaç Problemleri",
+            "Mum ve Tel Kesme Problemleri",
+            "Kuyruk ve Merdiven Problemleri"
           ]
         },
         {
-          "ad": "Sayma, Olasılık ve Veri",
+          "ad": "Sayma, Olasılık ve İstatistik",
           "konular": [
-            "Permütasyon",
-            "Kombinasyon",
-            "Olasılık",
-            "Veri ve İstatistik (ortalama, medyan, mod)"
+            "Toplama ve Çarpma Yoluyla Sayma İlkeleri",
+            "Faktöriyel ve Permütasyon (Dizilim)",
+            "Tekrarlı Permütasyon ve Dairesel Permütasyon",
+            "Kombinasyon (Seçim) ve Özellikleri",
+            "Geometrik Kombinasyon (Doğru, Üçgen, Dörtgen Sayısı)",
+            "Binom Açılımı ve Katsayılar",
+            "Olasılık: Basit Olayların Olasılığı ve Örnek Uzay",
+            "Koşullu Olasılık ve Bağımsız Olaylar",
+            "Deneysel ve Teorik Olasılık",
+            "İstatistik: Merkezi Eğilim Ölçüleri (Aritmetik Ortalama, Mod, Medyan)",
+            "İstatistik: Merkezi Yayılım Ölçüleri (Açıklık, Standart Sapma, Çeyrekler Açıklığı)"
           ]
         },
         {
-          "ad": "Geometri",
+          "ad": "TYT Geometri",
           "konular": [
-            "Açılar",
-            "Üçgenler (açı, alan, benzerlik, özel üçgenler)",
-            "Dörtgenler",
-            "Çokgenler",
-            "Çember ve Daire",
-            "Analitik Geometri (koordinat sistemi, doğru, uzaklık)",
-            "Katı Cisimler (prizma, piramit, silindir, koni, küre)"
+            "Doğruda Açılar ve Paralel Doğruda Açı Özellikleri",
+            "Üçgende Açılar ve Açı Bağıntıları",
+            "Açı - Kenar Bağıntıları (Üçgen Eşitsizliği)",
+            "Dik Üçgen ve Pisagor Bağıntısı",
+            "Öklid Bağıntıları",
+            "Özel Açılı Dik Üçgenler (30-60-90, 45-45-90, 15-75-90 vb.)",
+            "İkizkenar ve Eşkenar Üçgen Özellikleri",
+            "Üçgende İç ve Dış Açıortay Teoremleri",
+            "Üçgende Kenarortay, Ağırlık Merkezi ve Kenar Orta Dikme",
+            "Üçgende Yükseklik ve Diklik Merkezi",
+            "Üçgende Benzerlik (A.A.A, K.A.K, K.K.K) ve Temel Orantı Teoremi",
+            "Üçgende Alan ve Alan Parçalama Bağıntıları",
+            "Çokgenler: Dışbükey Çokgenlerde Açı ve Köşegen",
+            "Düzgün Çokgenler (Düzgün Beşgen, Altıgen, Sekizgen)",
+            "Dörtgenler ve Genel Özellikleri",
+            "Paralelkenar ve Eşkenar Dörtgen (Açı, Kenar, Alan)",
+            "Dikdörtgen ve Kare (Açı, Köşegen, Alan)",
+            "Yamuk ve İkizkenar/Dik Yamuk (Açı, Orta Taban, Alan)",
+            "Deltoid Özellikleri ve Alanı",
+            "Çemberde Açılar (Merkez, Çevre, Teğet-Kiriş, İç ve Dış Açı)",
+            "Çemberde Uzunluk ve Teğet Özellikleri",
+            "Dairede Çevre ve Daire Diliminin Alanı",
+            "Katı Cisimler: Prizmalar (Küp, Dikdörtgenler Prizması)",
+            "Katı Cisimler: Silindir (Alan ve Hacim)",
+            "Katı Cisimler: Piramit ve Koni (Alan ve Hacim)",
+            "Katı Cisimler: Küre (Alan ve Hacim)"
           ]
         }
       ]
@@ -1026,6 +1090,605 @@
           "ad": "Canlılar ve Çevre",
           "konular": [
             "Ekosistem Kavramları ve Bitki - Çevre Etkileşimleri"
+          ]
+        }
+      ]
+    },
+    "edebiyat": {
+      "ad": "Türk Dili ve Edebiyatı",
+      "soru_sayisi": 24,
+      "uniteler": [
+        {
+          "ad": "Edebiyat ve Şiir Bilgisi",
+          "konular": [
+            "Edebiyatın Tanımı, Anlamı ve Diğer Bilimlerle İlişkisi",
+            "Metinlerin Sınıflandırılması ve Edebi Türler",
+            "Şiir Bilgisi (nazım birimi, nazım biçimi, nazım türü)",
+            "Ahenk Unsurları (ölçü, uyak, redif, aliterasyon, asonans)",
+            "Edebi Sanatlar (Söz Sanatları)"
+          ]
+        },
+        {
+          "ad": "İslamiyet Öncesi ve İslami Dönem Türk Edebiyatı",
+          "konular": [
+            "İslamiyet Öncesi Türk Edebiyatı (Koşuk, Sagu, Sav, Destan)",
+            "Türk Destanları ve Özellikleri",
+            "Geçiş Dönemi Eserleri (Kutadgu Bilig, Divanü Lugati't-Türk, Atabetü'l-Hakayık, Divan-ı Hikmet)",
+            "Dede Korkut Hikayeleri"
+          ]
+        },
+        {
+          "ad": "Halk Edebiyatı",
+          "konular": [
+            "Anonim Halk Edebiyatı (mani, türkü, ağıt, ninni, tekerleme)",
+            "Âşık Tarzı Halk Edebiyatı (koşma, semai, varsağı, destan)",
+            "Dini-Tasavvufi (Tekke) Halk Edebiyatı (ilahi, nefes, deme, nutuk, şathiye, devriye)",
+            "Halk Edebiyatı Sanatçıları ve Eserleri"
+          ]
+        },
+        {
+          "ad": "Divan Edebiyatı",
+          "konular": [
+            "Divan Edebiyatının Genel Özellikleri ve Kaynakları",
+            "Divan Şiiri Nazım Biçimleri (gazel, kaside, mesnevi, rubai, tuyuğ, murabba, şarkı, terkibibent, terciibent)",
+            "Divan Nesri (sade, süslü, orta nesir ve nesir türleri: tezkire, seyahatname, sefaretname, gazavatname vb.)",
+            "Divan Edebiyatı Sanatçıları (13. yy - 19. yy) ve Eserleri",
+            "Edebi Akımlar (Sebk-i Hindi, Türki-i Basit, Hikemi Tarz, Mahallileşme)"
+          ]
+        },
+        {
+          "ad": "Tanzimat Edebiyatı",
+          "konular": [
+            "Tanzimat 1. Dönem Edebiyatı (Genel özellikleri, türler, sanatçılar)",
+            "Tanzimat 2. Dönem Edebiyatı (Genel özellikleri, türler, sanatçılar)",
+            "Tanzimat Şiiri, Romanı, Tiyatrosu ve Gazetecilik"
+          ]
+        },
+        {
+          "ad": "Servet-i Fünûn ve Fecr-i Âti Edebiyatı",
+          "konular": [
+            "Servet-i Fünûn Edebiyatı (Edebiyat-ı Cedide)",
+            "Servet-i Fünûn Şiiri (mensur şiir, serbest müstezat, sone, terza-rima)",
+            "Servet-i Fünûn Roman ve Hikayesi",
+            "Servet-i Fünûn Sanatçıları ve Eserleri",
+            "Fecr-i Âti Topluluğu, Beyannamesi ve Temsilcileri"
+          ]
+        },
+        {
+          "ad": "Millî Edebiyat Dönemi",
+          "konular": [
+            "Millî Edebiyat Akımı ve Genç Kalemler (Yeni Lisan)",
+            "Millî Edebiyat Şiiri (Sade Dil ve Hece Ölçüsü)",
+            "Millî Edebiyat Roman, Hikaye ve Tiyatrosu",
+            "Millî Edebiyat Dönemi Sanatçıları ve Eserleri",
+            "Millî Edebiyat Döneminde Bağımsız Sanatçılar"
+          ]
+        },
+        {
+          "ad": "Cumhuriyet Dönemi Türk Şiiri",
+          "konular": [
+            "Saf (Öz) Şiir Anlayışı",
+            "Yedi Meşaleciler",
+            "Serbest Nazım ve Toplumcu Gerçekçi Şiir",
+            "Millî Edebiyat Zevk ve Anlayışını Sürdüren Şiir",
+            "Garip Akımı (I. Yeni)",
+            "İkinci Yeni Şiiri",
+            "Dini Değerleri, Geleneği ve Metafizik Anlayışı Öne Çıkaran Şiir",
+            "1960 Sonrası Toplumcu Şiir",
+            "1980 Sonrası Şiir ve Cumhuriyet Dönemi Halk Şiiri"
+          ]
+        },
+        {
+          "ad": "Cumhuriyet Dönemi Anlatmaya Bağlı Metinler (Roman ve Hikâye)",
+          "konular": [
+            "Millî Edebiyat Zevk ve Anlayışını Sürdüren Roman ve Hikâye",
+            "Toplumcu Gerçekçi Roman ve Hikâye",
+            "Bireyin İç Dünyasını Esas Alan Roman ve Hikâye",
+            "Modernist ve Postmodernist Roman ve Hikâye"
+          ]
+        },
+        {
+          "ad": "Cumhuriyet Dönemi Göstermeye Bağlı Metinler ve Öğretici Metinler",
+          "konular": [
+            "Cumhuriyet Dönemi Tiyatrosu ve Sanatçıları",
+            "Cumhuriyet Dönemi Öğretici Metinleri (Deneme, Eleştiri, Makale, Fıkra, Anı, Gezi Yazısı)"
+          ]
+        },
+        {
+          "ad": "Batı Edebiyatı ve Edebî Akımlar",
+          "konular": [
+            "Hümanizm, Klasisizm ve Romantizm",
+            "Realizm ve Natüralizm",
+            "Parnasizm ve Sembolizm",
+            "Sürrealizm, Empresyonizm, Ekspresyonizm, Egzistansiyalizm ve Dadaizm"
+          ]
+        }
+      ]
+    },
+    "tarih1": {
+      "ad": "Tarih-1",
+      "soru_sayisi": 10,
+      "uniteler": [
+        {
+          "ad": "Tarih ve Zaman",
+          "konular": [
+            "Tarih Bilimine Giriş",
+            "Zamanın Taksimi ve Takvimler",
+            "Tarih Yazıcılığı"
+          ]
+        },
+        {
+          "ad": "İnsanlığın İlk Dönemleri ve İlk Çağ",
+          "konular": [
+            "İlk Çağ Medeniyetleri",
+            "Mezopotamya, Mısır, Anadolu ve Ege Medeniyetleri",
+            "İlk Devlet Tipleri ve Hukuk Sistemleri"
+          ]
+        },
+        {
+          "ad": "İlk ve Orta Çağlarda Türk Dünyası",
+          "konular": [
+            "Orta Asya Türk Devletleri (Hun, Göktürk, Uygur)",
+            "Diğer Türk Boyları",
+            "Eski Türklerde Devlet Teşkilatı, Toplum ve Kültür"
+          ]
+        },
+        {
+          "ad": "İslam Medeniyetinin Doğuşu ve İlk İslam Devletleri",
+          "konular": [
+            "İslamiyetin Doğuşu ve Hz. Muhammed Dönemi",
+            "Dört Halife Dönemi",
+            "Emeviler ve Abbasiler",
+            "İslam Kültür ve Medeniyeti"
+          ]
+        },
+        {
+          "ad": "Türklerin İslamiyet'i Kabulü ve İlk Türk-İslam Devletleri",
+          "konular": [
+            "Türklerin İslamlaşma Süreci",
+            "Karahanlılar, Gazneliler ve Büyük Selçuklu Devleti",
+            "Büyük Selçuklu Kültür ve Medeniyeti"
+          ]
+        },
+        {
+          "ad": "Yerleşme ve Devletleşme Sürecinde Selçuklu Türkiyesi",
+          "konular": [
+            "Anadolu'ya Türk Akınları ve İlk Beylikler",
+            "Türkiye Selçuklu Devleti",
+            "Haçlı Seferleri ve Moğol İstilası",
+            "Türkiye Selçuklu Kültür ve Medeniyeti"
+          ]
+        },
+        {
+          "ad": "Beylikten Devlete Osmanlı Siyaseti ve Medeniyeti",
+          "konular": [
+            "Osmanlı Kuruluş Dönemi (1302-1453)",
+            "Balkan Fetihleri ve İskan Politikası",
+            "Anadolu Türk Birliğini Sağlama Faaliyetleri",
+            "Devletleşme Sürecinde Askeri ve Merkez Teşkilatı"
+          ]
+        },
+        {
+          "ad": "Dünya Gücü Osmanlı Devleti (1453-1595)",
+          "konular": [
+            "İstanbul'un Fethi ve Sonuçları",
+            "Fatih, II. Bayezid, Yavuz ve Kanuni Dönemleri",
+            "Osmanlı'da Hukuk, Yönetim ve Toprak Sistemi",
+            "Denizlerde Hakimiyet Mücadelesi"
+          ]
+        },
+        {
+          "ad": "Değişen Dünya Dengeleri ve Arayış Yılları (1595-1774)",
+          "konular": [
+            "17. Yüzyıl Islahatları ve İsyanlar",
+            "Osmanlı-Habsburg ve Osmanlı-Safevi Mücadeleleri",
+            "Lale Devri ve 18. Yüzyıl Islahatları",
+            "Karlofça ve Küçük Kaynarca Antlaşmaları"
+          ]
+        },
+        {
+          "ad": "En Uzun Yüzyıl ve Uluslararası Dengeler (1774-1914)",
+          "konular": [
+            "Şark Meselesi ve Osmanlı'nın Denge Politikası",
+            "II. Mahmud Dönemi Islahatları",
+            "Tanzimat ve Islahat Fermanları",
+            "I. ve II. Meşrutiyet Dönemleri",
+            "Fikir Akımları (Osmanlıcılık, İslamcılık, Türkçülük, Batıcılık)"
+          ]
+        },
+        {
+          "ad": "20. Yüzyıl Başlarında Osmanlı ve Millî Mücadele",
+          "konular": [
+            "Trablusgarp ve Balkan Savaşları",
+            "I. Dünya Savaşı ve Cepheler",
+            "Mondros Ateşkesi ve Cemiyetler",
+            "Genelgeler ve Kongreler Dönemi",
+            "Misak-ı Millî ve TBMM'nin Açılması",
+            "Kurtuluş Savaşı Muharebeler Dönemi (Doğu, Güney, Batı Cephesi)",
+            "Mudanya ve Lozan Barış Antlaşması",
+            "Atatürkçülük ve Türk İnkılabı"
+          ]
+        }
+      ]
+    },
+    "cografya1": {
+      "ad": "Coğrafya-1",
+      "soru_sayisi": 6,
+      "uniteler": [
+        {
+          "ad": "Ekosistem ve Madde Döngüleri",
+          "konular": [
+            "Biyoçeşitlilik ve Biyomlar",
+            "Madde Döngüleri (Karbon, Azot, Su) ve Enerji Akışı",
+            "Su Ekosistemleri"
+          ]
+        },
+        {
+          "ad": "Nüfus Politikaları ve Yerleşme",
+          "konular": [
+            "Dünya'da Nüfus Politikaları",
+            "Türkiye'nin Nüfus Politikaları ve Geleceği",
+            "Şehirlerin Fonksiyonları ve Etki Alanları",
+            "Türkiye'de Şehirler ve Kırsal Yerleşmeler"
+          ]
+        },
+        {
+          "ad": "Türkiye Ekonomisi ve Sektörler",
+          "konular": [
+            "Türkiye Ekonomisinin Sektörel Dağılımı ve Temel Özellikleri",
+            "Türkiye'de Tarım ve Hayvancılık",
+            "Türkiye'de Madencilik ve Enerji Kaynakları",
+            "Türkiye'de Sanayi"
+          ]
+        },
+        {
+          "ad": "Bölgesel Kalkınma Projeleri",
+          "konular": [
+            "Güneydoğu Anadolu Projesi (GAP)",
+            "Doğu Anadolu Projesi (DAP)",
+            "Doğu Karadeniz Projesi (DOKAP)",
+            "Konya Ovası Projesi (KOP) ve ZBK Projesi"
+          ]
+        },
+        {
+          "ad": "Küresel Ticaret, Ulaşım ve Turizm",
+          "konular": [
+            "Hammadde, Üretim ve Pazar Alanları",
+            "Uluslararası Ticaret ve Ticaret Bölgeleri",
+            "Dünya ve Türkiye'de Ulaşım Sistemleri",
+            "Dünya ve Türkiye'de Turizm"
+          ]
+        },
+        {
+          "ad": "Küresel ve Bölgesel Örgütler",
+          "konular": [
+            "Birleşmiş Milletler (BM), NATO, AB, İİT, OECD, Karadeniz Ekonomik İşbirliği vb.",
+            "Türkiye'nin Jeopolitik Konumu"
+          ]
+        },
+        {
+          "ad": "Çevre ve Toplum",
+          "konular": [
+            "Çevre Sorunları ve Küresel İklim Değişikliği",
+            "Doğal Kaynakların Sürdürülebilir Kullanımı",
+            "Çevre Politikaları ve Uluslararası Anlaşmalar"
+          ]
+        }
+      ]
+    },
+    "tarih2": {
+      "ad": "Tarih-2",
+      "soru_sayisi": 11,
+      "uniteler": [
+        {
+          "ad": "Tarih ve Zaman",
+          "konular": [
+            "Tarih Bilimine Giriş",
+            "Zamanın Taksimi ve Takvimler",
+            "Tarih Yazıcılığı"
+          ]
+        },
+        {
+          "ad": "İnsanlığın İlk Dönemleri ve İlk Çağ",
+          "konular": [
+            "İlk Çağ Medeniyetleri",
+            "Mezopotamya, Mısır, Anadolu ve Ege Medeniyetleri",
+            "İlk Devlet Tipleri ve Hukuk Sistemleri"
+          ]
+        },
+        {
+          "ad": "İlk ve Orta Çağlarda Türk Dünyası",
+          "konular": [
+            "Orta Asya Türk Devletleri (Hun, Göktürk, Uygur)",
+            "Diğer Türk Boyları",
+            "Eski Türklerde Devlet Teşkilatı, Toplum ve Kültür"
+          ]
+        },
+        {
+          "ad": "İslam Medeniyetinin Doğuşu ve İlk İslam Devletleri",
+          "konular": [
+            "İslamiyetin Doğuşu ve Hz. Muhammed Dönemi",
+            "Dört Halife Dönemi",
+            "Emeviler ve Abbasiler",
+            "İslam Kültür ve Medeniyeti"
+          ]
+        },
+        {
+          "ad": "Türklerin İslamiyet'i Kabulü ve İlk Türk-İslam Devletleri",
+          "konular": [
+            "Türklerin İslamlaşma Süreci",
+            "Karahanlılar, Gazneliler ve Büyük Selçuklu Devleti",
+            "Büyük Selçuklu Kültür ve Medeniyeti"
+          ]
+        },
+        {
+          "ad": "Yerleşme ve Devletleşme Sürecinde Selçuklu Türkiyesi",
+          "konular": [
+            "Anadolu'ya Türk Akınları ve İlk Beylikler",
+            "Türkiye Selçuklu Devleti",
+            "Haçlı Seferleri ve Moğol İstilası",
+            "Türkiye Selçuklu Kültür ve Medeniyeti"
+          ]
+        },
+        {
+          "ad": "Beylikten Devlete Osmanlı Siyaseti ve Medeniyeti",
+          "konular": [
+            "Osmanlı Kuruluş Dönemi (1302-1453)",
+            "Balkan Fetihleri ve İskan Politikası",
+            "Anadolu Türk Birliğini Sağlama Faaliyetleri",
+            "Devletleşme Sürecinde Askeri ve Merkez Teşkilatı"
+          ]
+        },
+        {
+          "ad": "Dünya Gücü Osmanlı Devleti (1453-1595)",
+          "konular": [
+            "İstanbul'un Fethi ve Sonuçları",
+            "Fatih, II. Bayezid, Yavuz ve Kanuni Dönemleri",
+            "Osmanlı'da Hukuk, Yönetim ve Toprak Sistemi",
+            "Denizlerde Hakimiyet Mücadelesi"
+          ]
+        },
+        {
+          "ad": "Değişen Dünya Dengeleri ve Arayış Yılları (1595-1774)",
+          "konular": [
+            "17. Yüzyıl Islahatları ve İsyanlar",
+            "Osmanlı-Habsburg ve Osmanlı-Safevi Mücadeleleri",
+            "Lale Devri ve 18. Yüzyıl Islahatları",
+            "Karlofça ve Küçük Kaynarca Antlaşmaları"
+          ]
+        },
+        {
+          "ad": "En Uzun Yüzyıl ve Uluslararası Dengeler (1774-1914)",
+          "konular": [
+            "Şark Meselesi ve Osmanlı'nın Denge Politikası",
+            "II. Mahmud Dönemi Islahatları",
+            "Tanzimat ve Islahat Fermanları",
+            "I. ve II. Meşrutiyet Dönemleri",
+            "Fikir Akımları (Osmanlıcılık, İslamcılık, Türkçülük, Batıcılık)"
+          ]
+        },
+        {
+          "ad": "20. Yüzyıl Başlarında Osmanlı ve Millî Mücadele",
+          "konular": [
+            "Trablusgarp ve Balkan Savaşları",
+            "I. Dünya Savaşı ve Cepheler",
+            "Mondros Ateşkesi ve Cemiyetler",
+            "Genelgeler ve Kongreler Dönemi",
+            "Misak-ı Millî ve TBMM'nin Açılması",
+            "Kurtuluş Savaşı Muharebeler Dönemi (Doğu, Güney, Batı Cephesi)",
+            "Mudanya ve Lozan Barış Antlaşması",
+            "Atatürkçülük ve Türk İnkılabı"
+          ]
+        },
+        {
+          "ad": "Çağdaş Türk ve Dünya Tarihi",
+          "konular": [
+            "İki Savaş Arasındaki Dönemde Dünya (1918-1939)",
+            "İkinci Dünya Savaşı (1939-1945)",
+            "Soğuk Savaş Dönemi (1945-1960)",
+            "Yumuşama (Detant) Dönemi ve Sonrası (1960-1990)",
+            "Küreselleşen Dünya ve 21. Yüzyılın Başlarında Türkiye ve Dünya"
+          ]
+        }
+      ]
+    },
+    "cografya2": {
+      "ad": "Coğrafya-2",
+      "soru_sayisi": 11,
+      "uniteler": [
+        {
+          "ad": "Ekosistem ve Madde Döngüleri",
+          "konular": [
+            "Biyoçeşitlilik ve Biyomlar",
+            "Madde Döngüleri (Karbon, Azot, Su) ve Enerji Akışı",
+            "Su Ekosistemleri"
+          ]
+        },
+        {
+          "ad": "Nüfus Politikaları ve Yerleşme",
+          "konular": [
+            "Dünya'da Nüfus Politikaları",
+            "Türkiye'nin Nüfus Politikaları ve Geleceği",
+            "Şehirlerin Fonksiyonları ve Etki Alanları",
+            "Türkiye'de Şehirler ve Kırsal Yerleşmeler"
+          ]
+        },
+        {
+          "ad": "Türkiye Ekonomisi ve Sektörler",
+          "konular": [
+            "Türkiye Ekonomisinin Sektörel Dağılımı ve Temel Özellikleri",
+            "Türkiye'de Tarım ve Hayvancılık",
+            "Türkiye'de Madencilik ve Enerji Kaynakları",
+            "Türkiye'de Sanayi"
+          ]
+        },
+        {
+          "ad": "Bölgesel Kalkınma Projeleri",
+          "konular": [
+            "Güneydoğu Anadolu Projesi (GAP)",
+            "Doğu Anadolu Projesi (DAP)",
+            "Doğu Karadeniz Projesi (DOKAP)",
+            "Konya Ovası Projesi (KOP) ve ZBK Projesi"
+          ]
+        },
+        {
+          "ad": "Küresel Ticaret, Ulaşım ve Turizm",
+          "konular": [
+            "Hammadde, Üretim ve Pazar Alanları",
+            "Uluslararası Ticaret ve Ticaret Bölgeleri",
+            "Dünya ve Türkiye'de Ulaşım Sistemleri",
+            "Dünya ve Türkiye'de Turizm"
+          ]
+        },
+        {
+          "ad": "Küresel ve Bölgesel Örgütler",
+          "konular": [
+            "Birleşmiş Milletler (BM), NATO, AB, İİT, OECD, Karadeniz Ekonomik İşbirliği vb.",
+            "Türkiye'nin Jeopolitik Konumu"
+          ]
+        },
+        {
+          "ad": "Çevre ve Toplum",
+          "konular": [
+            "Çevre Sorunları ve Küresel İklim Değişikliği",
+            "Doğal Kaynakların Sürdürülebilir Kullanımı",
+            "Çevre Politikaları ve Uluslararası Anlaşmalar"
+          ]
+        },
+        {
+          "ad": "İlk Kültür Merkezleri ve Kültür Bölgeleri",
+          "konular": [
+            "Medeniyetlerin Doğuşu ve İlk Kültür Merkezleri",
+            "Türk Kültürü ve Yayılış Alanları",
+            "Dünya Kültür Bölgeleri"
+          ]
+        },
+        {
+          "ad": "Çevre Sorunlarının Çözümüne Yönelik Yaklaşımlar",
+          "konular": [
+            "Geri Dönüşüm, Ekolojik Ayak İzi ve Karbon Salınımı",
+            "Doğal Kaynakların Etkin Yönetimi ve Sürdürülebilirlik"
+          ]
+        }
+      ]
+    },
+    "felsefe_grubu": {
+      "ad": "Felsefe Grubu",
+      "soru_sayisi": 12,
+      "uniteler": [
+        {
+          "ad": "Mantık",
+          "konular": [
+            "Mantığa Giriş (Akıl ilkeleri, mantığın konusu)",
+            "Klasik Mantık (Kavram, Terim, Tanım, Önermeler, Kıyas ve Çıkarımlar)",
+            "Sembolik Mantık (Önermeler Mantığı, Niceleme Mantığı)"
+          ]
+        },
+        {
+          "ad": "Psikoloji",
+          "konular": [
+            "Psikoloji Bilimini Tanıyalım (Ekoller ve Yöntemler)",
+            "Psikolojinin Temel Süreçleri (Duyum, Algı, Güdü, Duygu)",
+            "Öğrenme, Bellek ve Düşünme",
+            "Ruh Sağlığının Temelleri ve Kişilik"
+          ]
+        },
+        {
+          "ad": "Sosyoloji",
+          "konular": [
+            "Sosyolojiye Giriş ve Sosyolojinin Yöntemleri",
+            "Birey ve Toplum (Sosyalleşme, Statü, Rol, Değer ve Normlar)",
+            "Toplumsal Yapı, Tabakalaşma ve Hareketlilik",
+            "Toplumsal Değişme ve Gelişme",
+            "Toplum ve Kültür",
+            "Toplumsal Kurumlar (Aile, Eğitim, Din, Ekonomi, Siyaset)"
+          ]
+        },
+        {
+          "ad": "Felsefe (İleri Düzey)",
+          "konular": [
+            "Felsefenin Temel Disiplinleri (Varlık, Bilgi, Ahlak, Sanat, Din, Siyaset, Bilim)",
+            "Felsefe Tarihi ve Çağdaş Felsefe Akımları"
+          ]
+        }
+      ]
+    },
+    "din_kulturu": {
+      "ad": "Din Kültürü ve Ahlak Bilgisi",
+      "soru_sayisi": 6,
+      "uniteler": [
+        {
+          "ad": "İnanç ve İbadet",
+          "konular": [
+            "Allah İnancı, İsim ve Sıfatları",
+            "İmanın Esasları ve İbadetler"
+          ]
+        },
+        {
+          "ad": "Ahlak ve Değerler",
+          "konular": [
+            "İslam'da Ahlaki Tutum ve Davranışlar",
+            "İslam ve Sosyal Adalet"
+          ]
+        },
+        {
+          "ad": "Kur'an ve Sünnet",
+          "konular": [
+            "Kur'an-ı Kerim'in Ana Konuları ve Yorumu",
+            "Hz. Muhammed ve Sünnetin Önemi"
+          ]
+        },
+        {
+          "ad": "İslam Medeniyeti ve Düşüncesi",
+          "konular": [
+            "İslam Medeniyetinde Bilim, Sanat ve Düşünce",
+            "İslam Düşüncesinde Yorumlar (İtikadi, Fıkhi, Tasavvufi)"
+          ]
+        },
+        {
+          "ad": "Dünya Dinleri",
+          "konular": [
+            "Yahudilik, Hristiyanlık, İslamiyet ve Doğu Dinleri"
+          ]
+        }
+      ]
+    },
+    "ydt_ingilizce": {
+      "ad": "YDT İngilizce",
+      "soru_sayisi": 80,
+      "uniteler": [
+        {
+          "ad": "Kelime Bilgisi (Vocabulary & Phrasal Verbs)",
+          "konular": [
+            "Academic Vocabulary (Nouns, Verbs, Adjectives, Adverbs)",
+            "Phrasal Verbs and Collocations",
+            "Idioms and Prepositional Phrases"
+          ]
+        },
+        {
+          "ad": "Dilbilgisi (Grammar)",
+          "konular": [
+            "Tenses and Modals",
+            "Passive Voice and Causatives",
+            "Conditionals and Wish Clauses",
+            "Relative Clauses and Noun Clauses",
+            "Gerunds and Infinitives",
+            "Conjunctions and Transitions",
+            "Quantifiers and Determiners"
+          ]
+        },
+        {
+          "ad": "Soru Türleri ve Beceriler",
+          "konular": [
+            "Cloze Test",
+            "Cümle Tamamlama (Sentence Completion)",
+            "Çeviri (İngilizce-Türkçe / Türkçe-İngilizce)",
+            "Paragraf Okuma ve Anlama (Reading Comprehension)",
+            "Diyalog Tamamlama (Dialogue Completion)",
+            "Anlamca En Yakın Cümleyi Bulma (Restatement)",
+            "Duruma Uygun İfadeyi Bulma (Situational Expressions)",
+            "Paragraf Tamamlama (Paragraph Completion)",
+            "Akışı Bozan Cümleyi Bulma (Irrelevant Sentence)"
           ]
         }
       ]

@@ -4,8 +4,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.Quiz
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.serialization.Serializable
@@ -18,9 +20,13 @@ object KutuphaneNav
 
 /**
  * Type-safe navigation destination for Soru Ekleme (Add Question) screen.
+ * Supports optional initial image URI and isSolution flag.
  */
 @Serializable
-object SoruEkleNav
+data class SoruEkleNav(
+    val initialImageUri: String? = null,
+    val isSolution: Boolean = false
+)
 
 /**
  * Type-safe navigation destination for Soru Detay (Question Detail) screen.
@@ -34,6 +40,25 @@ data class SoruDetayNav(val soruId: Long)
  */
 @Serializable
 data class KameraNav(val isSolution: Boolean = false)
+
+/**
+ * Type-safe navigation destination for Test Oluşturma screen.
+ */
+@Serializable
+object TestNav
+
+/**
+ * Type-safe navigation destination for Test Çözme Ekranı.
+ */
+@Serializable
+object TestCozNav
+
+/**
+ * Type-safe navigation destination for Test Sonuç Ekranı.
+ */
+@Serializable
+object TestSonucNav
+
 
 /**
  * Type-safe navigation destination for İstatistik (Statistics & Analytics) screen.
@@ -63,6 +88,13 @@ sealed class BottomNavItem(
         unselectedIcon = Icons.AutoMirrored.Outlined.MenuBook
     )
 
+    data object Test : BottomNavItem(
+        route = TestNav,
+        title = "Test Çöz",
+        selectedIcon = Icons.Filled.Quiz,
+        unselectedIcon = Icons.Outlined.Quiz
+    )
+
     data object Istatistik : BottomNavItem(
         route = IstatistikNav,
         title = "İstatistik",
@@ -78,6 +110,6 @@ sealed class BottomNavItem(
     )
 
     companion object {
-        val items = listOf(Kutuphane, Istatistik, Ayarlar)
+        val items = listOf(Kutuphane, Test, Istatistik, Ayarlar)
     }
 }

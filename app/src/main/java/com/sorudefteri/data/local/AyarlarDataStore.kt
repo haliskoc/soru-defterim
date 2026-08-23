@@ -37,8 +37,8 @@ class AyarlarDataStore @Inject constructor(
 
         const val DEFAULT_ALAN = "SAYISAL"
         const val DEFAULT_AI_PROVIDER = "GEMINI"
-        const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-        const val DEFAULT_GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+        const val DEFAULT_GEMINI_MODEL = "gemini-2.0-flash"
+        const val DEFAULT_GROQ_MODEL = "llama-3.2-11b-vision-preview"
         const val DEFAULT_DARK_THEME = 0 // 0: Sistem, 1: Açık, 2: Koyu
     }
 

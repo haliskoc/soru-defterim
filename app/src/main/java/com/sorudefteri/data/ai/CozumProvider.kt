@@ -12,7 +12,7 @@ interface CozumProvider {
      * @param dersAdi Sorunun ait olduğu ders adı (örn. "Matematik", "Fizik").
      * @param konu Sorunun ait olduğu konu (örn. "Türev", "Optik").
      * @param correctAnswer Varsa sorunun doğru cevap şıkkı (örn. "A", "B", "C", "D", "E") veya null.
-     * @param modelName Kullanılacak model adı (örn. "gemini-2.5-flash", "meta-llama/llama-4-scout-17b-16e-instruct").
+     * @param modelName Kullanılacak model adı (örn. "gemini-2.0-flash", "llama-3.2-11b-vision-preview").
      * @param apiKey İlgili sağlayıcıya ait API anahtarı.
      * @return Başarılı ise çözüm metni [Result.success], hata durumunda açıklayıcı hata mesajı [Result.failure].
      */

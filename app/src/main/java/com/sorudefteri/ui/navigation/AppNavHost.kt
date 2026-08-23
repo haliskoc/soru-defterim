@@ -22,13 +22,17 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import androidx.navigation.toRoute
+import androidx.compose.runtime.LaunchedEffect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sorudefteri.ui.ayarlar.AyarlarScreen
 import com.sorudefteri.ui.detay.SoruDetayScreen
 import com.sorudefteri.ui.istatistik.IstatistikScreen
 import com.sorudefteri.ui.kamera.KameraScreen
 import com.sorudefteri.ui.kutuphane.KutuphaneScreen
 import com.sorudefteri.ui.soruekle.SoruEklemeScreen
+import com.sorudefteri.ui.test.TestCozScreen
+import com.sorudefteri.ui.test.TestOlusturScreen
+import com.sorudefteri.ui.test.TestSonucScreen
 
 /**
  * Root Navigation Host composable managing destinations, backstack, and dynamic bottom navigation bar.
@@ -42,8 +46,9 @@ fun AppNavHost(
     val currentDestination = navBackStackEntry?.destination
 
     val isBottomBarVisible = currentDestination?.let { dest ->
-        dest.hasRoute<KutuphaneNav>() || dest.hasRoute<IstatistikNav>() || dest.hasRoute<AyarlarNav>()
+        dest.hasRoute<KutuphaneNav>() || dest.hasRoute<TestNav>() || dest.hasRoute<IstatistikNav>() || dest.hasRoute<AyarlarNav>()
     } ?: false
+
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -67,13 +72,27 @@ fun AppNavHost(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            composable<KutuphaneNav> {
+            composable<KutuphaneNav> { backStackEntry ->
+                val capturedPath by backStackEntry.savedStateHandle
+                    .getStateFlow<String?>("captured_image_path", null)
+                    .collectAsStateWithLifecycle()
+
+                LaunchedEffect(capturedPath) {
+                    capturedPath?.let { path ->
+                        backStackEntry.savedStateHandle.remove<String>("captured_image_path")
+                        navController.navigate(SoruEkleNav(initialImageUri = path))
+                    }
+                }
+
                 KutuphaneScreen(
                     onSoruClick = { id ->
                         navController.navigate(SoruDetayNav(soruId = id))
                     },
                     onAddClick = {
-                        navController.navigate(SoruEkleNav)
+                        navController.navigate(SoruEkleNav())
+                    },
+                    onNavigateToSoruEkle = { uri ->
+                        navController.navigate(SoruEkleNav(initialImageUri = uri))
                     },
                     onCameraClick = {
                         navController.navigate(KameraNav(isSolution = false))
@@ -81,8 +100,21 @@ fun AppNavHost(
                 )
             }
 
-            composable<SoruEkleNav> {
+            composable<SoruEkleNav> { backStackEntry ->
+                val nav = backStackEntry.toRoute<SoruEkleNav>()
+                val capturedPath by backStackEntry.savedStateHandle
+                    .getStateFlow<String?>("captured_image_path", null)
+                    .collectAsStateWithLifecycle()
+                val isSolutionImage by backStackEntry.savedStateHandle
+                    .getStateFlow<Boolean>("is_solution_image", false)
+                    .collectAsStateWithLifecycle()
+
+                val effectiveSoruPath = if (!isSolutionImage && capturedPath != null) capturedPath else nav.initialImageUri
+                val effectiveSolutionPath = if (isSolutionImage && capturedPath != null) capturedPath else null
+
                 SoruEklemeScreen(
+                    initialSoruImagePath = effectiveSoruPath,
+                    initialSolutionImagePath = effectiveSolutionPath,
                     onNavigateBack = {
                         navController.popBackStack()
                     },
@@ -90,6 +122,13 @@ fun AppNavHost(
                         navController.navigate(KameraNav(isSolution = isSol))
                     }
                 )
+
+                LaunchedEffect(capturedPath) {
+                    if (capturedPath != null) {
+                        backStackEntry.savedStateHandle.remove<String>("captured_image_path")
+                        backStackEntry.savedStateHandle.remove<Boolean>("is_solution_image")
+                    }
+                }
             }
 
             composable<SoruDetayNav> {
@@ -114,10 +153,53 @@ fun AppNavHost(
                         navController.previousBackStackEntry
                             ?.savedStateHandle
                             ?.set("captured_image_path", path)
+                        navController.previousBackStackEntry
+                            ?.savedStateHandle
+                            ?.set("is_solution_image", nav.isSolution)
                         navController.popBackStack()
                     },
                     onClose = {
                         navController.popBackStack()
+                    }
+                )
+            }
+
+            composable<TestNav> {
+                TestOlusturScreen(
+                    onStartTest = {
+                        navController.navigate(TestCozNav)
+                    }
+                )
+            }
+
+            composable<TestCozNav> {
+                TestCozScreen(
+                    onFinishTest = {
+                        navController.navigate(TestSonucNav) {
+                            popUpTo<TestNav>()
+                        }
+                    },
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    }
+                )
+            }
+
+            composable<TestSonucNav> {
+                TestSonucScreen(
+                    onNewTest = {
+                        navController.navigate(TestNav) {
+                            popUpTo<TestNav> { inclusive = true }
+                        }
+                    },
+                    onNavigateToLibrary = {
+                        navController.navigate(KutuphaneNav) {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
                     }
                 )
             }

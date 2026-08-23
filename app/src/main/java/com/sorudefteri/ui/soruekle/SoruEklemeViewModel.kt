@@ -8,6 +8,7 @@ import com.sorudefteri.data.local.AyarlarDataStore
 import com.sorudefteri.data.repository.SoruRepository
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.KonuKatalog
+import com.sorudefteri.domain.KonuUnite
 import com.sorudefteri.domain.model.Alan
 import com.sorudefteri.domain.model.Ders
 import com.sorudefteri.domain.model.HataTipi
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.File
 import javax.inject.Inject
 
 data class SoruEklemeUiState(
@@ -32,14 +34,25 @@ data class SoruEklemeUiState(
     val correctAnswer: String? = null,
     val note: String = "",
     val topicSuggestions: List<String> = emptyList(),
+    val catalogUnits: List<KonuUnite> = emptyList(),
+    val frequentTopics: List<String> = emptyList(),
     val availableSubjects: List<Ders> = emptyList(),
     val userAlan: Alan = Alan.SAYISAL,
+    val isCatalogSheetOpen: Boolean = false,
+    val catalogSearchQuery: String = "",
+    val selectedCatalogUnit: String? = null,
     val isSaving: Boolean = false,
     val isSaved: Boolean = false,
     val errorMessage: String? = null
 ) {
     val canSave: Boolean
         get() = !soruImagePath.isNullOrBlank() && topic.isNotBlank() && !isSaving
+
+    val currentSubjectName: String
+        get() = availableSubjects.find { it.id == subjectId }?.ad ?: DersTaksonomisi.getDersAdi(examType, subjectId)
+
+    val totalTopicCountInCatalog: Int
+        get() = catalogUnits.sumOf { it.konular.size }
 }
 
 @HiltViewModel
@@ -68,6 +81,69 @@ class SoruEklemeViewModel @Inject constructor(
                     )
                 }
                 updateTopicSuggestions()
+            }
+        }
+    }
+
+    /**
+     * Dışarıdan veya kameradan/galeriden gelen başlangıç görsel yolunu veya URI'sini yükler.
+     */
+    fun setInitialImage(pathOrUri: String?, isSolution: Boolean = false) {
+        if (pathOrUri.isNullOrBlank()) return
+        if (isSolution) {
+            setSolutionImageFromUriOrPath(pathOrUri)
+        } else {
+            setSoruImageFromUriOrPath(pathOrUri)
+        }
+    }
+
+    fun setSoruImageFromUriOrPath(uriOrPath: String) {
+        if (uriOrPath.isBlank()) return
+        viewModelScope.launch {
+            try {
+                if (uriOrPath.startsWith("content://") || uriOrPath.startsWith("file://")) {
+                    val uri = Uri.parse(uriOrPath)
+                    val path = gorselDepo.saveImageFromUri(uri, isSolution = false)
+                    _uiState.update { it.copy(soruImagePath = path, errorMessage = null) }
+                } else if (File(uriOrPath).exists() || uriOrPath.startsWith("/")) {
+                    _uiState.update { it.copy(soruImagePath = uriOrPath, errorMessage = null) }
+                } else {
+                    val uri = Uri.parse(uriOrPath)
+                    val path = gorselDepo.saveImageFromUri(uri, isSolution = false)
+                    _uiState.update { it.copy(soruImagePath = path, errorMessage = null) }
+                }
+            } catch (e: Exception) {
+                // Hata durumunda dosya yolu olarak doğrudan kullanmayı dene
+                if (File(uriOrPath).exists()) {
+                    _uiState.update { it.copy(soruImagePath = uriOrPath, errorMessage = null) }
+                } else {
+                    _uiState.update { it.copy(errorMessage = "Görsel yüklenemedi: ${e.localizedMessage}") }
+                }
+            }
+        }
+    }
+
+    fun setSolutionImageFromUriOrPath(uriOrPath: String) {
+        if (uriOrPath.isBlank()) return
+        viewModelScope.launch {
+            try {
+                if (uriOrPath.startsWith("content://") || uriOrPath.startsWith("file://")) {
+                    val uri = Uri.parse(uriOrPath)
+                    val path = gorselDepo.saveImageFromUri(uri, isSolution = true)
+                    _uiState.update { it.copy(solutionImagePath = path, errorMessage = null) }
+                } else if (File(uriOrPath).exists() || uriOrPath.startsWith("/")) {
+                    _uiState.update { it.copy(solutionImagePath = uriOrPath, errorMessage = null) }
+                } else {
+                    val uri = Uri.parse(uriOrPath)
+                    val path = gorselDepo.saveImageFromUri(uri, isSolution = true)
+                    _uiState.update { it.copy(solutionImagePath = path, errorMessage = null) }
+                }
+            } catch (e: Exception) {
+                if (File(uriOrPath).exists()) {
+                    _uiState.update { it.copy(solutionImagePath = uriOrPath, errorMessage = null) }
+                } else {
+                    _uiState.update { it.copy(errorMessage = "Çözüm görseli yüklenemedi: ${e.localizedMessage}") }
+                }
             }
         }
     }
@@ -123,26 +199,62 @@ class SoruEklemeViewModel @Inject constructor(
 
         val alan = _uiState.value.userAlan
         val subjects = DersTaksonomisi.getDersler(type, alan)
-        val firstSubject = subjects.firstOrNull()?.id ?: ""
+        val firstSubject = subjects.firstOrNull()?.id ?: "matematik"
 
         _uiState.update {
             it.copy(
                 examType = type,
                 availableSubjects = subjects,
                 subjectId = firstSubject,
-                topic = ""
+                topic = "",
+                catalogSearchQuery = "",
+                selectedCatalogUnit = null
             )
         }
         updateTopicSuggestions()
     }
 
     fun setSubject(subjectId: String) {
-        _uiState.update { it.copy(subjectId = subjectId, topic = "") }
+        _uiState.update {
+            it.copy(
+                subjectId = subjectId,
+                topic = "",
+                catalogSearchQuery = "",
+                selectedCatalogUnit = null
+            )
+        }
         updateTopicSuggestions()
     }
 
     fun setTopic(topic: String) {
         _uiState.update { it.copy(topic = topic, errorMessage = null) }
+    }
+
+    fun selectTopicFromCatalog(topic: String) {
+        _uiState.update {
+            it.copy(
+                topic = topic,
+                isCatalogSheetOpen = false,
+                errorMessage = null
+            )
+        }
+    }
+
+    fun openTopicCatalog(isOpen: Boolean) {
+        _uiState.update {
+            it.copy(
+                isCatalogSheetOpen = isOpen,
+                catalogSearchQuery = if (isOpen) it.catalogSearchQuery else ""
+            )
+        }
+    }
+
+    fun setCatalogSearchQuery(query: String) {
+        _uiState.update { it.copy(catalogSearchQuery = query) }
+    }
+
+    fun setSelectedCatalogUnit(unitName: String?) {
+        _uiState.update { it.copy(selectedCatalogUnit = unitName) }
     }
 
     fun setMistakeType(mistakeType: HataTipi?) {
@@ -167,8 +279,9 @@ class SoruEklemeViewModel @Inject constructor(
             val examType = currentState.examType
             val subjectId = currentState.subjectId
 
-            // 1. Konu kataloğundaki öneriler (konular.json)
-            val catalogTopics = konuKatalog.getTopics(examType, subjectId)
+            // 1. Konu kataloğundaki üniteler ve konular
+            val units = konuKatalog.getUniteList(examType, subjectId)
+            val catalogTopics = units.flatMap { it.konular }
 
             // 2. Kullanıcının Room'daki geçmiş konuları
             val userTopics = try {
@@ -177,10 +290,17 @@ class SoruEklemeViewModel @Inject constructor(
                 emptyList()
             }
 
-            // Birleştir ve tekilleştir (sıralı olarak katalog önde)
-            val combined = (catalogTopics + userTopics).distinct().filter { it.isNotBlank() }
+            // Birleştir ve tekilleştir
+            val combined = (userTopics + catalogTopics).distinct().filter { it.isNotBlank() }
+            val frequent = (userTopics.take(4) + catalogTopics.take(8)).distinct().take(8)
 
-            _uiState.update { it.copy(topicSuggestions = combined) }
+            _uiState.update {
+                it.copy(
+                    catalogUnits = units,
+                    topicSuggestions = combined,
+                    frequentTopics = frequent
+                )
+            }
         }
     }
 
@@ -194,7 +314,7 @@ class SoruEklemeViewModel @Inject constructor(
         }
 
         if (state.topic.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Lütfen bir konu başlığı girin.") }
+            _uiState.update { it.copy(errorMessage = "Lütfen bir konu başlığı seçin veya yazın.") }
             return
         }
 
