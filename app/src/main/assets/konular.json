@@ -1,0 +1,1034 @@
+{
+  "meta": {
+    "title": "YKS Konu Listesi (TYT + AYT Sayısal)",
+    "version": "1.1",
+    "created": "2026-08-22",
+    "kapsam": "2025/2026 YKS müfredatı — MEB/ÖSYM kapsamına dayalı dershane ve yayınevi konu listeleri (ÜniversiteGO, Başarı Sıralamaları, Unikazan, KR Akademi, Fizik Dersim, RehberPanda, Bilgenç, Cep Dershanesi vb. kaynaklar çapraz kontrol edildi)",
+    "notlar": [
+      "TYT soruları 9. ve 10. sınıf; AYT soruları (Sayısal) 11. ve 12. sınıf ağırlıklı olmak üzere 9-12. sınıf müfredatını kapsar.",
+      "Türkiye Yüzyılı Maarif Modeli (TYMM) kademeli uygulanmaktadır; 2026 (ve 2027) YKS'de klasik/mevcut konu listeleri geçerlidir. Yeni müfredatın sınav kapsamına yansıması en erken 2028 ve sonrası beklenmektedir.",
+      "Konular ünite (grup) başlıkları altında toplanmıştır; kazanım düzeyine inilmemiştir.",
+      "Uygulamada bu dosya v1'den itibaren asset olarak paketlenir; ders seçiminde hazır konu önerisi kaynağıdır (serbest metin girişi her zaman açıktır).",
+      "AYT bölümü şu an yalnızca Sayısal alanını kapsar; Eşit Ağırlık, Sözel ve Dil (YDT) listeleri sonraki sürümde eklenecektir."
+    ],
+    "ders_sayisi": {
+      "tyt": 9,
+      "ayt": 4
+    }
+  },
+  "tyt": {
+    "turkce": {
+      "ad": "Türkçe",
+      "soru_sayisi": 40,
+      "uniteler": [
+        {
+          "ad": "Anlam Bilgisi",
+          "konular": [
+            "Sözcükte Anlam (gerçek, mecaz, terim, yan anlam)",
+            "Söz Öbeklerinde Anlam (deyim, atasözü, ikileme)",
+            "Cümlede Anlam (yorum, neden-sonuç, amaç-sonuç, koşul)",
+            "Paragraf (ana düşünce, yardımcı düşünce, konu, başlık)",
+            "Paragrafta Anlatım Teknikleri ve Düşünceyi Geliştirme Yolları",
+            "Paragraf Tamamlama, Sıralama ve Karışık Paragraf",
+            "Söz Sanatları",
+            "Anlatım Bozuklukları"
+          ]
+        },
+        {
+          "ad": "Dil Bilgisi",
+          "konular": [
+            "Ses Bilgisi (ses olayları, ünlü/ünsüz uyumları)",
+            "Yazım Kuralları",
+            "Noktalama İşaretleri",
+            "Sözcükte Yapı (kök, ek, gövde)",
+            "Sözcük Türleri (isim, sıfat, zamir, zarf, edat, bağlaç, ünlem)",
+            "Fiiller, Ek Fiil ve Fiilimsiler",
+            "Fiilde Çatı",
+            "Cümlenin Ögeleri",
+            "Cümle Türleri"
+          ]
+        }
+      ]
+    },
+    "matematik": {
+      "ad": "Matematik",
+      "soru_sayisi": 40,
+      "not": "40 sorunun yaklaşık 30'u matematik, 10'u geometri.",
+      "uniteler": [
+        {
+          "ad": "Sayılar ve İşlemler",
+          "konular": [
+            "Temel Kavramlar",
+            "Sayı Basamakları",
+            "Bölme ve Bölünebilme",
+            "EBOB - EKOK",
+            "Rasyonel Sayılar",
+            "Üslü Sayılar",
+            "Köklü Sayılar",
+            "Mutlak Değer",
+            "Faktöriyel",
+            "Basit Eşitsizlikler"
+          ]
+        },
+        {
+          "ad": "Cebir",
+          "konular": [
+            "Oran ve Orantı",
+            "Denklem Çözme",
+            "Çarpanlara Ayırma",
+            "Kümeler ve Kartezyen Çarpım",
+            "Mantık (önermeler ve bağlaçlar)"
+          ]
+        },
+        {
+          "ad": "Fonksiyonlar",
+          "konular": [
+            "Fonksiyon Kavramı",
+            "Fonksiyon Çeşitleri",
+            "Bileşke Fonksiyon",
+            "Ters Fonksiyon"
+          ]
+        },
+        {
+          "ad": "Problemler",
+          "konular": [
+            "Sayı Problemleri",
+            "Kesir Problemleri",
+            "Yaş Problemleri",
+            "Hareket (Hız) Problemleri",
+            "İşçi - Havuz Problemleri",
+            "Yüzde ve Faiz Problemleri",
+            "Kâr - Zarar Problemleri",
+            "Karışım Problemleri",
+            "Grafik ve Tablo Problemleri",
+            "Rutin Olmayan Problemler"
+          ]
+        },
+        {
+          "ad": "Sayma, Olasılık ve Veri",
+          "konular": [
+            "Permütasyon",
+            "Kombinasyon",
+            "Olasılık",
+            "Veri ve İstatistik (ortalama, medyan, mod)"
+          ]
+        },
+        {
+          "ad": "Geometri",
+          "konular": [
+            "Açılar",
+            "Üçgenler (açı, alan, benzerlik, özel üçgenler)",
+            "Dörtgenler",
+            "Çokgenler",
+            "Çember ve Daire",
+            "Analitik Geometri (koordinat sistemi, doğru, uzaklık)",
+            "Katı Cisimler (prizma, piramit, silindir, koni, küre)"
+          ]
+        }
+      ]
+    },
+    "fizik": {
+      "ad": "Fizik",
+      "soru_sayisi": 7,
+      "uniteler": [
+        {
+          "ad": "Fizik Bilimine Giriş",
+          "konular": [
+            "Fiziğin Alt Dalları ve Uygulama Alanları",
+            "Fiziksel Nicelikler (skaler ve vektörel)",
+            "Birim Sistemleri, Ölçme ve Hata",
+            "Bilim Araştırma Merkezleri"
+          ]
+        },
+        {
+          "ad": "Madde ve Özellikleri",
+          "konular": [
+            "Kütle, Hacim ve Özkütle",
+            "Dayanıklılık",
+            "Adezyon ve Kohezyon",
+            "Yüzey Gerilimi ve Kılcallık"
+          ]
+        },
+        {
+          "ad": "Hareket ve Kuvvet",
+          "konular": [
+            "Doğrusal Hareket (konum, hız, ivme)",
+            "Kuvvet ve Newton'un Hareket Yasaları",
+            "Sürtünme Kuvveti ve Eylemsizlik"
+          ]
+        },
+        {
+          "ad": "Enerji",
+          "konular": [
+            "İş ve Güç",
+            "Kinetik ve Potansiyel Enerji",
+            "Mekanik Enerji ve Enerjinin Korunumu",
+            "Verim ve Enerji Kaynakları"
+          ]
+        },
+        {
+          "ad": "Isı ve Sıcaklık",
+          "konular": [
+            "Isı ve Sıcaklık Kavramları",
+            "Isı Alışverişi ve Isıl Denge",
+            "Hâl Değişimi",
+            "Genleşme",
+            "Enerji İletim Yolları ve İletim Hızı"
+          ]
+        },
+        {
+          "ad": "Elektrik ve Manyetizma",
+          "konular": [
+            "Elektrik Akımı, Potansiyel Fark ve Direnç",
+            "Ohm Yasası",
+            "Elektrik Devreleri (seri - paralel)",
+            "Elektriksel Güç ve Enerji",
+            "Mıknatıs ve Manyetik Alan",
+            "Akım ve Manyetik Alan"
+          ]
+        },
+        {
+          "ad": "Basınç ve Kaldırma Kuvveti",
+          "konular": [
+            "Katı, Sıvı ve Gaz Basıncı",
+            "Açık Hava Basıncı",
+            "Kaldırma Kuvveti (Arşimet İlkesi)"
+          ]
+        },
+        {
+          "ad": "Dalgalar",
+          "konular": [
+            "Dalgaların Temel Özellikleri",
+            "Yay Dalgaları",
+            "Su Dalgaları",
+            "Ses Dalgaları",
+            "Deprem Dalgaları"
+          ]
+        },
+        {
+          "ad": "Optik",
+          "konular": [
+            "Işığın Yayılması ve Aydınlanma",
+            "Gölge",
+            "Yansıma, Düzlem ve Küresel Aynalar",
+            "Kırılma, Renkler ve Prizma",
+            "Mercekler"
+          ]
+        }
+      ]
+    },
+    "kimya": {
+      "ad": "Kimya",
+      "soru_sayisi": 7,
+      "uniteler": [
+        {
+          "ad": "Kimya Bilimi",
+          "konular": [
+            "Kimyanın Tanımı ve Alt Disiplinleri",
+            "Kimyanın Sembolik Dili",
+            "İş Sağlığı ve Güvenliği (Laboratuvar Güvenliği)",
+            "Kimyacıların Çalışma Alanları"
+          ]
+        },
+        {
+          "ad": "Atom ve Periyodik Sistem",
+          "konular": [
+            "Atom Modelleri",
+            "Atomun Yapısı (proton, nötron, elektron)",
+            "İzotop, İzoton ve İzobar",
+            "Periyodik Sistem ve Periyodik Özellikler"
+          ]
+        },
+        {
+          "ad": "Kimyasal Türler Arası Etkileşimler",
+          "konular": [
+            "Güçlü Etkileşimler (iyonik, kovalent, metalik bağ)",
+            "Zayıf Etkileşimler (hidrojen bağı, dipol-dipol, London kuvvetleri)",
+            "Fiziksel ve Kimyasal Değişimler"
+          ]
+        },
+        {
+          "ad": "Kimyanın Temel Yasaları ve Hesaplamalar",
+          "konular": [
+            "Kimyanın Temel Kanunları",
+            "Mol Kavramı",
+            "Kimyasal Hesaplamalar"
+          ]
+        },
+        {
+          "ad": "Doğa ve Kimya",
+          "konular": [
+            "Su ve Su Sertliği",
+            "Hava ve Su Kirliliği",
+            "Sera Etkisi, Asit Yağmurları ve Ozon Tabakası"
+          ]
+        },
+        {
+          "ad": "Maddenin Halleri",
+          "konular": [
+            "Katı, Sıvı ve Gaz",
+            "Hâl Değişimleri",
+            "Gaz Yasaları (Boyle, Charles, Gay-Lussac)"
+          ]
+        },
+        {
+          "ad": "Karışımlar",
+          "konular": [
+            "Homojen ve Heterojen Karışımlar",
+            "Çözeltiler ve Derişim (kütlece yüzde, molarite)",
+            "Çözünürlük",
+            "Ayırma ve Saflaştırma Teknikleri"
+          ]
+        },
+        {
+          "ad": "Asitler, Bazlar ve Tuzlar",
+          "konular": [
+            "Asit ve Baz Kavramları",
+            "Asit - Baz Tepkimeleri ve Nötrleşme",
+            "Tuzlar",
+            "pH Kavramı"
+          ]
+        },
+        {
+          "ad": "Kimya Her Yerde",
+          "konular": [
+            "Günlük Hayat Kimyasalları (temizlik, ilaç, kozmetik, gıda)",
+            "Plastikler ve Yakıtlar"
+          ]
+        },
+        {
+          "ad": "Endüstride ve Canlılarda Enerji",
+          "konular": [
+            "Fosil ve Yenilenebilir Enerji Kaynakları",
+            "Biyokimya Temelleri (karbonhidrat, protein, yağ)",
+            "Fotosentez ve Solunum (temel)"
+          ]
+        }
+      ]
+    },
+    "biyoloji": {
+      "ad": "Biyoloji",
+      "soru_sayisi": 6,
+      "uniteler": [
+        {
+          "ad": "Yaşam Bilimi Biyoloji",
+          "konular": [
+            "Biyoloji ve Canlıların Ortak Özellikleri",
+            "İnorganik Bileşikler (su, mineraller, asitler, bazlar, tuzlar)",
+            "Organik Bileşikler (karbonhidrat, yağ, protein, enzim, vitamin, nükleik asit, ATP)"
+          ]
+        },
+        {
+          "ad": "Hücre",
+          "konular": [
+            "Hücre ve Organeller (prokaryot - ökaryot)",
+            "Hücre Zarından Madde Geçişleri (difüzyon, osmoz, aktif taşıma, endositoz, ekzositoz)",
+            "Nükleik Asitler (DNA - RNA)",
+            "Protein Sentezi (temel kavramlar)"
+          ]
+        },
+        {
+          "ad": "Canlılar Dünyası",
+          "konular": [
+            "Canlıların Sınıflandırılması",
+            "Canlı Âlemleri (arkeler, bakteriler, protistler, mantarlar, bitkiler, hayvanlar)",
+            "Virüsler"
+          ]
+        },
+        {
+          "ad": "Hücre Bölünmeleri",
+          "konular": [
+            "Mitoz ve Eşeysiz Üreme",
+            "Mayoz ve Eşeyli Üreme"
+          ]
+        },
+        {
+          "ad": "Kalıtımın Genel İlkeleri",
+          "konular": [
+            "Mendel Genetiği ve Çaprazlamalar",
+            "Eş Baskınlık, Çok Alellilik ve Kan Grupları",
+            "Cinsiyete Bağlı Kalıtım",
+            "Mutasyon ve Modifikasyon"
+          ]
+        },
+        {
+          "ad": "Ekosistem Ekolojisi ve Güncel Çevre Sorunları",
+          "konular": [
+            "Ekosistem Ekolojisi (besin zinciri, madde döngüleri, enerji piramidi)",
+            "Güncel Çevre Sorunları ve İnsan",
+            "Doğal Kaynaklar ve Biyolojik Çeşitliliğin Korunması"
+          ]
+        }
+      ]
+    },
+    "tarih": {
+      "ad": "Tarih",
+      "soru_sayisi": 5,
+      "uniteler": [
+        {
+          "ad": "Tarih ve Zaman",
+          "konular": [
+            "Tarih Bilimine Giriş (tanım, yöntem, kaynaklar)"
+          ]
+        },
+        {
+          "ad": "İnsanlığın İlk Dönemleri",
+          "konular": [
+            "Tarih Öncesi Dönemler",
+            "İlk Uygarlıklar (Mezopotamya, Anadolu, Mısır)",
+            "Yazının İcadı"
+          ]
+        },
+        {
+          "ad": "Orta Çağ'da Dünya",
+          "konular": [
+            "Orta Çağ Avrupası ve Feodalite",
+            "Dünya Siyasi ve Dini Yapısı"
+          ]
+        },
+        {
+          "ad": "İlk ve Orta Çağlarda Türk Dünyası",
+          "konular": [
+            "Orta Asya Türk Devletleri (Hun, Göktürk, Uygur)",
+            "Kavimler Göçü",
+            "Türklerin İslamiyet'e Geçiş Süreci"
+          ]
+        },
+        {
+          "ad": "Türklerin İslamiyet'i Kabulü ve İlk Türk İslam Devletleri",
+          "konular": [
+            "Karahanlılar, Gazneliler ve Büyük Selçuklu",
+            "İslamiyet'in Türk Devlet ve Toplum Yapısına Etkisi"
+          ]
+        },
+        {
+          "ad": "Anadolu'nun Türkleşmesi (Selçuklu Türkiyesi)",
+          "konular": [
+            "Anadolu'nun İlk Türk Siyasi Teşekkülleri",
+            "Haçlı Seferleri",
+            "Selçuklu - Bizans İlişkileri"
+          ]
+        },
+        {
+          "ad": "Beylikten Devlete Osmanlı Siyaseti (1302 - 1453)",
+          "konular": [
+            "Osmanlı'nın Kuruluşu",
+            "Rumeli'de İskân ve İstimâlet Politikası",
+            "Bizans ile İlişkiler ve Fetihler"
+          ]
+        },
+        {
+          "ad": "Dünya Gücü Osmanlı (1453 - 1600)",
+          "konular": [
+            "İstanbul'un Fethi",
+            "Yükselme Dönemi Savaşları ve Fetihler",
+            "Denizlerde Hâkimiyet"
+          ]
+        },
+        {
+          "ad": "Sultan ve Osmanlı Merkez Teşkilatı",
+          "konular": [
+            "Osmanlı Sarayı ve Divan Teşkilatı",
+            "Toprak ve Vergi Sistemi",
+            "Osmanlı Kültür ve Medeniyeti"
+          ]
+        },
+        {
+          "ad": "Değişen Dünya Dengeleri Karşısında Osmanlı (1595 - 1774)",
+          "konular": [
+            "Duraklama Dönemi ve İlk Islahatlar",
+            "Osmanlı - Avrupa Mücadelesi",
+            "17. Yüzyılda Değişim Arayışları",
+            "18. Yüzyılda Değişim ve Diplomasi (Lale Devri dahil)"
+          ]
+        },
+        {
+          "ad": "19. ve 20. Yüzyılda Değişen Sosyoekonomik Hayat",
+          "konular": [
+            "Osmanlı'da Sanayileşme Çabaları",
+            "Tanzimat ve Meşrutiyet Dönemleri"
+          ]
+        },
+        {
+          "ad": "20. Yüzyıl Başlarında Osmanlı Devleti ve Dünya",
+          "konular": [
+            "20. Yüzyıl Başında Osmanlı'nın Durumu",
+            "I. Dünya Savaşı"
+          ]
+        },
+        {
+          "ad": "Milli Mücadele",
+          "konular": [
+            "Milli Mücadele'ye Hazırlık ve Kongreler",
+            "Büyük Millet Meclisi'nin Açılışı",
+            "Cepheler (Batı Cephesi vb.)",
+            "Lozan Barış Antlaşması"
+          ]
+        },
+        {
+          "ad": "Atatürkçülük ve Türk İnkılabı",
+          "konular": [
+            "Atatürk İlkeleri",
+            "Siyasi, Eğitim, Kültür, Hukuk ve Sosyal Alanlarda İnkılaplar"
+          ]
+        },
+        {
+          "ad": "Türk Dış Politikası",
+          "konular": [
+            "Atatürk Dönemi Türk Dış Politikası",
+            "Lozan Sonrası Diplomasi"
+          ]
+        }
+      ]
+    },
+    "cografya": {
+      "ad": "Coğrafya",
+      "soru_sayisi": 5,
+      "uniteler": [
+        {
+          "ad": "Doğal Sistemler",
+          "konular": [
+            "Doğa ve İnsan",
+            "Coğrafya Bilimi",
+            "Dünya'nın Şekli ve Hareketleri",
+            "Coğrafi Konum (koordinat sistemi, yerel saat)",
+            "Harita Bilgisi (ölçek, yön, izohips)",
+            "Atmosfer ve İklim (iklim elemanları, iklim tipleri)",
+            "Dünya'nın Yapısı ve Oluşum Süreci",
+            "İç ve Dış Kuvvetler (tektonizma, volkanizma, akarsu, buzul, rüzgâr)",
+            "Su Kaynakları (yeraltı suyu, akarsu, göl, okyanuslar)",
+            "Topraklar ve Toprak Tipleri",
+            "Bitkiler ve Bitki Örtüsü"
+          ]
+        },
+        {
+          "ad": "Beşerî Sistemler",
+          "konular": [
+            "Nüfus ve Göç",
+            "Yerleşmeler ve Yerleşme Tipleri",
+            "Ekonomik Faaliyetler (tarım, hayvancılık, madencilik, sanayi, turizm)"
+          ]
+        },
+        {
+          "ad": "Küresel Ortam: Bölgeler ve Ülkeler",
+          "konular": [
+            "Bölge Kavramı ve Bölge Sınıflandırması",
+            "Türkiye'nin Bölgeleri",
+            "Uluslararası Ulaşım Hatları"
+          ]
+        },
+        {
+          "ad": "Çevre ve Toplum",
+          "konular": [
+            "Doğal Afetler (deprem, sel, heyelan, çığ)",
+            "Afetlerle Mücadele"
+          ]
+        }
+      ]
+    },
+    "felsefe": {
+      "ad": "Felsefe",
+      "soru_sayisi": 5,
+      "uniteler": [
+        {
+          "ad": "Felsefeyi Tanıma",
+          "konular": [
+            "Felsefenin Anlamı ve Doğuşu",
+            "Felsefi Düşüncenin Özellikleri",
+            "Felsefenin İnsan ve Toplum Hayatındaki Rolü"
+          ]
+        },
+        {
+          "ad": "Felsefe ile Düşünme",
+          "konular": [
+            "Düşünme ve Akıl Yürütme Kavramları (argüman, önerme, çelişki)",
+            "Düşünme ve Dil İlişkisi",
+            "Felsefi Görüş ve Argümanları Sorgulama"
+          ]
+        },
+        {
+          "ad": "Felsefenin Temel Konuları ve Problemleri",
+          "konular": [
+            "Varlık Felsefesi (Ontoloji)",
+            "Bilgi Felsefesi (Epistemoloji)",
+            "Bilim Felsefesi",
+            "Ahlak Felsefesi (Etik)",
+            "Din Felsefesi",
+            "Siyaset Felsefesi",
+            "Sanat Felsefesi"
+          ]
+        },
+        {
+          "ad": "Felsefe Tarihi",
+          "konular": [
+            "MÖ 6. yy - MS 2. yy Felsefesi",
+            "MS 2. yy - MS 15. yy Felsefesi",
+            "15. - 17. yy Felsefesi",
+            "18. - 19. yy Felsefesi (Aydınlanma)",
+            "20. yy Felsefesi"
+          ]
+        }
+      ]
+    },
+    "din_kulturu": {
+      "ad": "Din Kültürü ve Ahlak Bilgisi",
+      "soru_sayisi": 5,
+      "not": "Din dersinden muaf olan öğrencilere ek Felsefe (din) soruları sorulur.",
+      "uniteler": [
+        {
+          "ad": "Bilgi ve İnanç",
+          "konular": [
+            "Din - İnsan İlişkisi ve İnanç Türleri",
+            "Allah İnancı (tevhit) ve İmanın Esasları"
+          ]
+        },
+        {
+          "ad": "Ahlak ve Değerler",
+          "konular": [
+            "Ahlaki Tutum ve Davranışlar",
+            "Erdemler ve Evrensel Ahlak İlkeleri"
+          ]
+        },
+        {
+          "ad": "Vahiy ve Akıl",
+          "konular": [
+            "Kur'an'ın Kaynağı",
+            "Vahiy - Akıl - Bilim İlişkisi"
+          ]
+        },
+        {
+          "ad": "Allah - İnsan İlişkisi",
+          "konular": [
+            "Kader ve Kaza",
+            "İnsanın Sorumluluğu"
+          ]
+        },
+        {
+          "ad": "İbadetler",
+          "konular": [
+            "Namaz",
+            "Oruç",
+            "Zekât",
+            "Hac"
+          ]
+        },
+        {
+          "ad": "Hz. Muhammed'in Hayatı ve Örnekliği",
+          "konular": [
+            "Mekke ve Medine Dönemi",
+            "Hz. Muhammed'in Ahlakı ve Liderliği"
+          ]
+        },
+        {
+          "ad": "Din, Kültür ve Medeniyet",
+          "konular": [
+            "İslam Medeniyeti ve Kültürel Miras",
+            "Din - Sanat, Ekonomi ve Çevre İlişkisi"
+          ]
+        },
+        {
+          "ad": "İslam Düşüncesinde Yorumlar",
+          "konular": [
+            "İtikadi, Siyasi ve Fıkhi Yorumlar (mezhepler)",
+            "Tasavvufi Yorumlar"
+          ]
+        },
+        {
+          "ad": "Yaşayan Dinler",
+          "konular": [
+            "Hristiyanlık ve Yahudilik",
+            "Diğer İnanç Sistemleri"
+          ]
+        }
+      ]
+    }
+  },
+  "ayt": {
+    "matematik": {
+      "ad": "Matematik",
+      "soru_sayisi": 40,
+      "not": "40 sorunun yaklaşık 31'i matematik, 9-10'u geometri.",
+      "uniteler": [
+        {
+          "ad": "Temel Matematik (TYT Kapsamı - 9/10. Sınıf Tekrarı)",
+          "konular": [
+            "Temel Kavramlar ve Sayı Basamakları",
+            "Bölme ve Bölünebilme, EBOB - EKOK",
+            "Rasyonel, Üslü ve Köklü Sayılar",
+            "Mutlak Değer, Basit Eşitsizlikler",
+            "Oran - Orantı ve Denklem Çözme",
+            "Çarpanlara Ayırma",
+            "Kümeler ve Mantık",
+            "Fonksiyonlar (temel)",
+            "Problemler",
+            "Permütasyon, Kombinasyon ve Olasılık",
+            "Binom Açılımı"
+          ]
+        },
+        {
+          "ad": "Polinomlar",
+          "konular": [
+            "Polinom Kavramı ve İşlemler",
+            "Polinomlarda Bölme ve Kalan Bulma",
+            "Polinomların Çarpanlara Ayrılması"
+          ]
+        },
+        {
+          "ad": "İkinci Dereceden Denklemler ve Eşitsizlikler",
+          "konular": [
+            "İkinci Dereceden Denklemler",
+            "İkinci Dereceden Eşitsizlikler",
+            "Parabol (grafik çizimi ve yorumu)"
+          ]
+        },
+        {
+          "ad": "Denklem ve Eşitsizlik Sistemleri",
+          "konular": [
+            "Denklem Sistemleri",
+            "Eşitsizlik Sistemleri"
+          ]
+        },
+        {
+          "ad": "Karmaşık Sayılar",
+          "konular": [
+            "Karmaşık Sayılar ve İşlemler",
+            "Karmaşık Sayıların Kuvvetleri",
+            "Kutupsal Gösterim"
+          ]
+        },
+        {
+          "ad": "Trigonometri",
+          "konular": [
+            "Trigonometrik Fonksiyonlar ve Birim Çember",
+            "Trigonometrik Özdeşlikler",
+            "Trigonometrik Denklemler",
+            "Trigonometrik Grafikler"
+          ]
+        },
+        {
+          "ad": "Üstel ve Logaritmik Fonksiyonlar",
+          "konular": [
+            "Üstel Fonksiyonlar",
+            "Logaritma Kavramı ve Kuralları",
+            "Logaritmik Denklemler ve Eşitsizlikler"
+          ]
+        },
+        {
+          "ad": "Diziler",
+          "konular": [
+            "Dizi Kavramı",
+            "Aritmetik Dizi",
+            "Geometrik Dizi"
+          ]
+        },
+        {
+          "ad": "Limit ve Süreklilik",
+          "konular": [
+            "Limit Kavramı",
+            "Limit Alma Kuralları",
+            "Süreklilik"
+          ]
+        },
+        {
+          "ad": "Türev",
+          "konular": [
+            "Türev Alma Kuralları",
+            "Teğet ve Normal Denklemleri",
+            "Artan - Azalan Fonksiyonlar",
+            "Ekstremum Noktaları",
+            "Grafik Çizimi ve Yorumu",
+            "Optimizasyon Problemleri"
+          ]
+        },
+        {
+          "ad": "İntegral",
+          "konular": [
+            "Belirsiz İntegral ve Alma Yöntemleri",
+            "Belirli İntegral",
+            "Alan ve Hacim Hesaplamaları"
+          ]
+        },
+        {
+          "ad": "AYT Geometri",
+          "konular": [
+            "Üçgenler (açı, alan, benzerlik)",
+            "Çokgenler ve Dörtgenler",
+            "Çember ve Daire",
+            "Analitik Geometri: Doğrunun Analitik İncelenmesi",
+            "Analitik Geometri: Çemberin Analitik İncelenmesi",
+            "Dönüşüm Geometrisi",
+            "Vektörler ve Uzayda Geometri",
+            "Katı Cisimler"
+          ]
+        }
+      ]
+    },
+    "fizik": {
+      "ad": "Fizik",
+      "soru_sayisi": 14,
+      "uniteler": [
+        {
+          "ad": "Vektörler ve Kuvvet",
+          "konular": [
+            "Vektörlerde Toplama, Çıkarma ve Bileşenlere Ayırma",
+            "Kuvvet ve Kuvvet Dengesi"
+          ]
+        },
+        {
+          "ad": "Kuvvet ve Hareket",
+          "konular": [
+            "Bağıl Hareket",
+            "Newton'un Hareket Yasaları (dinamik)",
+            "Bir Boyutta Sabit İvmeli Hareket",
+            "İki Boyutta Hareket (yatay ve eğik atış)",
+            "Düzgün Çembersel Hareket (merkezcil kuvvet ve ivme)"
+          ]
+        },
+        {
+          "ad": "Tork ve Denge",
+          "konular": [
+            "Tork (Kuvvet Momenti)",
+            "Ağırlık Merkezi",
+            "Denge ve Denge Şartları",
+            "Basit Makineler"
+          ]
+        },
+        {
+          "ad": "İş, Güç ve Enerji",
+          "konular": [
+            "İş ve Güç Hesabı",
+            "Mekanik Enerji ve Enerji - İş Teoremi",
+            "Enerjinin Korunumu"
+          ]
+        },
+        {
+          "ad": "İtme ve Momentum",
+          "konular": [
+            "Momentum ve Korunumu",
+            "Esnek ve Esnek Olmayan Çarpışmalar",
+            "Patlamalar"
+          ]
+        },
+        {
+          "ad": "Basit Harmonik Hareket",
+          "konular": [
+            "Yay - Kütle Sistemi ve Sarkaç",
+            "Periyot ve Frekans Hesapları"
+          ]
+        },
+        {
+          "ad": "Dalga Mekaniği",
+          "konular": [
+            "Yay, Su ve Ses Dalgaları",
+            "Girişim ve Kırınım",
+            "Doppler Olayı",
+            "Polarizasyon",
+            "Elektromanyetik Dalgalar"
+          ]
+        },
+        {
+          "ad": "Elektrik ve Manyetizma",
+          "konular": [
+            "Coulomb Yasası ve Elektrik Alan",
+            "Elektriksel Potansiyel ve Potansiyel Enerji",
+            "Sığa ve Kondansatörler",
+            "Manyetik Alan ve Akım Taşıyan Tele Etkiyen Kuvvet",
+            "Elektromanyetik İndüksiyon (Faraday ve Lenz Yasaları)",
+            "Alternatif Akım ve Transformatörler"
+          ]
+        },
+        {
+          "ad": "Çembersel Hareket ve Kütle Çekimi",
+          "konular": [
+            "Düzgün Çembersel Hareket (ileri düzey)",
+            "Dönme ve Açısal Momentum",
+            "Kütle Çekim Kuvveti",
+            "Kepler Kanunları ve Uydu Yörüngeleri"
+          ]
+        },
+        {
+          "ad": "Atom Fiziği ve Radyoaktivite",
+          "konular": [
+            "Atom Modelleri ve Bohr Atom Modeli",
+            "Enerji Seviyeleri ve Spektrumlar",
+            "Fotoelektrik ve Compton Olayı",
+            "Özel Görelilik (zaman genleşmesi, uzunluk daralması)",
+            "Dalga - Parçacık İkiliği (de Broglie)",
+            "Radyoaktivite (alfa, beta, gama) ve Yarılanma Süresi"
+          ]
+        },
+        {
+          "ad": "Modern Fiziğin Teknolojideki Uygulamaları",
+          "konular": [
+            "Görüntüleme Teknolojileri",
+            "Yarı İletkenler",
+            "Süper İletkenler",
+            "Nanoteknoloji",
+            "Lazer"
+          ]
+        }
+      ]
+    },
+    "kimya": {
+      "ad": "Kimya",
+      "soru_sayisi": 13,
+      "uniteler": [
+        {
+          "ad": "Modern Atom Teorisi",
+          "konular": [
+            "Atomun Kuantum Modeli",
+            "Periyodik Sistem ve Periyodik Özellikler",
+            "Yükseltgenme Basamakları"
+          ]
+        },
+        {
+          "ad": "Gazlar",
+          "konular": [
+            "Gazların Özellikleri ve Gaz Yasaları",
+            "İdeal Gaz Denklemi",
+            "Gazlarda Kinetik Teori",
+            "Gaz Karışımları"
+          ]
+        },
+        {
+          "ad": "Sıvı Çözeltiler ve Çözünürlük",
+          "konular": [
+            "Derişim Birimleri (molarite, molalite)",
+            "Koligatif Özellikler",
+            "Çözünürlük"
+          ]
+        },
+        {
+          "ad": "Kimyasal Tepkimelerde Enerji (Termokimya)",
+          "konular": [
+            "Tepkimelerde Isı Değişimi (entalpi)",
+            "Oluşum Entalpisi",
+            "Hess Yasası"
+          ]
+        },
+        {
+          "ad": "Kimyasal Tepkimelerde Hız (Kinetik)",
+          "konular": [
+            "Tepkime Hızı",
+            "Tepkime Hızını Etkileyen Faktörler"
+          ]
+        },
+        {
+          "ad": "Kimyasal Tepkimelerde Denge",
+          "konular": [
+            "Kimyasal Denge (Kc ve Kp)",
+            "Dengeyi Etkileyen Faktörler (Le Chatelier İlkesi)",
+            "Sulu Çözelti Dengeleri"
+          ]
+        },
+        {
+          "ad": "Asit - Baz ve Çözünürlük Dengesi",
+          "konular": [
+            "Asit - Baz Dengesi (Bronsted - Lowry)",
+            "pH ve pOH Hesaplamaları",
+            "Tampon Çözeltiler ve Hidroliz",
+            "Çözünürlük Dengesi (Kçç)"
+          ]
+        },
+        {
+          "ad": "Kimya ve Elektrik (Elektrokimya)",
+          "konular": [
+            "Redoks Tepkimeleri",
+            "Elektrokimyasal Hücreler (galvanik ve elektrolitik)",
+            "Elektrot Potansiyelleri",
+            "Elektroliz",
+            "Korozyon"
+          ]
+        },
+        {
+          "ad": "Karbon Kimyasına Giriş",
+          "konular": [
+            "Doğada Karbon ve Karbon Bileşikleri",
+            "Basit ve Molekül Formülü",
+            "Hibritleşme ve Molekül Geometrisi",
+            "Fonksiyonel Gruplar"
+          ]
+        },
+        {
+          "ad": "Organik Bileşikler",
+          "konular": [
+            "Hidrokarbonlar (alkan, alken, alkin, aromatik)",
+            "Alkoller ve Eterler",
+            "Karbonil Bileşikleri (aldehit, keton)",
+            "Karboksilik Asitler",
+            "Esterler, Aminler ve Diğer Fonksiyonel Gruplar"
+          ]
+        },
+        {
+          "ad": "Hayatımızdaki Kimya ve Enerji Kaynakları",
+          "konular": [
+            "Enerji Kaynakları ve Yakıtlar",
+            "Bilimsel Gelişmelerin Kimyadaki Yeri"
+          ]
+        }
+      ]
+    },
+    "biyoloji": {
+      "ad": "Biyoloji",
+      "soru_sayisi": 13,
+      "not": "AYT 9-12. sınıfın tamamını kapsar; TYT üniteleri (Yaşam Bilimi, Hücre, Canlılar Dünyası, Hücre Bölünmeleri, Kalıtım, Ekosistem) burada da geçerlidir.",
+      "uniteler": [
+        {
+          "ad": "İnsan Fizyolojisi",
+          "konular": [
+            "Sinir Sistemi",
+            "Endokrin Sistem (hormonlar ve geri bildirim)",
+            "Duyu Organları",
+            "Destek ve Hareket Sistemi",
+            "Sindirim Sistemi",
+            "Dolaşım Sistemi ve Bağışıklık",
+            "Solunum Sistemi",
+            "Üriner (Boşaltım) Sistem",
+            "Üreme Sistemi ve Embriyonik Gelişim"
+          ]
+        },
+        {
+          "ad": "Komünite ve Popülasyon Ekolojisi",
+          "konular": [
+            "Komünite Ekolojisi (türler arası ilişkiler, simbiyoz, rekabet)",
+            "Popülasyon Ekolojisi (büyüme eğrileri, taşıma kapasitesi)"
+          ]
+        },
+        {
+          "ad": "Genden Proteine",
+          "konular": [
+            "Nükleik Asitlerin Keşfi ve Önemi",
+            "DNA Replikasyonu",
+            "Genetik Şifre ve Protein Sentezi",
+            "Mutasyonlar"
+          ]
+        },
+        {
+          "ad": "Canlılarda Enerji Dönüşümleri",
+          "konular": [
+            "Canlılık ve Enerji (ATP)",
+            "Fotosentez",
+            "Kemosentez",
+            "Hücresel Solunum (glikoliz, Krebs, oksidatif fosforilasyon)",
+            "Fermantasyon"
+          ]
+        },
+        {
+          "ad": "Bitki Biyolojisi",
+          "konular": [
+            "Bitkilerin Yapısı (kök, gövde, yaprak, dokular)",
+            "Bitkilerde Madde Taşınması (ksilem, floem)",
+            "Bitkilerde Eşeyli Üreme (çiçek, tohum, çimlenme)",
+            "Bitkilerde Hormonlar ve Hareket"
+          ]
+        },
+        {
+          "ad": "Canlılar ve Çevre",
+          "konular": [
+            "Ekosistem Kavramları ve Bitki - Çevre Etkileşimleri"
+          ]
+        }
+      ]
+    }
+  }
+}
