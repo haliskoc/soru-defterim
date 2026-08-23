@@ -3,8 +3,10 @@ package com.sorudefteri.ui.ortak
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ImageNotSupported
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
@@ -33,9 +36,9 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.outlined.CheckCircleOutline
+import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -77,7 +80,7 @@ import java.util.Locale
 /**
  * Kütüphane listesindeki soru kartı bileşeni.
  */
-@OptIn(ExperimentalLayoutApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(ExperimentalLayoutApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun SoruKarti(
     soru: Soru,
@@ -92,7 +95,7 @@ fun SoruKarti(
     val isTyt = soru.examType.equals("TYT", ignoreCase = true)
     val dersAdi = DersTaksonomisi.getDersName(soru.subjectId)
 
-    ElevatedCard(
+    Card(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
@@ -101,11 +104,11 @@ fun SoruKarti(
                 onLongClick = onLongClick
             ),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.elevatedCardColors(
+        colors = CardDefaults.cardColors(
             containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surface
         ),
         border = if (isSelected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-        elevation = CardDefaults.elevatedCardElevation(
+        elevation = CardDefaults.cardElevation(
             defaultElevation = 2.dp,
             pressedElevation = 6.dp
         )

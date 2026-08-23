@@ -226,7 +226,7 @@ class GeminiProvider @Inject constructor(
                 .post(requestJson.toRequestBody(jsonMediaType))
                 .build()
 
-            okHttpClient.newCall(httpRequest).execute().use { response ->
+            return okHttpClient.newCall(httpRequest).execute().use { response ->
                 val responseBodyString = response.body?.string().orEmpty()
 
                 when (response.code) {
