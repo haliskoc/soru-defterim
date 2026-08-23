@@ -39,7 +39,7 @@ class MathMarkdownParserTest {
         val rawText = "Sonuç: \\frac{3x + 1}{2} ve \\sqrt{16} = 4 olur."
         val formatted = formatMathSymbols(rawText)
 
-        assertTrue("Kesir (3x + 1) / 2 biçiminde sadeleşmeli", formatted.contains("(3x + 1) / 2"))
+        assertTrue("Kesir (3x + 1 / 2) biçiminde sadeleşmeli", formatted.contains("(3x + 1 / 2)"))
         assertTrue("Karekök √(16) biçiminde sadeleşmeli", formatted.contains("√(16)"))
     }
 }

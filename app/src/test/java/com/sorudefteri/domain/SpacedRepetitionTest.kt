@@ -17,27 +17,32 @@ class SpacedRepetitionTest {
     fun isDueForReview_tarihKontroluDogruCalisiyor() {
         val now = System.currentTimeMillis()
 
-        // 1. Durum: Henüz hiç tekrarlanmamış (nextReviewDate = null) -> false
+        // 1. Durum: Çözülmemiş soru (isSolved = false, nextReviewDate = null) -> Çözülmeyi beklediği için due = true
         val soru1 = Soru(
             id = 1L,
             imagePath = "path/1.jpg",
             examType = "TYT",
             subjectId = "tyt_matematik",
             topic = "Temel Kavramlar",
+            isSolved = false,
             nextReviewDate = null
         )
-        assertFalse("Henüz tekrar planlanmamış soru due olamaz", soru1.isDueForReview)
+        assertTrue("Çözülmemiş ve tekrar tarihi atanmamış soru due olmalı", soru1.isDueForReview)
 
-        // 2. Durum: Tekrar tarihi gelecekte (yarın) -> false
-        val soru2 = soru1.copy(nextReviewDate = now + oneDayMs)
-        assertFalse("Gelecekteki tekrar tarihi due olamaz", soru2.isDueForReview)
+        // 2. Durum: Çözülmüş soru (isSolved = true, nextReviewDate = null) -> Tekrar planlanmamış due = false
+        val soruSolved = soru1.copy(isSolved = true, nextReviewDate = null)
+        assertFalse("Çözülmüş ve tekrar planlanmamış soru due olamaz", soruSolved.isDueForReview)
 
-        // 3. Durum: Tekrar tarihi tam şu an veya geçmişte (dün) -> true
-        val soru3 = soru1.copy(nextReviewDate = now - oneDayMs)
-        assertTrue("Geçmişteki tekrar tarihi due olmalı", soru3.isDueForReview)
+        // 3. Durum: Tekrar tarihi gelecekte (yarın) -> due = false
+        val soruGelecek = soru1.copy(isSolved = true, nextReviewDate = now + oneDayMs)
+        assertFalse("Gelecekteki tekrar tarihi due olamaz", soruGelecek.isDueForReview)
 
-        val soru4 = soru1.copy(nextReviewDate = now - 1000L)
-        assertTrue("Süresi dolmuş tekrar due olmalı", soru4.isDueForReview)
+        // 4. Durum: Tekrar tarihi tam şu an veya geçmişte (dün) -> due = true
+        val soruGecmis = soru1.copy(isSolved = true, nextReviewDate = now - oneDayMs)
+        assertTrue("Geçmişteki tekrar tarihi due olmalı", soruGecmis.isDueForReview)
+
+        val soruSuresiDolmus = soru1.copy(isSolved = true, nextReviewDate = now - 1000L)
+        assertTrue("Süresi dolmuş tekrar due olmalı", soruSuresiDolmus.isDueForReview)
     }
 
     @Test
