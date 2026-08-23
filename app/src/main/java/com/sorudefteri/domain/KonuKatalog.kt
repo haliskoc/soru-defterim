@@ -2,10 +2,13 @@ package com.sorudefteri.domain
 
 import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -26,9 +29,22 @@ class KonuKatalog @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 
-    // Cache: key = "EXAMTYPE_SUBJECTKEY" (örn: "TYT_MATEMATIK", "AYT_EDABIYAT"), value = Map<ÜniteAdı, List<KonuAdı>>
-    private val unitelerCache: MutableMap<String, Map<String, List<String>>> by lazy {
-        loadKatalog()
+    // Thread-safe önbellek: key = "EXAMTYPE_SUBJECTKEY", value = Map<ÜniteAdı, List<KonuAdı>>
+    @Volatile
+    private var unitelerCache: Map<String, Map<String, List<String>>>? = null
+    private val lock = Any()
+
+    private fun getCache(): Map<String, Map<String, List<String>>> {
+        return unitelerCache ?: synchronized(lock) {
+            unitelerCache ?: loadKatalog().also { unitelerCache = it }
+        }
+    }
+
+    /**
+     * Kataloğu arka planda (IO thread) önceden yükler.
+     */
+    suspend fun preload() = withContext(Dispatchers.IO) {
+        getCache()
     }
 
     private fun loadKatalog(): MutableMap<String, Map<String, List<String>>> {
@@ -129,16 +145,17 @@ class KonuKatalog @Inject constructor(
     private fun findMatchingUnitMap(examType: String, subjectId: String): Map<String, List<String>> {
         val cleanExam = if (examType.equals("AYT", ignoreCase = true)) "AYT" else "TYT"
         val normalized = normalizeKey(subjectId)
+        val cache = getCache()
 
         // 1. Doğrudan tam eşleşme
-        unitelerCache["${cleanExam}_$normalized"]?.let { return it }
+        cache["${cleanExam}_$normalized"]?.let { return it }
 
         // 2. TYT / AYT çapraz kontrolü
         val otherExam = if (cleanExam == "AYT") "TYT" else "AYT"
-        unitelerCache["${otherExam}_$normalized"]?.let { return it }
+        cache["${otherExam}_$normalized"]?.let { return it }
 
         // 3. İçeren anahtar kontrolü
-        for ((key, map) in unitelerCache) {
+        for ((key, map) in cache) {
             if (key.startsWith("${cleanExam}_") && (key.contains(normalized) || normalized.contains(key.removePrefix("${cleanExam}_")))) {
                 return map
             }

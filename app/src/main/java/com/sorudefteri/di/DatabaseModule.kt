@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.sorudefteri.data.local.SoruDatabase
 import com.sorudefteri.data.local.dao.SoruDao
+import com.sorudefteri.data.local.dao.TestSonucDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -23,7 +24,10 @@ object DatabaseModule {
             SoruDatabase::class.java,
             SoruDatabase.DATABASE_NAME
         )
-            .addMigrations(SoruDatabase.MIGRATION_1_2)
+            .addMigrations(
+                SoruDatabase.MIGRATION_1_2,
+                SoruDatabase.MIGRATION_2_3
+            )
             .build()
     }
 
@@ -31,5 +35,11 @@ object DatabaseModule {
     @Singleton
     fun provideSoruDao(db: SoruDatabase): SoruDao {
         return db.soruDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideTestSonucDao(db: SoruDatabase): TestSonucDao {
+        return db.testSonucDao()
     }
 }

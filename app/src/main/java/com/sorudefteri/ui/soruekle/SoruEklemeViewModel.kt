@@ -14,6 +14,7 @@ import com.sorudefteri.domain.model.Ders
 import com.sorudefteri.domain.model.HataTipi
 import com.sorudefteri.domain.model.Soru
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -270,8 +271,11 @@ class SoruEklemeViewModel @Inject constructor(
         _uiState.update { it.copy(errorMessage = null) }
     }
 
+    private var topicJob: Job? = null
+
     private fun updateTopicSuggestions() {
-        viewModelScope.launch {
+        topicJob?.cancel()
+        topicJob = viewModelScope.launch {
             val currentState = _uiState.value
             val examType = currentState.examType
             val subjectId = currentState.subjectId

@@ -353,12 +353,21 @@ private fun RenderFormattedLines(content: String) {
         lines.forEach { line ->
             val trimmed = line.trim()
             if (trimmed.isNotBlank()) {
-                val isListItem = trimmed.startsWith("-") || trimmed.startsWith("•") || trimmed.startsWith("*")
-                val isNumberedItem = trimmed.firstOrNull()?.isDigit() == true && (trimmed.getOrNull(1) == '.' || trimmed.getOrNull(2) == '.')
+                val cleanPrefix = trimmed.removePrefix("-").removePrefix("•").removePrefix("*").removePrefix(".").trim()
+                val numberMatch = Regex("""^(\d{1,2}\.)\s*(.*)$""").find(cleanPrefix)
+                val isNumberedItem = numberMatch != null
+                val isListItem = trimmed.startsWith("-") || trimmed.startsWith("•") || (trimmed.startsWith("*") && !trimmed.startsWith("**")) || trimmed.startsWith(".") || isNumberedItem
 
-                val formatted = formatMathText(trimmed.removePrefix("-").removePrefix("•").removePrefix("*").trim())
+                val rawContent = when {
+                    isNumberedItem -> numberMatch!!.groupValues[2]
+                    isListItem -> cleanPrefix
+                    else -> trimmed
+                }.removeSuffix(":*").removeSuffix("*").trim()
 
-                if (isListItem || isNumberedItem) {
+                val formatted = formatMathText(rawContent)
+
+                if (isListItem) {
+                    val bulletText = if (isNumberedItem) numberMatch!!.groupValues[1] else "•"
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -367,7 +376,7 @@ private fun RenderFormattedLines(content: String) {
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text(
-                            text = if (isNumberedItem) trimmed.substringBefore(".").trim() + "." else "•",
+                            text = bulletText,
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary,
@@ -402,12 +411,23 @@ private fun RenderFormattedLines(content: String) {
 fun formatMathSymbols(raw: String): String {
     var text = raw
 
-    // 1. LaTeX bloklarını ve inline sembolleri temizle/dönüştür
+    // 0. AI Düşünce (<think>...</think>) etiketlerini temizle
+    text = text.replace(Regex("""<(think|thought)>[\s\S]*?</\1>"""), "")
+
+    // 1. LaTeX bloklarını, parantez kaçışlarını ve \left / \right belirteçlerini temizle
     text = text.replace("$$", "").replace("$", "")
     text = text.replace("\\[", "").replace("\\]", "")
     text = text.replace("\\(", "").replace("\\)", "")
+    text = text.replace(Regex("""\\left\s*"""), "")
+    text = text.replace(Regex("""\\right\s*"""), "")
 
-    // 2. LaTeX Kesirleri: \frac{a}{b} -> (a / b)
+    // 2. LaTeX Metin ve Yazı Tipi Sarmalayıcılarını Çöz: \text{...}, \mathbf{...}, vb.
+    val textCmdRegex = Regex("""\\(text|mathbf|mathit|mathrm|textbf|textit|mathbb|bold|operatorname)\{([^}]+)\}""")
+    while (textCmdRegex.containsMatchIn(text)) {
+        text = textCmdRegex.replace(text) { it.groupValues[2] }
+    }
+
+    // 3. LaTeX Kesirleri: \frac{a}{b} -> (a / b)
     val fracRegex = Regex("""\\frac\{([^}]+)\}\{([^}]+)\}""")
     text = fracRegex.replace(text) { match ->
         val num = match.groupValues[1]
@@ -415,91 +435,91 @@ fun formatMathSymbols(raw: String): String {
         "($num / $den)"
     }
 
-    // 3. LaTeX Kökleri: \sqrt{x} -> √(x), \sqrt[n]{x} -> ⁿ√(x)
+    // 4. LaTeX Kökleri: \sqrt{x} -> √(x), \sqrt[n]{x} -> ⁿ√(x)
     val sqrtRegex = Regex("""\\sqrt\{([^}]+)\}""")
     text = sqrtRegex.replace(text) { "√(${it.groupValues[1]})" }
     val nSqrtRegex = Regex("""\\sqrt\[([^\]]+)\]\{([^}]+)\}""")
     text = nSqrtRegex.replace(text) { "${toSuperscript(it.groupValues[1])}√(${it.groupValues[2]})" }
 
-    // 4. LaTeX Sembolleri ve Matematiksel Operatörler
-    val replacements = mapOf(
-        "\\int" to "∫",
-        "\\iint" to "∬",
-        "\\iiint" to "∭",
-        "\\oint" to "∮",
-        "\\sum" to "∑",
-        "\\prod" to "∏",
-        "\\lim" to "lim",
-        "\\infty" to "∞",
-        "\\pm" to "±",
-        "\\mp" to "∓",
-        "\\times" to "×",
-        "\\cdot" to "·",
-        "\\div" to "÷",
-        "\\leq" to "≤",
-        "\\le" to "≤",
-        "\\geq" to "≥",
-        "\\ge" to "≥",
-        "\\neq" to "≠",
-        "\\ne" to "≠",
-        "\\approx" to "≈",
-        "\\sim" to "∼",
-        "\\equiv" to "≡",
-        "\\alpha" to "α",
-        "\\beta" to "β",
-        "\\gamma" to "γ",
-        "\\Gamma" to "Γ",
-        "\\delta" to "δ",
-        "\\Delta" to "Δ",
-        "\\epsilon" to "ε",
-        "\\zeta" to "ζ",
-        "\\eta" to "η",
-        "\\theta" to "θ",
-        "\\Theta" to "Θ",
-        "\\lambda" to "λ",
-        "\\Lambda" to "Λ",
-        "\\mu" to "μ",
-        "\\nu" to "ν",
-        "\\xi" to "ξ",
-        "\\pi" to "π",
-        "\\Pi" to "Π",
-        "\\rho" to "ρ",
-        "\\sigma" to "σ",
-        "\\Sigma" to "Σ",
-        "\\tau" to "τ",
-        "\\phi" to "ϕ",
-        "\\Phi" to "Φ",
-        "\\chi" to "χ",
-        "\\psi" to "ψ",
-        "\\omega" to "ω",
-        "\\Omega" to "Ω",
-        "\\degree" to "°",
-        "\\circ" to "°",
-        "\\partial" to "∂",
-        "\\nabla" to "∇",
-        "\\in" to "∈",
-        "\\notin" to "∉",
-        "\\subset" to "⊂",
-        "\\subseteq" to "⊆",
-        "\\cup" to "∪",
-        "\\cap" to "∩",
-        "\\emptyset" to "∅",
-        "\\forall" to "∀",
-        "\\exists" to "∃",
-        "\\rightarrow" to "→",
-        "\\to" to "→",
-        "\\leftarrow" to "←",
-        "\\Rightarrow" to "⇒",
-        "\\Leftarrow" to "⇐",
-        "\\Leftrightarrow" to "⇔",
-        "\\leftrightarrow" to "↔"
+    // 5. Mantıksal ve Yön Okları: \implies, \iff, \to, \rightarrow, vb.
+    text = text.replace(Regex("""\\implies\b"""), " ⇒ ")
+    text = text.replace(Regex("""\\impliedby\b"""), " ⇐ ")
+    text = text.replace(Regex("""\\iff\b"""), " ⇔ ")
+    text = text.replace(Regex("""\\to\b|\\rightarrow\b"""), " → ")
+    text = text.replace(Regex("""\\leftarrow\b"""), " ← ")
+    text = text.replace(Regex("""\\Rightarrow\b"""), " ⇒ ")
+    text = text.replace(Regex("""\\Leftarrow\b"""), " ⇐ ")
+    text = text.replace(Regex("""\\Leftrightarrow\b"""), " ⇔ ")
+    text = text.replace(Regex("""\\leftrightarrow\b"""), " ↔ ")
+
+    // 6. Kelime Sınırı Güvenliğine Sahip LaTeX Sembolleri (Böylece \left bozulmaz)
+    val regexReplacements = mapOf(
+        Regex("""\\(leq|le)\b""") to "≤",
+        Regex("""\\(geq|ge)\b""") to "≥",
+        Regex("""\\(neq|ne)\b""") to "≠",
+        Regex("""\\(approx)\b""") to "≈",
+        Regex("""\\(sim)\b""") to "∼",
+        Regex("""\\(equiv)\b""") to "≡",
+        Regex("""\\(times)\b""") to "×",
+        Regex("""\\(cdot)\b""") to "·",
+        Regex("""\\(div)\b""") to "÷",
+        Regex("""\\(pm)\b""") to "±",
+        Regex("""\\(mp)\b""") to "∓",
+        Regex("""\\(infty)\b""") to "∞",
+        Regex("""\\(degree|circ)\b""") to "°",
+        Regex("""\\(int)\b""") to "∫",
+        Regex("""\\(iint)\b""") to "∬",
+        Regex("""\\(iiint)\b""") to "∭",
+        Regex("""\\(oint)\b""") to "∮",
+        Regex("""\\(sum)\b""") to "∑",
+        Regex("""\\(prod)\b""") to "∏",
+        Regex("""\\(lim)\b""") to "lim",
+        Regex("""\\(alpha)\b""") to "α",
+        Regex("""\\(beta)\b""") to "β",
+        Regex("""\\(gamma)\b""") to "γ",
+        Regex("""\\(Gamma)\b""") to "Γ",
+        Regex("""\\(delta)\b""") to "δ",
+        Regex("""\\(Delta)\b""") to "Δ",
+        Regex("""\\(epsilon)\b""") to "ε",
+        Regex("""\\(zeta)\b""") to "ζ",
+        Regex("""\\(eta)\b""") to "η",
+        Regex("""\\(theta)\b""") to "θ",
+        Regex("""\\(Theta)\b""") to "Θ",
+        Regex("""\\(lambda)\b""") to "λ",
+        Regex("""\\(Lambda)\b""") to "Λ",
+        Regex("""\\(mu)\b""") to "μ",
+        Regex("""\\(nu)\b""") to "ν",
+        Regex("""\\(xi)\b""") to "ξ",
+        Regex("""\\(pi)\b""") to "π",
+        Regex("""\\(Pi)\b""") to "Π",
+        Regex("""\\(rho)\b""") to "ρ",
+        Regex("""\\(sigma)\b""") to "σ",
+        Regex("""\\(Sigma)\b""") to "Σ",
+        Regex("""\\(tau)\b""") to "τ",
+        Regex("""\\(phi)\b""") to "ϕ",
+        Regex("""\\(Phi)\b""") to "Φ",
+        Regex("""\\(chi)\b""") to "χ",
+        Regex("""\\(psi)\b""") to "ψ",
+        Regex("""\\(omega)\b""") to "ω",
+        Regex("""\\(Omega)\b""") to "Ω",
+        Regex("""\\(partial)\b""") to "∂",
+        Regex("""\\(nabla)\b""") to "∇",
+        Regex("""\\(notin)\b""") to "∉",
+        Regex("""\\(in)\b""") to "∈",
+        Regex("""\\(subset)\b""") to "⊂",
+        Regex("""\\(subseteq)\b""") to "⊆",
+        Regex("""\\(cup)\b""") to "∪",
+        Regex("""\\(cap)\b""") to "∩",
+        Regex("""\\(emptyset)\b""") to "∅",
+        Regex("""\\(forall)\b""") to "∀",
+        Regex("""\\(exists)\b""") to "∃"
     )
 
-    for ((latex, unicode) in replacements) {
-        text = text.replace(latex, unicode)
+    for ((pattern, replacement) in regexReplacements) {
+        text = text.replace(pattern, replacement)
     }
 
-    // 5. Üslü İfadeler: x^{2} veya x^2 veya x^+ veya x^-
+    // 7. Üslü İfadeler: x^{2} veya x^2 veya x^+ veya x^-
     val exponentBraceRegex = Regex("""\^\{([^}]+)\}""")
     text = exponentBraceRegex.replace(text) { match ->
         toSuperscript(match.groupValues[1])
@@ -510,7 +530,7 @@ fun formatMathSymbols(raw: String): String {
         toSuperscript(match.groupValues[1])
     }
 
-    // 6. Alt İndisler: x_{1} veya x_1 veya x_n
+    // 8. Alt İndisler: x_{1} veya x_1 veya x_n
     val subscriptBraceRegex = Regex("""_\{([^}]+)\}""")
     text = subscriptBraceRegex.replace(text) { match ->
         toSubscript(match.groupValues[1])

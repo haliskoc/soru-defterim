@@ -9,6 +9,7 @@ import com.sorudefteri.data.ai.dto.GeminiPart
 import com.sorudefteri.data.ai.dto.GeminiRequest
 import com.sorudefteri.data.ai.dto.GeminiResponse
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -62,55 +63,50 @@ class GeminiProvider @Inject constructor(
 
             okHttpClient.newCall(httpRequest).execute().use { response ->
                 val responseBodyString = response.body?.string().orEmpty()
-
-                if (response.isSuccessful) {
-                    val listResponse = try {
-                        json.decodeFromString<GeminiModelListResponse>(responseBodyString)
-                    } catch (e: Exception) {
-                        return@withContext Result.failure(
-                            Exception("Model listesi çözümlenemedi: ${e.localizedMessage}", e)
-                        )
+                if (!response.isSuccessful) {
+                    val errorDetail = when (response.code) {
+                        401, 403 -> "Geçersiz veya yetkisiz API Anahtarı."
+                        429 -> "İstek sınırı aşıldı (Kota doldu)."
+                        else -> "HTTP ${response.code}"
                     }
+                    return@withContext Result.failure(
+                        Exception("Gemini modelleri çekilemedi ($errorDetail). Lütfen API anahtarınızı kontrol edin.")
+                    )
+                }
 
-                    val models = listResponse.models.orEmpty()
-                        .filter { it.supportedGenerationMethods.contains("generateContent") }
-                        .filter {
-                            val id = it.name.removePrefix("models/").lowercase()
-                            id.contains("gemini") && !id.contains("embedding") && !id.contains("aqa")
-                        }
-                        .sortedWith(
-                            compareByDescending<GeminiModelItem> { it.name.contains("2.5") }
-                                .thenByDescending { it.name.contains("2.0") }
-                                .thenByDescending { it.name.contains("flash") }
-                                .thenByDescending { it.name.contains("pro") }
-                        )
-                        .map { item ->
-                            val modelId = item.name.removePrefix("models/")
-                            val display = item.displayName?.takeIf { it.isNotBlank() } ?: modelId
-                            modelId to "$display ($modelId)"
-                        }
-
-                    if (models.isEmpty()) {
-                        Result.failure(Exception("Kullanılabilir Gemini modeli bulunamadı."))
-                    } else {
-                        Result.success(models)
+                val modelListResponse = json.decodeFromString<GeminiModelListResponse>(responseBodyString)
+                val supportedModels = modelListResponse.models
+                    .filter { item ->
+                        item.supportedGenerationMethods.contains("generateContent") &&
+                                !item.name.contains("embedding", ignoreCase = true) &&
+                                !item.name.contains("aqa", ignoreCase = true)
                     }
+                    .map { item ->
+                        val cleanId = item.name.removePrefix("models/")
+                        val displayName = item.displayName.ifBlank { cleanId }
+                        cleanId to "$displayName ($cleanId)"
+                    }
+                    .sortedByDescending { it.first }
+
+                if (supportedModels.isEmpty()) {
+                    Result.success(
+                        listOf(
+                            FALLBACK_MODEL to "Gemini 2.5 Flash ($FALLBACK_MODEL)",
+                            SECONDARY_FALLBACK_MODEL to "Gemini 2.0 Flash ($SECONDARY_FALLBACK_MODEL)"
+                        )
+                    )
                 } else {
-                    val parsedError = try {
-                        json.decodeFromString<GeminiResponse>(responseBodyString).error?.message
-                    } catch (_: Exception) {
-                        null
-                    }
-                    val errorDetail = parsedError ?: responseBodyString.take(200).ifBlank { "HTTP ${response.code}" }
-                    Result.failure(Exception("Model listesi alınamadı: $errorDetail"))
+                    Result.success(supportedModels)
                 }
             }
         } catch (e: Exception) {
-            Result.failure(e)
+            Result.failure(
+                Exception("Gemini modelleri alınamadı: ${e.localizedMessage ?: "Bağlantı hatası"}", e)
+            )
         }
     }
 
-    override suspend fun cozumIste(
+    override suspend fun solveQuestion(
         imageBytes: ByteArray,
         dersAdi: String,
         konu: String,
@@ -120,14 +116,14 @@ class GeminiProvider @Inject constructor(
     ): Result<String> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             return@withContext Result.failure(
-                IllegalArgumentException("Gemini API anahtarı boş olamaz. Lütfen Ayarlar sayfasından anahtarınızı girin.")
+                IllegalArgumentException("Google Gemini API Anahtarı bulunamadı. Lütfen Ayarlar sayfasından API anahtarınızı girin.")
             )
         }
 
         val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
 
-        // İlk deneme: Seçili model ile çağrı
-        val primaryResult = executeGenerateContent(imageBytes, dersAdi, konu, correctAnswer, effectiveModel, apiKey)
+        // İlk deneme: Seçili model ile retry ve exponential backoff destekli çağrı
+        val primaryResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, correctAnswer, effectiveModel, apiKey)
         if (primaryResult.isSuccess) {
             return@withContext primaryResult
         }
@@ -142,13 +138,13 @@ class GeminiProvider @Inject constructor(
                 errorMsg.contains("404")
 
         if (isModelNotFoundOrDeprecated && effectiveModel != FALLBACK_MODEL) {
-            val fallbackResult = executeGenerateContent(imageBytes, dersAdi, konu, correctAnswer, FALLBACK_MODEL, apiKey)
+            val fallbackResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, correctAnswer, FALLBACK_MODEL, apiKey)
             if (fallbackResult.isSuccess) {
                 return@withContext fallbackResult
             }
             // İkincil fallback dene (örn. 2.0-flash)
             if (FALLBACK_MODEL != SECONDARY_FALLBACK_MODEL) {
-                val secFallback = executeGenerateContent(imageBytes, dersAdi, konu, correctAnswer, SECONDARY_FALLBACK_MODEL, apiKey)
+                val secFallback = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, correctAnswer, SECONDARY_FALLBACK_MODEL, apiKey)
                 if (secFallback.isSuccess) {
                     return@withContext secFallback
                 }
@@ -156,6 +152,44 @@ class GeminiProvider @Inject constructor(
         }
 
         return@withContext primaryResult
+    }
+
+    private suspend fun executeGenerateContentWithRetry(
+        imageBytes: ByteArray,
+        dersAdi: String,
+        konu: String,
+        correctAnswer: String?,
+        modelName: String,
+        apiKey: String,
+        maxRetries: Int = 3
+    ): Result<String> {
+        var lastResult: Result<String> = Result.failure(Exception("Bilinmeyen hata"))
+        for (attempt in 0 until maxRetries) {
+            lastResult = executeGenerateContent(imageBytes, dersAdi, konu, correctAnswer, modelName, apiKey)
+            if (lastResult.isSuccess) {
+                return lastResult
+            }
+
+            val exception = lastResult.exceptionOrNull()
+            val msg = exception?.message.orEmpty().lowercase()
+            val isRetryable = msg.contains("429") ||
+                    msg.contains("rate limit") ||
+                    msg.contains("500") ||
+                    msg.contains("502") ||
+                    msg.contains("503") ||
+                    msg.contains("504") ||
+                    msg.contains("zaman aşımı") ||
+                    msg.contains("timeout") ||
+                    exception is SocketTimeoutException
+
+            if (isRetryable && attempt < maxRetries - 1) {
+                val backoffMs = 1000L * (1L shl attempt) // 1s, 2s, 4s
+                delay(backoffMs)
+            } else {
+                break
+            }
+        }
+        return lastResult
     }
 
     private fun executeGenerateContent(

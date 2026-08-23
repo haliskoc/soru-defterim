@@ -2,6 +2,8 @@ package com.sorudefteri.ui.test
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sorudefteri.data.local.dao.TestSonucDao
+import com.sorudefteri.data.local.entity.TestSonucEntity
 import com.sorudefteri.domain.model.TestQuestion
 import com.sorudefteri.domain.repository.TestSessionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -51,7 +53,8 @@ data class TestCozUiState(
 
 @HiltViewModel
 class TestCozViewModel @Inject constructor(
-    private val testSessionManager: TestSessionManager
+    private val testSessionManager: TestSessionManager,
+    private val testSonucDao: TestSonucDao
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TestCozUiState())
@@ -172,12 +175,33 @@ class TestCozViewModel @Inject constructor(
     fun finishTest(onFinished: () -> Unit) {
         timerJob?.cancel()
         val state = _uiState.value
-        testSessionManager.finishSession(
+        val result = testSessionManager.finishSession(
             totalTimeSeconds = state.elapsedSeconds,
             questionTimes = state.questionTimes
         )
-        _uiState.update { it.copy(isFinished = true, showFinishDialog = false) }
-        onFinished()
+        val filter = testSessionManager.currentFilter.value
+
+        viewModelScope.launch {
+            try {
+                testSonucDao.insertTestResult(
+                    TestSonucEntity(
+                        totalQuestions = result.totalQuestions,
+                        correctCount = result.correctCount,
+                        wrongCount = result.wrongCount,
+                        emptyCount = result.emptyCount,
+                        netCount = result.netCount,
+                        successRate = result.successRate,
+                        totalTimeSeconds = result.totalTimeSeconds,
+                        examType = filter.examType ?: "TÜMÜ",
+                        completedAt = result.completedAt
+                    )
+                )
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+            _uiState.update { it.copy(isFinished = true, showFinishDialog = false) }
+            onFinished()
+        }
     }
 
     override fun onCleared() {

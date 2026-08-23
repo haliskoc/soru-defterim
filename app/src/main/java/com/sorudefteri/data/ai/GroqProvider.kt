@@ -8,6 +8,7 @@ import com.sorudefteri.data.ai.dto.GroqImageUrl
 import com.sorudefteri.data.ai.dto.GroqMessage
 import com.sorudefteri.data.ai.dto.GroqModelListResponse
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -102,6 +103,46 @@ class GroqProvider @Inject constructor(
 
         val effectiveModel = modelName.ifBlank { "llama-3.2-11b-vision-preview" }
 
+        val maxRetries = 3
+        var lastResult: Result<String> = Result.failure(Exception("Bilinmeyen hata"))
+
+        for (attempt in 0 until maxRetries) {
+            lastResult = executeGroqSolve(imageBytes, dersAdi, konu, correctAnswer, effectiveModel, apiKey)
+            if (lastResult.isSuccess) {
+                return@withContext lastResult
+            }
+
+            val exception = lastResult.exceptionOrNull()
+            val msg = exception?.message.orEmpty().lowercase()
+            val isRetryable = msg.contains("429") ||
+                    msg.contains("rate limit") ||
+                    msg.contains("500") ||
+                    msg.contains("502") ||
+                    msg.contains("503") ||
+                    msg.contains("504") ||
+                    msg.contains("zaman aşımı") ||
+                    msg.contains("timeout") ||
+                    exception is SocketTimeoutException
+
+            if (isRetryable && attempt < maxRetries - 1) {
+                val backoffMs = 1000L * (1L shl attempt)
+                delay(backoffMs)
+            } else {
+                break
+            }
+        }
+
+        return@withContext lastResult
+    }
+
+    private fun executeGroqSolve(
+        imageBytes: ByteArray,
+        dersAdi: String,
+        konu: String,
+        correctAnswer: String?,
+        modelName: String,
+        apiKey: String
+    ): Result<String> {
         val answerInfo = if (!correctAnswer.isNullOrBlank()) {
             "Öğrencinin belirttiği / Sorunun doğru cevap şıkkı: $correctAnswer"
         } else {

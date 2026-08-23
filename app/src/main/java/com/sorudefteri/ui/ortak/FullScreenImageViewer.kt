@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -99,7 +100,8 @@ fun FullScreenImageViewer(
                 color = Color.White,
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 48.dp)
+                    .statusBarsPadding()
+                    .padding(top = 16.dp)
             )
 
             // Kapat butonu
@@ -107,7 +109,8 @@ fun FullScreenImageViewer(
                 onClick = onDismiss,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 40.dp, end = 16.dp)
+                    .statusBarsPadding()
+                    .padding(top = 8.dp, end = 16.dp)
                     .clip(CircleShape)
                     .background(Color.Black.copy(alpha = 0.6f))
                     .size(40.dp)
