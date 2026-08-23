@@ -4,10 +4,8 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.ai.AiRepository
-import com.sorudefteri.data.repository.SoruRepository
 import com.sorudefteri.domain.model.Soru
-import com.sorudefteri.domain.model.toDomain
-import com.sorudefteri.domain.model.toEntity
+import com.sorudefteri.domain.repository.SoruRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -64,10 +62,10 @@ class SoruDetayViewModel @Inject constructor(
                 .catch {
                     _uiState.update { state -> state.copy(isLoading = false) }
                 }
-                .collect { entity ->
+                .collect { soru ->
                     _uiState.update { state ->
                         state.copy(
-                            soru = entity?.toDomain(),
+                            soru = soru,
                             isLoading = false
                         )
                     }
@@ -89,7 +87,7 @@ class SoruDetayViewModel @Inject constructor(
                 solvedAt = solvedAt,
                 updatedAt = System.currentTimeMillis()
             )
-            soruRepository.updateSoru(updated.toEntity())
+            soruRepository.soruGuncelle(updated)
         }
     }
 
@@ -100,7 +98,7 @@ class SoruDetayViewModel @Inject constructor(
                 note = newNote.trim().ifEmpty { null },
                 updatedAt = System.currentTimeMillis()
             )
-            soruRepository.updateSoru(updated.toEntity())
+            soruRepository.soruGuncelle(updated)
             _uiState.update { it.copy(showEditNoteDialog = false) }
         }
     }
@@ -112,7 +110,7 @@ class SoruDetayViewModel @Inject constructor(
                 solutionImagePath = imagePath,
                 updatedAt = System.currentTimeMillis()
             )
-            soruRepository.updateSoru(updated.toEntity())
+            soruRepository.soruGuncelle(updated)
             if (imagePath != null) {
                 _uiState.update { it.copy(activeTab = DetayTab.COZUM) }
             }
@@ -122,7 +120,7 @@ class SoruDetayViewModel @Inject constructor(
     fun deleteSoru(onSuccess: () -> Unit) {
         val currentSoru = _uiState.value.soru ?: return
         viewModelScope.launch {
-            soruRepository.deleteSoru(currentSoru.toEntity())
+            soruRepository.soruSil(currentSoru)
             _uiState.update { it.copy(showDeleteDialog = false) }
             onSuccess()
         }
@@ -158,7 +156,7 @@ class SoruDetayViewModel @Inject constructor(
                     aiExplanation = explanation,
                     updatedAt = System.currentTimeMillis()
                 )
-                soruRepository.updateSoru(updated.toEntity())
+                soruRepository.soruGuncelle(updated)
                 _uiState.update {
                     it.copy(
                         isAiLoading = false,

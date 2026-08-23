@@ -172,9 +172,10 @@ class SoruRepositoryImpl @Inject constructor(
         soruDao.updateSoru(updated)
     }
 
-    override suspend fun tumVerileriTemizle() = withContext(Dispatchers.IO) {
+    override suspend fun tumVerileriTemizle(): Unit = withContext(Dispatchers.IO) {
         soruDao.clearAll()
         gorselDepo.tumGorselleriSil()
+        Unit
     }
 
     override fun getDistinctTopics(subjectId: String): Flow<List<String>> {
