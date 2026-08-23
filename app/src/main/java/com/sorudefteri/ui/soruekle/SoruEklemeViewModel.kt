@@ -5,13 +5,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.data.local.AyarlarDataStore
-import com.sorudefteri.data.local.entity.SoruEntity
 import com.sorudefteri.data.repository.SoruRepository
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.KonuKatalog
 import com.sorudefteri.domain.model.Alan
 import com.sorudefteri.domain.model.Ders
 import com.sorudefteri.domain.model.HataTipi
+import com.sorudefteri.domain.model.Soru
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -104,13 +104,17 @@ class SoruEklemeViewModel @Inject constructor(
 
     fun removeSoruImage() {
         val currentPath = _uiState.value.soruImagePath
-        currentPath?.let { gorselDepo.deleteImage(it) }
+        if (currentPath != null) {
+            viewModelScope.launch { gorselDepo.gorselSil(currentPath) }
+        }
         _uiState.update { it.copy(soruImagePath = null) }
     }
 
     fun removeSolutionImage() {
         val currentPath = _uiState.value.solutionImagePath
-        currentPath?.let { gorselDepo.deleteImage(it) }
+        if (currentPath != null) {
+            viewModelScope.launch { gorselDepo.gorselSil(currentPath) }
+        }
         _uiState.update { it.copy(solutionImagePath = null) }
     }
 
@@ -132,27 +136,25 @@ class SoruEklemeViewModel @Inject constructor(
         updateTopicSuggestions()
     }
 
-    fun setSubject(id: String) {
-        if (_uiState.value.subjectId == id) return
-
-        _uiState.update { it.copy(subjectId = id, topic = "") }
+    fun setSubject(subjectId: String) {
+        _uiState.update { it.copy(subjectId = subjectId, topic = "") }
         updateTopicSuggestions()
     }
 
-    fun setTopic(t: String) {
-        _uiState.update { it.copy(topic = t, errorMessage = null) }
+    fun setTopic(topic: String) {
+        _uiState.update { it.copy(topic = topic, errorMessage = null) }
     }
 
-    fun setMistakeType(type: HataTipi?) {
-        _uiState.update { it.copy(mistakeType = type) }
+    fun setMistakeType(mistakeType: HataTipi?) {
+        _uiState.update { it.copy(mistakeType = mistakeType) }
     }
 
-    fun setCorrectAnswer(ans: String?) {
-        _uiState.update { it.copy(correctAnswer = ans) }
+    fun setCorrectAnswer(answer: String?) {
+        _uiState.update { it.copy(correctAnswer = answer) }
     }
 
-    fun setNote(n: String) {
-        _uiState.update { it.copy(note = n) }
+    fun setNote(note: String) {
+        _uiState.update { it.copy(note = note) }
     }
 
     fun clearError() {
@@ -192,21 +194,21 @@ class SoruEklemeViewModel @Inject constructor(
         }
 
         if (state.topic.isBlank()) {
-            _uiState.update { it.copy(errorMessage = "Lütfen bir konu başlığı girin veya seçin.") }
+            _uiState.update { it.copy(errorMessage = "Lütfen bir konu başlığı girin.") }
             return
         }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, errorMessage = null) }
             try {
-                val entity = SoruEntity(
+                val soru = Soru(
                     imagePath = imagePath,
                     solutionImagePath = state.solutionImagePath,
                     correctAnswer = state.correctAnswer,
                     examType = state.examType,
                     subjectId = state.subjectId,
                     topic = state.topic.trim(),
-                    mistakeType = state.mistakeType?.name,
+                    mistakeType = state.mistakeType,
                     note = state.note.trim().ifBlank { null },
                     isSolved = false,
                     solvedAt = null,
@@ -215,7 +217,7 @@ class SoruEklemeViewModel @Inject constructor(
                     updatedAt = System.currentTimeMillis()
                 )
 
-                soruRepository.insertSoru(entity)
+                soruRepository.soruEkle(soru)
                 _uiState.update { it.copy(isSaving = false, isSaved = true) }
                 onSuccess()
             } catch (e: Exception) {

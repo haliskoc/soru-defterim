@@ -195,13 +195,13 @@ class KutuphaneViewModel @Inject constructor(
                 solvedAt = solvedAt,
                 updatedAt = System.currentTimeMillis()
             )
-            soruRepository.updateSoru(updatedSoru.toEntity())
+            soruRepository.soruGuncelle(updatedSoru)
         }
     }
 
     fun deleteSoru(soru: Soru) {
         viewModelScope.launch {
-            soruRepository.deleteSoru(soru.toEntity())
+            soruRepository.soruSil(soru)
         }
     }
 }

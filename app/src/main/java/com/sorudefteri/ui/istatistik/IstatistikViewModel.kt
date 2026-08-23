@@ -32,6 +32,7 @@ class IstatistikViewModel @Inject constructor(
     private val soruRepository: SoruRepository
 ) : ViewModel() {
 
+    @Suppress("UNCHECKED_CAST")
     val uiState: StateFlow<IstatistikUiState> = combine(
         soruRepository.totalCount,
         soruRepository.solvedCount,
@@ -39,7 +40,14 @@ class IstatistikViewModel @Inject constructor(
         soruRepository.getSubjectStats(),
         soruRepository.getMistakeStats(),
         soruRepository.getWeeklyActivity()
-    ) { total, solved, unsolved, subjects, mistakes, weekly ->
+    ) { args: Array<Any?> ->
+        val total = args[0] as? Int ?: 0
+        val solved = args[1] as? Int ?: 0
+        val unsolved = args[2] as? Int ?: 0
+        val subjects = args[3] as? List<DersSoruSayisi> ?: emptyList()
+        val mistakes = args[4] as? List<HataTipiDagilimi> ?: emptyList()
+        val weekly = args[5] as? List<GunlukAktivite> ?: emptyList()
+
         val rate = if (total > 0) (solved.toFloat() / total.toFloat()) * 100f else 0f
         IstatistikUiState(
             totalCount = total,

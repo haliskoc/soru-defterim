@@ -27,11 +27,19 @@ import androidx.compose.ui.unit.dp
 fun EmptyState(
     icon: ImageVector,
     title: String,
-    message: String,
+    message: String = "",
+    description: String = message,
     actionButtonText: String? = null,
+    buttonText: String? = actionButtonText,
+    buttonIcon: ImageVector? = null,
     onActionClick: (() -> Unit)? = null,
+    onButtonClick: (() -> Unit)? = onActionClick,
     modifier: Modifier = Modifier
 ) {
+    val displayMessage = description.ifEmpty { message }
+    val finalButtonText = buttonText ?: actionButtonText
+    val finalButtonClick = onButtonClick ?: onActionClick
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -56,26 +64,36 @@ fun EmptyState(
             textAlign = TextAlign.Center
         )
 
-        Spacer(modifier = Modifier.height(8.dp))
+        if (displayMessage.isNotBlank()) {
+            Spacer(modifier = Modifier.height(8.dp))
 
-        Text(
-            text = message,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(0.9f)
-        )
+            Text(
+                text = displayMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(0.9f)
+            )
+        }
 
-        if (actionButtonText != null && onActionClick != null) {
+        if (finalButtonText != null && finalButtonClick != null) {
             Spacer(modifier = Modifier.height(24.dp))
             Button(
-                onClick = onActionClick,
+                onClick = finalButtonClick,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
                 )
             ) {
+                if (buttonIcon != null) {
+                    Icon(
+                        imageVector = buttonIcon,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
                 Text(
-                    text = actionButtonText,
+                    text = finalButtonText,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -83,3 +101,4 @@ fun EmptyState(
         }
     }
 }
+
