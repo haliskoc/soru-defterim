@@ -442,77 +442,77 @@ fun formatMathSymbols(raw: String): String {
     text = nSqrtRegex.replace(text) { "${toSuperscript(it.groupValues[1])}√(${it.groupValues[2]})" }
 
     // 5. Mantıksal ve Yön Okları: \implies, \iff, \to, \rightarrow, vb.
-    text = text.replace(Regex("""\\implies\b"""), " ⇒ ")
-    text = text.replace(Regex("""\\impliedby\b"""), " ⇐ ")
-    text = text.replace(Regex("""\\iff\b"""), " ⇔ ")
-    text = text.replace(Regex("""\\to\b|\\rightarrow\b"""), " → ")
-    text = text.replace(Regex("""\\leftarrow\b"""), " ← ")
-    text = text.replace(Regex("""\\Rightarrow\b"""), " ⇒ ")
-    text = text.replace(Regex("""\\Leftarrow\b"""), " ⇐ ")
-    text = text.replace(Regex("""\\Leftrightarrow\b"""), " ⇔ ")
-    text = text.replace(Regex("""\\leftrightarrow\b"""), " ↔ ")
+    text = text.replace(Regex("""\\implies(?![a-zA-Z])"""), " ⇒ ")
+    text = text.replace(Regex("""\\impliedby(?![a-zA-Z])"""), " ⇐ ")
+    text = text.replace(Regex("""\\iff(?![a-zA-Z])"""), " ⇔ ")
+    text = text.replace(Regex("""\\(to|rightarrow)(?![a-zA-Z])"""), " → ")
+    text = text.replace(Regex("""\\leftarrow(?![a-zA-Z])"""), " ← ")
+    text = text.replace(Regex("""\\Rightarrow(?![a-zA-Z])"""), " ⇒ ")
+    text = text.replace(Regex("""\\Leftarrow(?![a-zA-Z])"""), " ⇐ ")
+    text = text.replace(Regex("""\\Leftrightarrow(?![a-zA-Z])"""), " ⇔ ")
+    text = text.replace(Regex("""\\leftrightarrow(?![a-zA-Z])"""), " ↔ ")
 
-    // 6. Kelime Sınırı Güvenliğine Sahip LaTeX Sembolleri (Böylece \left bozulmaz)
+    // 6. Kelime Sınırı Güvenliğine Sahip LaTeX Sembolleri (Böylece \left bozulmaz ve \int_0^1 çalışır)
     val regexReplacements = mapOf(
-        Regex("""\\(leq|le)\b""") to "≤",
-        Regex("""\\(geq|ge)\b""") to "≥",
-        Regex("""\\(neq|ne)\b""") to "≠",
-        Regex("""\\(approx)\b""") to "≈",
-        Regex("""\\(sim)\b""") to "∼",
-        Regex("""\\(equiv)\b""") to "≡",
-        Regex("""\\(times)\b""") to "×",
-        Regex("""\\(cdot)\b""") to "·",
-        Regex("""\\(div)\b""") to "÷",
-        Regex("""\\(pm)\b""") to "±",
-        Regex("""\\(mp)\b""") to "∓",
-        Regex("""\\(infty)\b""") to "∞",
-        Regex("""\\(degree|circ)\b""") to "°",
-        Regex("""\\(int)\b""") to "∫",
-        Regex("""\\(iint)\b""") to "∬",
-        Regex("""\\(iiint)\b""") to "∭",
-        Regex("""\\(oint)\b""") to "∮",
-        Regex("""\\(sum)\b""") to "∑",
-        Regex("""\\(prod)\b""") to "∏",
-        Regex("""\\(lim)\b""") to "lim",
-        Regex("""\\(alpha)\b""") to "α",
-        Regex("""\\(beta)\b""") to "β",
-        Regex("""\\(gamma)\b""") to "γ",
-        Regex("""\\(Gamma)\b""") to "Γ",
-        Regex("""\\(delta)\b""") to "δ",
-        Regex("""\\(Delta)\b""") to "Δ",
-        Regex("""\\(epsilon)\b""") to "ε",
-        Regex("""\\(zeta)\b""") to "ζ",
-        Regex("""\\(eta)\b""") to "η",
-        Regex("""\\(theta)\b""") to "θ",
-        Regex("""\\(Theta)\b""") to "Θ",
-        Regex("""\\(lambda)\b""") to "λ",
-        Regex("""\\(Lambda)\b""") to "Λ",
-        Regex("""\\(mu)\b""") to "μ",
-        Regex("""\\(nu)\b""") to "ν",
-        Regex("""\\(xi)\b""") to "ξ",
-        Regex("""\\(pi)\b""") to "π",
-        Regex("""\\(Pi)\b""") to "Π",
-        Regex("""\\(rho)\b""") to "ρ",
-        Regex("""\\(sigma)\b""") to "σ",
-        Regex("""\\(Sigma)\b""") to "Σ",
-        Regex("""\\(tau)\b""") to "τ",
-        Regex("""\\(phi)\b""") to "ϕ",
-        Regex("""\\(Phi)\b""") to "Φ",
-        Regex("""\\(chi)\b""") to "χ",
-        Regex("""\\(psi)\b""") to "ψ",
-        Regex("""\\(omega)\b""") to "ω",
-        Regex("""\\(Omega)\b""") to "Ω",
-        Regex("""\\(partial)\b""") to "∂",
-        Regex("""\\(nabla)\b""") to "∇",
-        Regex("""\\(notin)\b""") to "∉",
-        Regex("""\\(in)\b""") to "∈",
-        Regex("""\\(subset)\b""") to "⊂",
-        Regex("""\\(subseteq)\b""") to "⊆",
-        Regex("""\\(cup)\b""") to "∪",
-        Regex("""\\(cap)\b""") to "∩",
-        Regex("""\\(emptyset)\b""") to "∅",
-        Regex("""\\(forall)\b""") to "∀",
-        Regex("""\\(exists)\b""") to "∃"
+        Regex("""\\(leq|le)(?![a-zA-Z])""") to "≤",
+        Regex("""\\(geq|ge)(?![a-zA-Z])""") to "≥",
+        Regex("""\\(neq|ne)(?![a-zA-Z])""") to "≠",
+        Regex("""\\(approx)(?![a-zA-Z])""") to "≈",
+        Regex("""\\(sim)(?![a-zA-Z])""") to "∼",
+        Regex("""\\(equiv)(?![a-zA-Z])""") to "≡",
+        Regex("""\\(times)(?![a-zA-Z])""") to "×",
+        Regex("""\\(cdot)(?![a-zA-Z])""") to "·",
+        Regex("""\\(div)(?![a-zA-Z])""") to "÷",
+        Regex("""\\(pm)(?![a-zA-Z])""") to "±",
+        Regex("""\\(mp)(?![a-zA-Z])""") to "∓",
+        Regex("""\\(infty)(?![a-zA-Z])""") to "∞",
+        Regex("""\\(degree|circ)(?![a-zA-Z])""") to "°",
+        Regex("""\\(int)(?![a-zA-Z])""") to "∫",
+        Regex("""\\(iint)(?![a-zA-Z])""") to "∬",
+        Regex("""\\(iiint)(?![a-zA-Z])""") to "∭",
+        Regex("""\\(oint)(?![a-zA-Z])""") to "∮",
+        Regex("""\\(sum)(?![a-zA-Z])""") to "∑",
+        Regex("""\\(prod)(?![a-zA-Z])""") to "∏",
+        Regex("""\\(lim)(?![a-zA-Z])""") to "lim",
+        Regex("""\\(alpha)(?![a-zA-Z])""") to "α",
+        Regex("""\\(beta)(?![a-zA-Z])""") to "β",
+        Regex("""\\(gamma)(?![a-zA-Z])""") to "γ",
+        Regex("""\\(Gamma)(?![a-zA-Z])""") to "Γ",
+        Regex("""\\(delta)(?![a-zA-Z])""") to "δ",
+        Regex("""\\(Delta)(?![a-zA-Z])""") to "Δ",
+        Regex("""\\(epsilon)(?![a-zA-Z])""") to "ε",
+        Regex("""\\(zeta)(?![a-zA-Z])""") to "ζ",
+        Regex("""\\(eta)(?![a-zA-Z])""") to "η",
+        Regex("""\\(theta)(?![a-zA-Z])""") to "θ",
+        Regex("""\\(Theta)(?![a-zA-Z])""") to "Θ",
+        Regex("""\\(lambda)(?![a-zA-Z])""") to "λ",
+        Regex("""\\(Lambda)(?![a-zA-Z])""") to "Λ",
+        Regex("""\\(mu)(?![a-zA-Z])""") to "μ",
+        Regex("""\\(nu)(?![a-zA-Z])""") to "ν",
+        Regex("""\\(xi)(?![a-zA-Z])""") to "ξ",
+        Regex("""\\(pi)(?![a-zA-Z])""") to "π",
+        Regex("""\\(Pi)(?![a-zA-Z])""") to "Π",
+        Regex("""\\(rho)(?![a-zA-Z])""") to "ρ",
+        Regex("""\\(sigma)(?![a-zA-Z])""") to "σ",
+        Regex("""\\(Sigma)(?![a-zA-Z])""") to "Σ",
+        Regex("""\\(tau)(?![a-zA-Z])""") to "τ",
+        Regex("""\\(phi)(?![a-zA-Z])""") to "ϕ",
+        Regex("""\\(Phi)(?![a-zA-Z])""") to "Φ",
+        Regex("""\\(chi)(?![a-zA-Z])""") to "χ",
+        Regex("""\\(psi)(?![a-zA-Z])""") to "ψ",
+        Regex("""\\(omega)(?![a-zA-Z])""") to "ω",
+        Regex("""\\(Omega)(?![a-zA-Z])""") to "Ω",
+        Regex("""\\(partial)(?![a-zA-Z])""") to "∂",
+        Regex("""\\(nabla)(?![a-zA-Z])""") to "∇",
+        Regex("""\\(notin)(?![a-zA-Z])""") to "∉",
+        Regex("""\\(in)(?![a-zA-Z])""") to "∈",
+        Regex("""\\(subset)(?![a-zA-Z])""") to "⊂",
+        Regex("""\\(subseteq)(?![a-zA-Z])""") to "⊆",
+        Regex("""\\(cup)(?![a-zA-Z])""") to "∪",
+        Regex("""\\(cap)(?![a-zA-Z])""") to "∩",
+        Regex("""\\(emptyset)(?![a-zA-Z])""") to "∅",
+        Regex("""\\(forall)(?![a-zA-Z])""") to "∀",
+        Regex("""\\(exists)(?![a-zA-Z])""") to "∃"
     )
 
     for ((pattern, replacement) in regexReplacements) {
