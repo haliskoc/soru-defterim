@@ -1,7 +1,6 @@
 package com.sorudefteri.data
 
 import com.sorudefteri.data.local.entity.SoruEntity
-import com.sorudefteri.data.local.entity.toDomain
 import com.sorudefteri.data.local.entity.toEntity
 import com.sorudefteri.domain.model.HataTipi
 import com.sorudefteri.domain.model.Soru

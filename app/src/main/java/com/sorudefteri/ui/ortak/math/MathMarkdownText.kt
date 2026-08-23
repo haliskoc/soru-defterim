@@ -396,10 +396,10 @@ private fun RenderFormattedLines(content: String) {
 }
 
 /**
- * LaTeX sembollerini, üslü sayıları, alt indisleri, integralleri,
- * toplam sembollerini ve Markdown kalın/italik yapılarını temiz Unicode Matematik formatına dönüştürür.
+ * LaTeX sembollerini, üslü sayıları, alt indisleri, integralleri, kesirleri
+ * ve toplam sembollerini temiz Unicode Matematik formatına dönüştürür.
  */
-fun formatMathText(raw: String): AnnotatedString {
+fun formatMathSymbols(raw: String): String {
     var text = raw
 
     // 1. LaTeX bloklarını ve inline sembolleri temizle/dönüştür
@@ -521,8 +521,15 @@ fun formatMathText(raw: String): AnnotatedString {
         toSubscript(match.groupValues[1])
     }
 
-    // 7. Markdown Kalın (**text**) ve İtalik (*text*) çözümleme
-    return parseMarkdownToAnnotatedString(text)
+    return text
+}
+
+/**
+ * LaTeX sembollerini ve Markdown kalın/italik yapılarını temiz AnnotatedString formatına dönüştürür.
+ */
+fun formatMathText(raw: String): AnnotatedString {
+    val mathFormatted = formatMathSymbols(raw)
+    return parseMarkdownToAnnotatedString(mathFormatted)
 }
 
 /**
