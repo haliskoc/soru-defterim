@@ -200,6 +200,27 @@ class AyarlarViewModel @Inject constructor(
         }
     }
 
+    fun shareBackupToDriveOrCloud(context: android.content.Context) {
+        viewModelScope.launch {
+            _backupState.value = BackupState(isLoading = true, message = "Google Drive / Bulut yedek paketi hazırlanıyor...")
+            val result = backupManager.exportBackupToTempFile()
+            result.onSuccess { (file, count) ->
+                _backupState.value = BackupState(
+                    isLoading = false,
+                    message = "$count soru hazırlandı. Bulut / Drive paylaşım menüsü açılıyor...",
+                    isError = false
+                )
+                com.sorudefteri.ui.ortak.ShareHelper.shareBackupFile(context, file)
+            }.onFailure { e ->
+                _backupState.value = BackupState(
+                    isLoading = false,
+                    message = "Bulut yedekleme hatası: ${e.localizedMessage}",
+                    isError = true
+                )
+            }
+        }
+    }
+
     fun importBackup(sourceUri: Uri) {
         viewModelScope.launch {
             _backupState.value = BackupState(isLoading = true, message = "Yedek paketi açılıyor ve görseller aktarılıyor...")

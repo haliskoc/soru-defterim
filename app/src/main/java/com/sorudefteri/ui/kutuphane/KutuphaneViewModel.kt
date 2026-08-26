@@ -121,6 +121,10 @@ class KutuphaneViewModel @Inject constructor(
             DersTaksonomisi.getDersler(filters.examType, Alan.SAYISAL)
         }
 
+        val trLocale = Locale("tr", "TR")
+        val cleanQuery = filters.query.lowercase(trLocale).trim()
+        val hasQuery = cleanQuery.isNotBlank()
+
         val filtered = sorular.filter { soru ->
             val matchesExamType = filters.examType == null || soru.examType.equals(filters.examType, ignoreCase = true)
             val matchesSubject = filters.subjectId == null || soru.subjectId.equals(filters.subjectId, ignoreCase = true)
@@ -129,11 +133,9 @@ class KutuphaneViewModel @Inject constructor(
             val matchesFavorites = !filters.onlyFavorites || soru.isFavorite
             val matchesDueReview = !filters.onlyDueReview || soru.isDueForReview
 
-            val matchesQuery = if (filters.query.isBlank()) {
+            val matchesQuery = if (!hasQuery) {
                 true
             } else {
-                val trLocale = Locale("tr", "TR")
-                val cleanQuery = filters.query.lowercase(trLocale).trim()
                 val dersName = DersTaksonomisi.getDersAdi(soru.subjectId).lowercase(trLocale)
                 val topic = soru.topic.lowercase(trLocale)
                 val note = soru.note?.lowercase(trLocale) ?: ""

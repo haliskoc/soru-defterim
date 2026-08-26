@@ -28,6 +28,7 @@ object DatabaseModule {
                 SoruDatabase.MIGRATION_1_2,
                 SoruDatabase.MIGRATION_2_3
             )
+            .fallbackToDestructiveMigrationOnDowngrade()
             .build()
     }
 

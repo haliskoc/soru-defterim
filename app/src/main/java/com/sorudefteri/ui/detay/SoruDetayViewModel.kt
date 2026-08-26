@@ -24,6 +24,8 @@ enum class DetayTab {
     COZUM
 }
 
+import com.sorudefteri.domain.model.SimilarQuestionResult
+
 data class SoruDetayUiState(
     val soru: Soru? = null,
     val isLoading: Boolean = true,
@@ -34,7 +36,14 @@ data class SoruDetayUiState(
     val showDeleteDialog: Boolean = false,
     val showEditNoteDialog: Boolean = false,
     val zoomImagePath: String? = null,
-    val zoomImageTitle: String? = null
+    val zoomImageTitle: String? = null,
+    val showDrawingDialog: Boolean = false,
+    val isGeneratingSimilar: Boolean = false,
+    val similarQuestion: SimilarQuestionResult? = null,
+    val similarQuestionError: String? = null,
+    val showSimilarQuestionDialog: Boolean = false,
+    val userSelectedSimilarOption: String? = null,
+    val isSimilarAnswerRevealed: Boolean = false
 )
 
 @HiltViewModel
@@ -275,6 +284,10 @@ class SoruDetayViewModel @Inject constructor(
         _uiState.update { it.copy(showEditNoteDialog = show) }
     }
 
+    fun setShowDrawingDialog(show: Boolean) {
+        _uiState.update { it.copy(showDrawingDialog = show) }
+    }
+
     fun openZoomImage(imagePath: String?, title: String?) {
         _uiState.update {
             it.copy(
@@ -289,6 +302,86 @@ class SoruDetayViewModel @Inject constructor(
             it.copy(
                 zoomImagePath = null,
                 zoomImageTitle = null
+            )
+        }
+    }
+
+    /**
+     * Bu soruyla birebir aynı kazanımı ölçen benzer bir soru ve çözümü üretir (Question Cloner).
+     */
+    fun generateSimilarQuestion() {
+        val currentSoru = _uiState.value.soru ?: return
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isGeneratingSimilar = true,
+                    similarQuestionError = null,
+                    showSimilarQuestionDialog = true,
+                    userSelectedSimilarOption = null,
+                    isSimilarAnswerRevealed = false
+                )
+            }
+
+            val hasKey = aiRepository.hasApiKey()
+            if (!hasKey) {
+                _uiState.update {
+                    it.copy(
+                        isGeneratingSimilar = false,
+                        similarQuestionError = "Benzer soru üretmek için lütfen Ayarlar sayfasından API anahtarınızı girin."
+                    )
+                }
+                return@launch
+            }
+
+            val bytes = gorselDepo.getGorselBytes(currentSoru.imagePath)
+            if (bytes == null || bytes.isEmpty()) {
+                _uiState.update {
+                    it.copy(
+                        isGeneratingSimilar = false,
+                        similarQuestionError = "Soru görseli okunamadı."
+                    )
+                }
+                return@launch
+            }
+
+            val dersAdi = com.sorudefteri.domain.DersTaksonomisi.getDersAdi(currentSoru.examType, currentSoru.subjectId)
+            val result = aiRepository.generateSimilarQuestion(bytes, dersAdi, currentSoru.topic)
+            result.onSuccess { similar ->
+                _uiState.update {
+                    it.copy(
+                        isGeneratingSimilar = false,
+                        similarQuestion = similar,
+                        similarQuestionError = null
+                    )
+                }
+            }.onFailure { throwable ->
+                _uiState.update {
+                    it.copy(
+                        isGeneratingSimilar = false,
+                        similarQuestionError = "Benzer soru üretilemedi: ${throwable.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun selectSimilarOption(option: String) {
+        _uiState.update { it.copy(userSelectedSimilarOption = option) }
+    }
+
+    fun revealSimilarAnswer() {
+        _uiState.update { it.copy(isSimilarAnswerRevealed = true) }
+    }
+
+    fun closeSimilarQuestionDialog() {
+        _uiState.update {
+            it.copy(
+                showSimilarQuestionDialog = false,
+                similarQuestion = null,
+                similarQuestionError = null,
+                userSelectedSimilarOption = null,
+                isSimilarAnswerRevealed = false
             )
         }
     }

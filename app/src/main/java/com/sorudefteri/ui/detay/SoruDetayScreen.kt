@@ -38,6 +38,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -56,9 +57,12 @@ import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.ZoomIn
+import com.sorudefteri.ui.ortak.DrawingCanvasDialog
+import com.sorudefteri.ui.ortak.ShareHelper
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -192,6 +196,36 @@ fun SoruDetayScreen(
                 },
                 actions = {
                     if (soru != null) {
+                        // Çizim / Karalama Butonu
+                        IconButton(onClick = { viewModel.setShowDrawingDialog(true) }) {
+                            Icon(
+                                imageVector = Icons.Default.Brush,
+                                contentDescription = "Soru Üzerine Çizim Yap",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        // Paylaş Butonu
+                        IconButton(
+                            onClick = {
+                                ShareHelper.shareQuestion(
+                                    context = context,
+                                    imagePath = soru.imagePath,
+                                    dersAdi = DersTaksonomisi.getDersAdi(soru.examType, soru.subjectId),
+                                    topic = soru.topic,
+                                    correctAnswer = soru.correctAnswer,
+                                    note = soru.note,
+                                    aiSolution = soru.aiExplanation
+                                )
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Share,
+                                contentDescription = "Soruyu Paylaş",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+
                         // Favori Butonu
                         IconButton(onClick = { viewModel.toggleFavorite() }) {
                             Icon(
@@ -205,8 +239,7 @@ fun SoruDetayScreen(
                         IconButton(onClick = { viewModel.toggleCozumDurumu() }) {
                             Icon(
                                 imageVector = if (soru.isSolved) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                contentDescription = if (soru.isSolved) "Çözüldü" else "Çözülmedi",
-                                tint = if (soru.isSolved) SolvedGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                                contentDescription = if (soru.isSolved) SolvedGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
@@ -369,7 +402,7 @@ fun SoruDetayScreen(
                             File(activePath)
                         }
 
-                        SubcomposeAsyncImage(
+                        AsyncImage(
                             model = ImageRequest.Builder(context)
                                 .data(imageModel)
                                 .crossfade(true)
@@ -383,21 +416,7 @@ fun SoruDetayScreen(
                                         imagePath = activePath,
                                         title = if (uiState.activeTab == DetayTab.SORU) "Soru Görseli" else "Çözüm Görseli"
                                     )
-                                },
-                            loading = {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    CircularProgressIndicator()
                                 }
-                            },
-                            error = {
-                                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = Icons.Default.ImageNotSupported,
-                                        contentDescription = "Görsel yüklenemedi",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
                         )
 
                         // Büyütme İpucu Rozeti
@@ -986,6 +1005,31 @@ fun SoruDetayScreen(
                                 )
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Benzer Soru Üretme Butonu
+                        Button(
+                            onClick = { viewModel.generateSimilarQuestion() },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "✨ Bu Soruya Benzer Yeni Soru Üret (Pekiştir)",
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 }
 
@@ -1068,10 +1112,37 @@ fun SoruDetayScreen(
                 onDismissRequest = { viewModel.closeZoomImage() }
             )
         }
+
+        // Çizim & Karalama Dialogu
+        if (uiState.showDrawingDialog && soru != null) {
+            val activeDrawPath = if (uiState.activeTab == DetayTab.SORU) soru.imagePath else (soru.solutionImagePath ?: soru.imagePath)
+            DrawingCanvasDialog(
+                imagePath = activeDrawPath,
+                title = if (uiState.activeTab == DetayTab.SORU) "Soru Üzerine Çizim & Karalama" else "Çözüm Üzerine Çizim",
+                onDismiss = { viewModel.setShowDrawingDialog(false) }
+            )
+        }
+
+        // Benzer Soru Dialogu
+        if (uiState.showSimilarQuestionDialog) {
+            SimilarQuestionDialog(
+                isLoading = uiState.isGeneratingSimilar,
+                errorMessage = uiState.similarQuestionError,
+                similarQuestion = uiState.similarQuestion,
+                selectedOption = uiState.userSelectedSimilarOption,
+                isAnswerRevealed = uiState.isSimilarAnswerRevealed,
+                onOptionSelected = { viewModel.selectSimilarOption(it) },
+                onRevealAnswer = { viewModel.revealSimilarAnswer() },
+                onRegenerate = { viewModel.generateSimilarQuestion() },
+                onDismiss = { viewModel.closeSimilarQuestionDialog() }
+            )
+        }
     }
 }
 
+private val detailDateFormatter = SimpleDateFormat("dd MMMM yyyy, HH:mm", Locale("tr", "TR"))
 private fun formatTimestampDetailed(timestamp: Long): String {
-    val sdf = SimpleDateFormat("dd MMMM yyyy, HH:mm", Locale("tr", "TR"))
-    return sdf.format(Date(timestamp))
+    return synchronized(detailDateFormatter) {
+        detailDateFormatter.format(Date(timestamp))
+    }
 }

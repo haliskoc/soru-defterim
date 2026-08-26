@@ -92,13 +92,15 @@ class GorselDepo @Inject constructor(
         val targetFile = File(imagesDir, fileName)
 
         val scaledBitmap = scaleBitmapIfNeeded(bitmap, MAX_DIMENSION)
-        FileOutputStream(targetFile).use { out ->
-            scaledBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-            out.flush()
-        }
-
-        if (scaledBitmap != bitmap) {
-            scaledBitmap.recycle()
+        try {
+            FileOutputStream(targetFile).use { out ->
+                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                out.flush()
+            }
+        } finally {
+            if (scaledBitmap != bitmap && !scaledBitmap.isRecycled) {
+                scaledBitmap.recycle()
+            }
         }
 
         targetFile.absolutePath
@@ -191,43 +193,46 @@ class GorselDepo @Inject constructor(
         val originalBitmap = decodeSampledBitmapFromUri(sourceUri)
             ?: throw IllegalArgumentException("Görsel yüklenemedi: $sourceUri")
 
-        // 3. EXIF rotasyonunu uygula
-        val rotatedBitmap = if (rotationDegrees != 0) {
-            val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
-            val transformed = Bitmap.createBitmap(
-                originalBitmap,
-                0,
-                0,
-                originalBitmap.width,
-                originalBitmap.height,
-                matrix,
-                true
-            )
-            if (transformed != originalBitmap) {
+        var rotatedBitmap: Bitmap = originalBitmap
+        var finalBitmap: Bitmap = originalBitmap
+
+        try {
+            // 3. EXIF rotasyonunu uygula
+            if (rotationDegrees != 0) {
+                val matrix = Matrix().apply { postRotate(rotationDegrees.toFloat()) }
+                rotatedBitmap = Bitmap.createBitmap(
+                    originalBitmap,
+                    0,
+                    0,
+                    originalBitmap.width,
+                    originalBitmap.height,
+                    matrix,
+                    true
+                )
+            }
+
+            // 4. Max boyuta ölçekle
+            finalBitmap = scaleBitmapIfNeeded(rotatedBitmap, MAX_DIMENSION)
+
+            // 5. JPEG olarak kaydet
+            FileOutputStream(targetFile).use { out ->
+                finalBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                out.flush()
+            }
+
+            return targetFile.absolutePath
+        } finally {
+            // Bellek Temizliği: Tüm bitmap referanslarını güvenli şekilde recycle et
+            if (finalBitmap != rotatedBitmap && !finalBitmap.isRecycled) {
+                finalBitmap.recycle()
+            }
+            if (rotatedBitmap != originalBitmap && !rotatedBitmap.isRecycled) {
+                rotatedBitmap.recycle()
+            }
+            if (!originalBitmap.isRecycled) {
                 originalBitmap.recycle()
             }
-            transformed
-        } else {
-            originalBitmap
         }
-
-        // 4. Max boyuta ölçekle
-        val finalBitmap = scaleBitmapIfNeeded(rotatedBitmap, MAX_DIMENSION)
-
-        // 5. JPEG olarak kaydet
-        FileOutputStream(targetFile).use { out ->
-            finalBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
-            out.flush()
-        }
-
-        if (finalBitmap != rotatedBitmap) {
-            finalBitmap.recycle()
-        }
-        if (rotatedBitmap != originalBitmap) {
-            rotatedBitmap.recycle()
-        }
-
-        return targetFile.absolutePath
     }
 
     private fun getRotationDegrees(uri: Uri): Int {
@@ -263,10 +268,10 @@ class GorselDepo @Inject constructor(
         val originalHeight = options.outHeight
         if (originalWidth <= 0 || originalHeight <= 0) return null
 
-        // inSampleSize hesapla
+        // inSampleSize hesapla - MAX_DIMENSION sınırına göre doğru ölçekleme
         var inSampleSize = 1
         val maxDim = max(originalWidth, originalHeight)
-        while ((maxDim / inSampleSize) > MAX_DIMENSION * 2) {
+        while ((maxDim / (inSampleSize * 2)) >= MAX_DIMENSION) {
             inSampleSize *= 2
         }
 

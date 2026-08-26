@@ -87,6 +87,22 @@ class BackupManager @Inject constructor(
         }
     }
 
+    /**
+     * Bulut / Google Drive paylaşımı için yedek paketini geçici dosyaya yazar.
+     */
+    suspend fun exportBackupToTempFile(): Result<Pair<File, Int>> = withContext(Dispatchers.IO) {
+        try {
+            val fileName = "soru_defterim_yedek_${System.currentTimeMillis()}.sdefteri"
+            val tempFile = File(context.cacheDir, fileName)
+            val result = FileOutputStream(tempFile).use { out ->
+                exportBackupToStream(out)
+            }
+            result.map { count -> tempFile to count }
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     private suspend fun exportBackupToStream(outputStream: OutputStream): Result<Int> = withContext(Dispatchers.IO) {
         try {
             val sorular = soruRepository.getAllSorular().first()

@@ -123,56 +123,22 @@ fun SoruKarti(
                     .aspectRatio(16f / 10f)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                val imageModel = if (soru.imagePath.startsWith("http") || soru.imagePath.startsWith("content://")) {
-                    soru.imagePath
-                } else {
-                    File(soru.imagePath)
+                val imageModel = remember(soru.imagePath) {
+                    if (soru.imagePath.startsWith("http") || soru.imagePath.startsWith("content://")) {
+                        soru.imagePath
+                    } else {
+                        File(soru.imagePath)
+                    }
                 }
 
-                SubcomposeAsyncImage(
+                AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(imageModel)
                         .crossfade(true)
                         .build(),
                     contentDescription = "Soru Görseli",
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    loading = {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                    },
-                    error = {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.ImageNotSupported,
-                                    contentDescription = "Görsel yüklenemedi",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                    modifier = Modifier.size(32.dp)
-                                )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                Text(
-                                    text = "Görsel Yok",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
-                                )
-                            }
-                        }
-                    }
+                    modifier = Modifier.fillMaxSize()
                 )
 
                 // Görsel Üzerindeki Rozetler (Top-Start: Seçim veya TYT/AYT, Top-End: Favori & AI)
@@ -432,7 +398,9 @@ fun SoruKarti(
     }
 }
 
+private val cardDateFormatter = SimpleDateFormat("dd MMM yyyy", Locale("tr", "TR"))
 private fun formatTimestamp(timestamp: Long): String {
-    val sdf = SimpleDateFormat("dd MMM yyyy", Locale("tr", "TR"))
-    return sdf.format(Date(timestamp))
+    return synchronized(cardDateFormatter) {
+        cardDateFormatter.format(Date(timestamp))
+    }
 }

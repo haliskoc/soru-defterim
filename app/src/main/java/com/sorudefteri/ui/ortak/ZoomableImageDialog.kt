@@ -117,7 +117,7 @@ fun ZoomableImageDialog(
                     File(imagePath)
                 }
 
-                SubcomposeAsyncImage(
+                AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(imageModel)
                         .crossfade(true)
@@ -131,31 +131,7 @@ fun ZoomableImageDialog(
                             scaleY = scale,
                             translationX = offset.x,
                             translationY = offset.y
-                        ),
-                    loading = {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(
-                                color = Color.White,
-                                modifier = Modifier.size(48.dp)
-                            )
-                        }
-                    },
-                    error = {
-                        Box(
-                            modifier = Modifier.fillMaxSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ImageNotSupported,
-                                contentDescription = "Görsel yüklenemedi",
-                                tint = Color.White.copy(alpha = 0.6f),
-                                modifier = Modifier.size(64.dp)
-                            )
-                        }
-                    }
+                        )
                 )
             }
 

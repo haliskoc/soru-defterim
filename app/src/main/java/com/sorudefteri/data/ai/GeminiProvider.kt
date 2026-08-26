@@ -353,4 +353,75 @@ class GeminiProvider @Inject constructor(
             )
         }
     }
+
+    suspend fun detectMetadata(
+        imageBytes: ByteArray,
+        modelName: String,
+        apiKey: String
+    ): Result<com.sorudefteri.domain.model.QuestionMetadata> = withContext(Dispatchers.IO) {
+        val prompt = """
+            Görseldeki YKS (TYT veya AYT) sorusunu incele ve JSON formatında şu bilgileri çıkar:
+            1. examType: "TYT" veya "AYT"
+            2. subjectId: ["turkce", "matematik", "fizik", "kimya", "biyoloji", "tarih", "cografya", "felsefe", "din_kulturu", "ayt_matematik", "ayt_fizik", "ayt_kimya", "ayt_biyoloji", "ayt_edebiyat", "ayt_tarih1", "ayt_cografya1", "ydt_ingilizce"] değerlerinden en uygun olanı.
+            3. topic: Sorunun ait olduğu net YKS konu başlığı (Örn: "Türev", "Paragrafta Anlam", "Kalıtım", "Optik", "Trigonometri", "Polinomlar").
+            4. correctAnswer: Görsel üzerinde işaretlenmiş doğru cevap şıkkı veya bariz doğru cevap varsa "A", "B", "C", "D", "E" veya null.
+
+            SADECE geçerli bir JSON objesi döndür, markdown code block veya başka metin ekleme:
+            {"examType": "TYT", "subjectId": "matematik", "topic": "Fonksiyonlar", "correctAnswer": "C"}
+        """.trimIndent()
+
+        val rawResult = executeGenerateContentWithRetry(imageBytes, "", "", null, modelName, apiKey)
+        rawResult.mapCatching { rawText ->
+            val jsonStart = rawText.indexOf('{')
+            val jsonEnd = rawText.lastIndexOf('}')
+            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+                val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
+                json.decodeFromString<com.sorudefteri.domain.model.QuestionMetadata>(cleanJson)
+            } else {
+                com.sorudefteri.domain.model.QuestionMetadata()
+            }
+        }
+    }
+
+    suspend fun generateSimilarQuestion(
+        imageBytes: ByteArray,
+        dersAdi: String,
+        konu: String,
+        modelName: String,
+        apiKey: String
+    ): Result<com.sorudefteri.domain.model.SimilarQuestionResult> = withContext(Dispatchers.IO) {
+        val prompt = """
+            Sen uzman bir YKS (TYT / AYT) soru yazarısın.
+            Görseldeki soruyu analiz et. Bu soruyla TAM OLARAK AYNI KAZANIMI ve zorluk seviyesini ölçen, fakat sayıları/metni/değişkenleri FARKLI yepyeni ve özgün bir soru üret.
+            Ders: $dersAdi, Konu: $konu
+            Matematiksel formülleri standart LaTeX formatında ($...$) yaz.
+            A, B, C, D, E olmak üzere 5 şık ver.
+
+            SADECE geçerli bir JSON objesi döndür, format:
+            {
+              "questionText": "Soru metni ve öncüller...",
+              "options": {
+                "A": "Şık A",
+                "B": "Şık B",
+                "C": "Şık C",
+                "D": "Şık D",
+                "E": "Şık E"
+              },
+              "correctAnswer": "A",
+              "solution": "Adım adım ayrıntılı çözüm..."
+            }
+        """.trimIndent()
+
+        val rawResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, null, modelName, apiKey)
+        rawResult.mapCatching { rawText ->
+            val jsonStart = rawText.indexOf('{')
+            val jsonEnd = rawText.lastIndexOf('}')
+            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+                val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
+                json.decodeFromString<com.sorudefteri.domain.model.SimilarQuestionResult>(cleanJson)
+            } else {
+                throw Exception("Benzer soru formatı çözümlenemedi.")
+            }
+        }
+    }
 }

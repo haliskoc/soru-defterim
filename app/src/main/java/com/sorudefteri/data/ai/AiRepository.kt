@@ -39,6 +39,52 @@ class AiRepository @Inject constructor(
     }
 
     /**
+     * Aktif AI sağlayıcısı üzerinden görselden sınav türü, ders, konu ve cevap şıkkı tespiti yapar (Auto-Tagging).
+     */
+    override suspend fun detectQuestionMetadata(imageBytes: ByteArray): Result<com.sorudefteri.domain.model.QuestionMetadata> {
+        val providerType = ayarlarDataStore.getAiProvider()
+        return when (providerType) {
+            AiProviderType.GEMINI -> {
+                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(IllegalStateException("Gemini API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
+                geminiProvider.detectMetadata(imageBytes, model, apiKey)
+            }
+            AiProviderType.GROQ -> {
+                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(IllegalStateException("Groq API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
+                groqProvider.detectMetadata(imageBytes, model, apiKey)
+            }
+        }
+    }
+
+    /**
+     * Mevcut soru görselinden ve kazanımlarından yola çıkarak birebir benzer yeni bir soru türetir (Question Cloner).
+     */
+    override suspend fun generateSimilarQuestion(
+        imageBytes: ByteArray,
+        dersAdi: String,
+        konu: String
+    ): Result<com.sorudefteri.domain.model.SimilarQuestionResult> {
+        val providerType = ayarlarDataStore.getAiProvider()
+        return when (providerType) {
+            AiProviderType.GEMINI -> {
+                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(IllegalStateException("Gemini API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
+                geminiProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, model, apiKey)
+            }
+            AiProviderType.GROQ -> {
+                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(IllegalStateException("Groq API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
+                groqProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, model, apiKey)
+            }
+        }
+    }
+
+    /**
      * Aktif AI sağlayıcısı için API anahtarı girilip girilmediğini kontrol eder.
      */
     override suspend fun hasApiKey(): Boolean {

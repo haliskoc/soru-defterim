@@ -13,6 +13,7 @@ import com.sorudefteri.domain.model.Alan
 import com.sorudefteri.domain.model.Ders
 import com.sorudefteri.domain.model.HataTipi
 import com.sorudefteri.domain.model.Soru
+import com.sorudefteri.domain.repository.AiRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +45,8 @@ data class SoruEklemeUiState(
     val selectedCatalogUnit: String? = null,
     val isSaving: Boolean = false,
     val isSaved: Boolean = false,
+    val isAutoTagging: Boolean = false,
+    val autoTagSuccessMessage: String? = null,
     val errorMessage: String? = null
 ) {
     val canSave: Boolean
@@ -61,7 +64,8 @@ class SoruEklemeViewModel @Inject constructor(
     private val soruRepository: SoruRepository,
     private val gorselDepo: GorselDepo,
     private val konuKatalog: KonuKatalog,
-    private val ayarlarDataStore: AyarlarDataStore
+    private val ayarlarDataStore: AyarlarDataStore,
+    private val aiRepository: AiRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SoruEklemeUiState())
@@ -269,6 +273,66 @@ class SoruEklemeViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(errorMessage = null) }
+    }
+
+    fun clearAutoTagStatus() {
+        _uiState.update { it.copy(autoTagSuccessMessage = null) }
+    }
+
+    /**
+     * Soru görselini yapay zekaya analiz ettirerek Ders, Konu, Sınav Türü ve Doğru Cevabı otomatik belirler.
+     */
+    fun autoTagWithAi() {
+        val currentImagePath = _uiState.value.soruImagePath
+        if (currentImagePath.isNullOrBlank()) {
+            _uiState.update { it.copy(errorMessage = "Otomatik analiz için önce bir soru fotoğrafı ekleyin.") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isAutoTagging = true, errorMessage = null, autoTagSuccessMessage = null) }
+            val bytes = gorselDepo.getGorselBytes(currentImagePath)
+            if (bytes == null || bytes.isEmpty()) {
+                _uiState.update { it.copy(isAutoTagging = false, errorMessage = "Soru görseli okunamadı.") }
+                return@launch
+            }
+
+            val result = aiRepository.detectQuestionMetadata(bytes)
+            result.onSuccess { metadata ->
+                val detectedExam = if (metadata.examType.equals("AYT", ignoreCase = true)) "AYT" else "TYT"
+                val alan = _uiState.value.userAlan
+                val subjects = DersTaksonomisi.getDersler(detectedExam, alan)
+                val matchingSubject = subjects.find {
+                    it.id.equals(metadata.subjectId, ignoreCase = true) ||
+                            it.ad.equals(metadata.subjectId, ignoreCase = true) ||
+                            metadata.subjectId.contains(it.id, ignoreCase = true)
+                }?.id ?: subjects.firstOrNull()?.id ?: "matematik"
+
+                val dersName = DersTaksonomisi.getDersAdi(detectedExam, matchingSubject)
+                val successMsg = "✓ AI Analizi Tamamlandı: $dersName > ${metadata.topic}"
+
+                _uiState.update { current ->
+                    current.copy(
+                        isAutoTagging = false,
+                        examType = detectedExam,
+                        availableSubjects = subjects,
+                        subjectId = matchingSubject,
+                        topic = metadata.topic.ifBlank { current.topic },
+                        correctAnswer = metadata.correctAnswer ?: current.correctAnswer,
+                        autoTagSuccessMessage = successMsg,
+                        errorMessage = null
+                    )
+                }
+                updateTopicSuggestions()
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        isAutoTagging = false,
+                        errorMessage = "AI otomatik etiketleme başarısız: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
     }
 
     private var topicJob: Job? = null
