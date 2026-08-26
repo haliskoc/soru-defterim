@@ -25,13 +25,27 @@ enum class AiProviderType(
     ),
     GROQ(
         displayName = "Groq",
-        defaultModel = "llama-3.2-11b-vision-preview",
+        defaultModel = "meta-llama/llama-4-scout-17b-16e-instruct",
         supportedModels = listOf(
-            "llama-3.2-11b-vision-preview" to "Llama 3.2 11B Vision (Önerilen - Hızlı)",
-            "llama-3.2-90b-vision-preview" to "Llama 3.2 90B Vision (Gelişmiş Görsel)"
+            "meta-llama/llama-4-scout-17b-16e-instruct" to "Llama 4 Scout 17B (Önerilen - Hızlı & Vision)",
+            "meta-llama/llama-4-maverick-17b-128e-instruct" to "Llama 4 Maverick 17B (Gelişmiş Akıl Yürütme)",
+            "llama-3.3-70b-versatile" to "Llama 3.3 70B Versatile (Metin)"
         ),
         consoleUrl = "https://console.groq.com/keys",
         consoleName = "Groq Console"
+    ),
+    NVIDIA(
+        displayName = "NVIDIA Build",
+        defaultModel = "meta/llama-3.1-405b-instruct",
+        supportedModels = listOf(
+            "meta/llama-3.1-405b-instruct" to "Llama 3.1 405B Instruct (Önerilen - En Güçlü)",
+            "meta/llama-3.1-70b-instruct" to "Llama 3.1 70B Instruct (Hızlı)",
+            "mistralai/mixtral-8x22b-instruct-v0.1" to "Mixtral 8x22B Instruct",
+            "nvidia/llama-3.1-nemotron-70b-instruct" to "Nemotron 70B Instruct (NVIDIA)",
+            "google/gemma-2-27b-it" to "Gemma 2 27B IT"
+        ),
+        consoleUrl = "https://build.nvidia.com/explore/reasoning",
+        consoleName = "NVIDIA Build"
     );
 
     companion object {

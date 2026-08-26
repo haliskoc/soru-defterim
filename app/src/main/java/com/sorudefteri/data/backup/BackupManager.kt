@@ -93,7 +93,8 @@ open class BackupManager @Inject constructor(
         private const val SALT_LENGTH = 16
         private const val IV_LENGTH = 12
         private const val GCM_TAG_LENGTH_BITS = 128
-        private const val PBKDF2_ITERATIONS = 10000
+        private const val PBKDF2_ITERATIONS = 120000
+        private const val PBKDF2_ITERATIONS_LEGACY = 10000
         private const val KEY_LENGTH_BITS = 256
     }
 
@@ -309,6 +310,10 @@ open class BackupManager @Inject constructor(
             val readHeaderSize = bufferedIn.read(headerBuffer)
             val isEncrypted = readHeaderSize == MAGIC_HEADER.size && headerBuffer.contentEquals(MAGIC_HEADER)
 
+            // Şifreli ise salt/iv sakla — legacy fallback için gerekebilir
+            var encryptedSalt: ByteArray? = null
+            var encryptedIv: ByteArray? = null
+
             val zipInputStream: ZipInputStream = if (isEncrypted) {
                 if (password.isNullOrBlank()) {
                     return@withContext Result.failure(
@@ -324,8 +329,10 @@ open class BackupManager @Inject constructor(
                 if (readSalt != SALT_LENGTH || readIv != IV_LENGTH) {
                     return@withContext Result.failure(Exception("Bozuk şifreli yedek başlığı."))
                 }
+                encryptedSalt = salt
+                encryptedIv = iv
 
-                val secretKey = deriveKey(password.toCharArray(), salt)
+                val secretKey = deriveKey(password.toCharArray(), salt, PBKDF2_ITERATIONS)
                 val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
                     init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
                 }
@@ -337,43 +344,55 @@ open class BackupManager @Inject constructor(
                 ZipInputStream(bufferedIn)
             }
 
-            // 1. ZIP içeriğini Zip Slip korumasıyla geçici klasöre aç
-            zipInputStream.use { zipIn ->
-                var entry: ZipEntry?
-                val buffer = ByteArray(BUFFER_SIZE)
+            // 1. ZIP içeriğini Zip Slip korumasıyla geçici klasöre aç — legacy fallback destekli
+            var extractionSucceeded = false
+            var lastExtractionError: Exception? = null
+            try {
+                zipInputStream.use { zipIn -> extractZipSafely(zipIn, tempExtractDir) }
+                extractionSucceeded = true
+            } catch (e: Exception) {
+                lastExtractionError = e
+                val msg = e.localizedMessage?.lowercase().orEmpty()
+                val isAuthFailure = msg.contains("tag mismatch") || msg.contains("mac check") || msg.contains("bad tag") || msg.contains("pad block") || e is javax.crypto.AEADBadTagException || e.cause is javax.crypto.AEADBadTagException
+                if (isAuthFailure && isEncrypted && encryptedSalt != null && encryptedIv != null) {
+                    // Eski iterasyonla tekrar dene
+                    try {
+                        try { zipInputStream.close() } catch (_: Exception) {}
+                        try { bufferedIn.close() } catch (_: Exception) {}
+                        try { rawInputStream.close() } catch (_: Exception) {}
+                        val newRaw = context.contentResolver.openInputStream(sourceUri)
+                            ?: throw Exception("Yedek dosyası yeniden açılamadı")
+                        val newBuffered = BufferedInputStream(newRaw)
+                        newBuffered.skip(MAGIC_HEADER.size.toLong())
+                        // salt ve iv zaten okundu, onları atla — ama stream başında olduklarından tekrar atla
+                        // Yeni stream'de header+ salt+iv tekrar okunmalı — salt/iv elimizde var, sadece stream'i ilerlet
+                        // Header'ı atla ve salt/iv boyutunu atla (gerçek stream'de header+SUPER)
+                        // Basit: yeni stream'de header'ı oku ve atla, sonra salt/iv atla
+                        val skipHeader = ByteArray(MAGIC_HEADER.size)
+                        newBuffered.read(skipHeader)
+                        val skipSalt = ByteArray(SALT_LENGTH)
+                        newBuffered.read(skipSalt)
+                        val skipIv = ByteArray(IV_LENGTH)
+                        newBuffered.read(skipIv)
 
-                try {
-                    entry = zipIn.nextEntry
-                } catch (e: Exception) {
-                    return@withContext Result.failure(
-                        SecurityException("Yedek şifresi hatalı veya dosya bozulmuş: ${e.localizedMessage}")
-                    )
-                }
-
-                val canonicalDestDir = tempExtractDir.canonicalFile
-
-                while (entry != null) {
-                    val destinationFile = File(tempExtractDir, entry.name).canonicalFile
-
-                    // Gelişmiş Zip Slip Path Traversal Koruması
-                    if (!destinationFile.path.startsWith(canonicalDestDir.path + File.separator) && destinationFile != canonicalDestDir) {
-                        throw SecurityException("Güvensiz zip içeriği tespit edildi (Path Traversal Saldırısı): ${entry.name}")
-                    }
-
-                    if (entry.isDirectory) {
-                        destinationFile.mkdirs()
-                    } else {
-                        destinationFile.parentFile?.mkdirs()
-                        FileOutputStream(destinationFile).use { out ->
-                            var len: Int
-                            while (zipIn.read(buffer).also { len = it } > 0) {
-                                out.write(buffer, 0, len)
-                            }
+                        val legacyKey = deriveKey(password!!.toCharArray(), encryptedSalt!!, PBKDF2_ITERATIONS_LEGACY)
+                        val legacyCipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                            init(Cipher.DECRYPT_MODE, legacyKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, encryptedIv!!))
                         }
+                        val legacyZip = ZipInputStream(BufferedInputStream(CipherInputStream(newBuffered, legacyCipher)))
+                        legacyZip.use { zipIn -> extractZipSafely(zipIn, tempExtractDir) }
+                        extractionSucceeded = true
+                        lastExtractionError = null
+                    } catch (e2: Exception) {
+                        lastExtractionError = e2
                     }
-                    zipIn.closeEntry()
-                    entry = zipIn.nextEntry
                 }
+            }
+
+            if (!extractionSucceeded) {
+                return@withContext Result.failure(
+                    SecurityException("Yedek şifresi hatalı veya dosya bozulmuş: ${lastExtractionError?.localizedMessage}")
+                )
             }
 
             // 2. Manifest kontrolü
@@ -462,12 +481,46 @@ open class BackupManager @Inject constructor(
 
     /**
      * PBKDF2WithHmacSHA256 kullanarak paroladan 256-bit AES anahtarı türetir.
+     * Yeni yedekler 120k iterasyon; eski 10k yedekler import'ta otomatik denenir.
      */
-    private fun deriveKey(password: CharArray, salt: ByteArray): SecretKeySpec {
-        val keySpec = PBEKeySpec(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH_BITS)
+    private fun deriveKey(password: CharArray, salt: ByteArray, iterations: Int = PBKDF2_ITERATIONS): SecretKeySpec {
+        val keySpec = PBEKeySpec(password, salt, iterations, KEY_LENGTH_BITS)
         val keyFactory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
         val keyBytes = keyFactory.generateSecret(keySpec).encoded
+        try { keySpec.clearPassword() } catch (_: Exception) {}
         return SecretKeySpec(keyBytes, "AES")
+    }
+
+    private fun extractZipSafely(zipIn: ZipInputStream, destDir: File) {
+        var entry: ZipEntry?
+        val buffer = ByteArray(BUFFER_SIZE)
+        try {
+            entry = zipIn.nextEntry
+        } catch (e: Exception) {
+            throw SecurityException("Yedek şifresi hatalı veya dosya bozulmuş: ${e.localizedMessage}", e)
+        }
+        val canonicalDestDir = destDir.canonicalFile
+        while (entry != null) {
+            val destinationFile = File(destDir, entry.name).canonicalFile
+            if (!destinationFile.path.startsWith(canonicalDestDir.path + File.separator) && destinationFile != canonicalDestDir) {
+                throw SecurityException("Güvensiz zip içeriği tespit edildi (Path Traversal Saldırısı): ${entry.name}")
+            }
+            if (entry.isDirectory) {
+                destinationFile.mkdirs()
+            } else {
+                destinationFile.parentFile?.mkdirs()
+                FileOutputStream(destinationFile).use { out ->
+                    var len: Int
+                    while (zipIn.read(buffer).also { len = it } > 0) {
+                        out.write(buffer, 0, len)
+                    }
+                }
+            }
+            zipIn.closeEntry()
+            entry = try { zipIn.nextEntry } catch (e: Exception) {
+                throw SecurityException("Yedek şifresi hatalı veya dosya bozulmuş: ${e.localizedMessage}", e)
+            }
+        }
     }
 }
 

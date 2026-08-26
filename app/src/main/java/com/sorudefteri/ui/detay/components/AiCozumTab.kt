@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
@@ -44,8 +45,10 @@ fun AiCozumTab(
     isAiLoading: Boolean,
     aiError: String?,
     isApiKeyMissing: Boolean,
+    isQueuedForRetry: Boolean = false,
     onGenerateSolution: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onManualSolution: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -110,6 +113,24 @@ fun AiCozumTab(
                             Text("AI Çözümünü Getir")
                         }
                     }
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedButton(
+                        onClick = onManualSolution,
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Manuel Çözüm Gir (Harici AI)")
+                    }
+
+                    if (isQueuedForRetry) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            "📡 Çevrimdışı kuyruk aktif — internet gelince otomatik denenecek.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
 
                     aiError?.let { err ->
                         Spacer(modifier = Modifier.height(12.dp))
@@ -118,6 +139,17 @@ fun AiCozumTab(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.error
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (!isApiKeyMissing) {
+                            OutlinedButton(
+                                onClick = onGenerateSolution,
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Tekrar Dene")
+                            }
+                        }
                     }
                 }
             }
@@ -178,6 +210,9 @@ fun AiCozumTab(
                         }
 
                         Row {
+                            IconButton(onClick = onManualSolution) {
+                                Icon(Icons.Default.Edit, contentDescription = "Manuel Düzenle")
+                            }
                             IconButton(onClick = {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 val clip = ClipData.newPlainText("AI Çözüm", aiExplanation)
@@ -199,6 +234,34 @@ fun AiCozumTab(
                         text = aiExplanation ?: "",
                         modifier = Modifier.fillMaxWidth()
                     )
+
+                    // Yeniden denemede oluşan hata - cached çözüm varken bile göster
+                    aiError?.let { err ->
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = "Yeniden çözüm hatası: $err",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (isApiKeyMissing) {
+                            Button(
+                                onClick = onNavigateToSettings,
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                            ) {
+                                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("API Anahtarı Tanımla")
+                            }
+                        } else {
+                            FilledTonalButton(onClick = onGenerateSolution, shape = RoundedCornerShape(10.dp)) {
+                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Tekrar Dene")
+                            }
+                        }
+                    }
                 }
             }
         }

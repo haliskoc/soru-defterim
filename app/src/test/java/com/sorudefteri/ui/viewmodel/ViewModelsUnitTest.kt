@@ -95,8 +95,10 @@ class ViewModelsUnitTest {
         every { mockAyarlarDataStore.aiProvider } returns flowOf(AiProviderType.GEMINI)
         every { mockAyarlarDataStore.geminiApiKey } returns flowOf("test_gemini_key")
         every { mockAyarlarDataStore.groqApiKey } returns flowOf("test_groq_key")
+        every { mockAyarlarDataStore.nvidiaApiKey } returns flowOf("test_nvidia_key")
         every { mockAyarlarDataStore.geminiModel } returns flowOf("gemini-2.5-flash")
-        every { mockAyarlarDataStore.groqModel } returns flowOf("llama-3.2-11b-vision-preview")
+        every { mockAyarlarDataStore.groqModel } returns flowOf("meta-llama/llama-4-scout-17b-16e-instruct")
+        every { mockAyarlarDataStore.nvidiaModel } returns flowOf("meta/llama-3.1-405b-instruct")
         every { mockAyarlarDataStore.themeMode } returns flowOf(0)
         every { mockSoruRepository.getDistinctTopics(any()) } returns flowOf(listOf("Trigonometri", "Türev"))
         every { mockKonuKatalog.getUniteList(any(), any()) } returns listOf(

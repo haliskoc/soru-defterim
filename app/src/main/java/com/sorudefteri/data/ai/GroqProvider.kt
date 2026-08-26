@@ -46,8 +46,10 @@ open class GroqProvider @Inject constructor(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     companion object {
-        const val FALLBACK_MODEL = "llama-3.2-11b-vision-preview"
+        const val FALLBACK_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
         const val MAX_RETRIES = 3
+        private const val FALLBACK_MODEL_LEGACY_1 = "llama-3.2-11b-vision-preview"
+        private const val FALLBACK_MODEL_LEGACY_2 = "llama-3.2-90b-vision-preview"
     }
 
     /**
@@ -159,7 +161,8 @@ open class GroqProvider @Inject constructor(
             mistakeType = mistakeType,
             customTemplate = customPromptTemplate
         )
-        val effectiveModel = modelName.ifBlank { FALLBACK_MODEL }
+        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+            .let { if (it == FALLBACK_MODEL_LEGACY_1 || it == FALLBACK_MODEL_LEGACY_2) FALLBACK_MODEL else it }
         executeGroqWithRetry(imageBytes, prompt, effectiveModel, apiKey)
     }
 
@@ -179,7 +182,8 @@ open class GroqProvider @Inject constructor(
         }
 
         val prompt = promptManager.buildOcrTemizlemePrompt(rawOcrText, customPromptTemplate)
-        val effectiveModel = modelName.ifBlank { FALLBACK_MODEL }
+        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+            .let { if (it == FALLBACK_MODEL_LEGACY_1 || it == FALLBACK_MODEL_LEGACY_2) FALLBACK_MODEL else it }
         executeGroqWithRetry(null, prompt, effectiveModel, apiKey)
     }
 
@@ -202,7 +206,8 @@ open class GroqProvider @Inject constructor(
         }
 
         val prompt = promptManager.buildBenzerSoruPrompt(dersAdi, konu, soruMetni, customPromptTemplate)
-        val effectiveModel = modelName.ifBlank { FALLBACK_MODEL }
+        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+            .let { if (it == FALLBACK_MODEL_LEGACY_1 || it == FALLBACK_MODEL_LEGACY_2) FALLBACK_MODEL else it }
 
         val rawResult = executeGroqWithRetry(imageBytes, prompt, effectiveModel, apiKey)
         rawResult.mapCatching { rawText ->
@@ -242,7 +247,8 @@ open class GroqProvider @Inject constructor(
             sinavTipi = sinavTipi,
             customTemplate = customPromptTemplate
         )
-        val effectiveModel = modelName.ifBlank { FALLBACK_MODEL }
+        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+            .let { if (it == FALLBACK_MODEL_LEGACY_1 || it == FALLBACK_MODEL_LEGACY_2) FALLBACK_MODEL else it }
 
         val rawResult = executeGroqWithRetry(null, prompt, effectiveModel, apiKey)
         rawResult.mapCatching { rawText ->
@@ -269,7 +275,8 @@ open class GroqProvider @Inject constructor(
             )
         }
 
-        val effectiveModel = modelName.ifBlank { FALLBACK_MODEL }
+        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+            .let { if (it == FALLBACK_MODEL_LEGACY_1 || it == FALLBACK_MODEL_LEGACY_2) FALLBACK_MODEL else it }
         val prompt = """
             Görseldeki YKS (TYT veya AYT) sorusunu incele ve JSON formatında şu bilgileri çıkar:
             1. examType: "TYT" veya "AYT"
@@ -292,9 +299,10 @@ open class GroqProvider @Inject constructor(
             if (parseResult.isSuccess) {
                 return@withContext parseResult
             }
+            return@withContext parseResult
         }
 
-        Result.success(QuestionMetadata())
+        return@withContext rawResult.map { QuestionMetadata() } as Result<QuestionMetadata>
     }
 
     private suspend fun executeGroqWithRetry(
@@ -314,11 +322,15 @@ open class GroqProvider @Inject constructor(
             }
 
             val exception = lastResult.exceptionOrNull()
+            if (exception is AiException && exception.errorType == AiErrorType.MODEL_UNAVAILABLE && exception.message?.contains("404") == true) {
+                break
+            }
             val isRetryable = isRetryableException(exception)
 
             if (isRetryable && attempt < MAX_RETRIES - 1) {
-                val backoffMs = 1000L * (1L shl attempt)
-                delay(backoffMs)
+                val base = 1000L * (1L shl attempt)
+                val jitter = (0..500).random().toLong()
+                delay(base + jitter)
             } else {
                 break
             }
@@ -329,10 +341,12 @@ open class GroqProvider @Inject constructor(
 
     private fun isRetryableException(throwable: Throwable?): Boolean {
         if (throwable == null) return false
+        if (throwable is kotlinx.coroutines.CancellationException) return false
         if (throwable is AiException) {
-            return throwable.errorType == AiErrorType.QUOTA_EXCEEDED ||
-                    throwable.errorType == AiErrorType.MODEL_UNAVAILABLE ||
-                    throwable.errorType == AiErrorType.NETWORK_TIMEOUT
+            return throwable.errorType == AiErrorType.NETWORK_TIMEOUT ||
+                    throwable.errorType == AiErrorType.NETWORK_ERROR ||
+                    (throwable.errorType == AiErrorType.MODEL_UNAVAILABLE && !throwable.message.orEmpty().contains("404")) ||
+                    throwable.errorType == AiErrorType.QUOTA_EXCEEDED
         }
         val msg = throwable.message.orEmpty().lowercase()
         return msg.contains("429") ||
@@ -357,6 +371,14 @@ open class GroqProvider @Inject constructor(
             contentParts.add(GroqContentPart(type = "text", text = prompt))
 
             if (imageBytes != null && imageBytes.isNotEmpty()) {
+                if (imageBytes.size > 5 * 1024 * 1024) {
+                    return Result.failure(
+                        AiException(
+                            AiErrorType.UNKNOWN,
+                            "Görsel boyutu çok büyük (${imageBytes.size / 1024}KB). Lütfen daha küçük bir görsel deneyin."
+                        )
+                    )
+                }
                 val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
                 val dataUrl = "data:image/jpeg;base64,$base64Image"
                 contentParts.add(
@@ -446,6 +468,14 @@ open class GroqProvider @Inject constructor(
                             )
                         )
                     }
+                    404 -> {
+                        Result.failure(
+                            AiException(
+                                AiErrorType.MODEL_UNAVAILABLE,
+                                "Seçilen '$modelName' modeli Groq tarafından bulunamadı veya kullanımdan kaldırılmış (HTTP 404). Model ayarınızı güncelleyin."
+                            )
+                        )
+                    }
                     429 -> {
                         Result.failure(
                             AiException(
@@ -484,9 +514,15 @@ open class GroqProvider @Inject constructor(
     }
 
     private fun mapToAiException(e: Exception): AiException {
+        if (e is kotlinx.coroutines.CancellationException) throw e
         return when (e) {
             is AiException -> e
             is SocketTimeoutException -> AiException(
+                AiErrorType.NETWORK_TIMEOUT,
+                "İstek zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.",
+                e
+            )
+            is InterruptedIOException -> AiException(
                 AiErrorType.NETWORK_TIMEOUT,
                 "İstek zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.",
                 e

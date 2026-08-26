@@ -12,5 +12,7 @@
         <domain includeSubdomains="true">googleapis.com</domain>
         <domain includeSubdomains="true">api.groq.com</domain>
         <domain includeSubdomains="true">groq.com</domain>
+        <domain includeSubdomains="true">integrate.api.nvidia.com</domain>
+        <domain includeSubdomains="true">api.nvidia.com</domain>
     </domain-config>
 </network-security-config>

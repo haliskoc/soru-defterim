@@ -26,7 +26,8 @@ import javax.inject.Singleton
 class AiRepository @Inject constructor(
     private val ayarlarDataStore: AyarlarDataStore,
     private val geminiProvider: GeminiProvider,
-    private val groqProvider: GroqProvider
+    private val groqProvider: GroqProvider,
+    private val nvidiaProvider: NvidiaProvider
 ) : AiRepositoryInterface {
 
     /**
@@ -126,6 +127,12 @@ class AiRepository @Inject constructor(
                 val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
                 groqProvider.cleanOcrText(rawOcrText, model, apiKey)
             }
+            AiProviderType.NVIDIA -> {
+                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı girilmemiş. Ayarlar > NVIDIA Build bölümünden ekleyin."))
+                val model = ayarlarDataStore.getNvidiaModel().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
+                nvidiaProvider.cleanOcrText(rawOcrText, model, apiKey)
+            }
         }
     }
 
@@ -147,6 +154,12 @@ class AiRepository @Inject constructor(
                 val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
                 groqProvider.detectMetadata(imageBytes, model, apiKey)
             }
+            AiProviderType.NVIDIA -> {
+                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getNvidiaModel().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
+                nvidiaProvider.detectMetadata(imageBytes, model, apiKey)
+            }
         }
     }
 
@@ -159,6 +172,10 @@ class AiRepository @Inject constructor(
         konu: String,
         soruMetni: String?
     ): Result<SimilarQuestionResult> {
+        // Geliştirici notu: NVIDIA Build görsel gönderimi destekler ama metin-only de çalışır
+        if (imageBytes == null && soruMetni.isNullOrBlank() && konu.isBlank()) {
+            return Result.failure(IllegalArgumentException("Benzer soru üretmek için görsel veya konu bilgisi gereklidir."))
+        }
         val providerType = ayarlarDataStore.getAiProvider()
         return when (providerType) {
             AiProviderType.GEMINI -> {
@@ -172,6 +189,12 @@ class AiRepository @Inject constructor(
                 if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
                 val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
                 groqProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
+            }
+            AiProviderType.NVIDIA -> {
+                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getNvidiaModel().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
+                nvidiaProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
             }
         }
     }
@@ -216,6 +239,12 @@ class AiRepository @Inject constructor(
                 val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
                 groqProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, model, apiKey)
             }
+            AiProviderType.NVIDIA -> {
+                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getNvidiaModel().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
+                nvidiaProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, model, apiKey)
+            }
         }
     }
 
@@ -248,6 +277,14 @@ class AiRepository @Inject constructor(
                     groqProvider.listModels(apiKey)
                 }
             }
+            AiProviderType.NVIDIA -> {
+                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
+                if (apiKey.isBlank()) {
+                    Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı girilmemiş. Ayarlar > NVIDIA Build bölümünden ekleyin."))
+                } else {
+                    nvidiaProvider.listModels(apiKey)
+                }
+            }
         }
     }
 
@@ -262,6 +299,15 @@ class AiRepository @Inject constructor(
         mistakeType: String?,
         soruMetni: String?
     ): Result<String> {
+        // Kritik validasyon: görsel ve metin ikisi de boşsa anlamsız istek
+        if (imageBytes == null && soruMetni.isNullOrBlank()) {
+            return Result.failure(
+                AiException(
+                    AiErrorType.UNKNOWN,
+                    "Soru gönderilemedi: ne görsel var ne de metin. Lütfen görsel yükleyin veya OCR ile metin çıkarın ve 'Görseli AI'a gönder' ayarını kontrol edin."
+                )
+            )
+        }
         val providerType = ayarlarDataStore.getAiProvider()
 
         return when (providerType) {
@@ -299,6 +345,28 @@ class AiRepository @Inject constructor(
                 }
                 val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
                 groqProvider.cozumIsteDetayli(
+                    imageBytes = imageBytes,
+                    dersAdi = dersAdi,
+                    konu = konu,
+                    correctAnswer = correctAnswer,
+                    mistakeType = mistakeType,
+                    soruMetni = soruMetni,
+                    modelName = model,
+                    apiKey = apiKey
+                )
+            }
+            AiProviderType.NVIDIA -> {
+                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
+                if (apiKey.isBlank()) {
+                    return Result.failure(
+                        AiException(
+                            AiErrorType.INVALID_API_KEY,
+                            "API anahtarı bulunamadı. Lütfen Ayarlar bölümünden NVIDIA Build API anahtarınızı girin. (build.nvidia.com)"
+                        )
+                    )
+                }
+                val model = ayarlarDataStore.getNvidiaModel().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
+                nvidiaProvider.cozumIsteDetayli(
                     imageBytes = imageBytes,
                     dersAdi = dersAdi,
                     konu = konu,

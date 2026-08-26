@@ -132,18 +132,23 @@ fun AyarlarScreen(
                         aiProvider = uiState.aiProvider,
                         geminiApiKey = uiState.geminiApiKey,
                         groqApiKey = uiState.groqApiKey,
+                        nvidiaApiKey = uiState.nvidiaApiKey,
                         geminiModel = uiState.geminiModel,
                         groqModel = uiState.groqModel,
+                        nvidiaModel = uiState.nvidiaModel,
                         isFetchingModels = uiState.isFetchingModels,
                         fetchedGeminiModels = uiState.fetchedGeminiModels,
                         fetchedGroqModels = uiState.fetchedGroqModels,
+                        fetchedNvidiaModels = uiState.fetchedNvidiaModels,
                         modelFetchStatus = uiState.modelFetchStatus,
                         isModelFetchError = uiState.isModelFetchError,
                         onAiProviderSelected = { viewModel.setAiProvider(it) },
                         onGeminiApiKeyChanged = { viewModel.setGeminiApiKey(it) },
                         onGroqApiKeyChanged = { viewModel.setGroqApiKey(it) },
+                        onNvidiaApiKeyChanged = { viewModel.setNvidiaApiKey(it) },
                         onGeminiModelSelected = { viewModel.setGeminiModel(it) },
                         onGroqModelSelected = { viewModel.setGroqModel(it) },
+                        onNvidiaModelSelected = { viewModel.setNvidiaModel(it) },
                         onFetchLiveModelsClick = { viewModel.fetchLiveModels(it) }
                     )
 

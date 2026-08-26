@@ -50,6 +50,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sorudefteri.ui.detay.components.AiCozumTab
 import com.sorudefteri.ui.detay.components.BenzerSorularTab
+import com.sorudefteri.ui.detay.components.ManualSolutionDialog
 import com.sorudefteri.ui.detay.components.SoruDetayTab
 import com.sorudefteri.ui.detay.components.SoruDetayTopBar
 import com.sorudefteri.ui.ortak.ShareHelper
@@ -180,8 +181,10 @@ fun SoruDetayScreen(
                         isAiLoading = uiState.isAiLoading,
                         aiError = uiState.aiError,
                         isApiKeyMissing = uiState.isApiKeyMissing,
+                        isQueuedForRetry = uiState.isAiQueuedForRetry,
                         onGenerateSolution = { viewModel.requestAiSolution() },
-                        onNavigateToSettings = onNavigateToSettings
+                        onNavigateToSettings = onNavigateToSettings,
+                        onManualSolution = { viewModel.setShowManualSolutionDialog(true) }
                     )
 
                     2 -> BenzerSorularTab(
@@ -230,6 +233,15 @@ fun SoruDetayScreen(
                     Text("İptal")
                 }
             }
+        )
+    }
+
+    // Manuel Çözüm Dialogu
+    if (uiState.showManualSolutionDialog) {
+        ManualSolutionDialog(
+            initialText = soru.aiExplanation,
+            onDismiss = { viewModel.setShowManualSolutionDialog(false) },
+            onSave = { viewModel.saveManualSolution(it) }
         )
     }
 

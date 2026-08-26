@@ -23,6 +23,7 @@ class AiRepositoryTest {
     private lateinit var mockAyarlarDataStore: AyarlarDataStore
     private lateinit var fakeGeminiProvider: FakeGeminiProvider
     private lateinit var fakeGroqProvider: FakeGroqProvider
+    private lateinit var fakeNvidiaProvider: FakeNvidiaProvider
     private lateinit var aiRepository: AiRepository
 
     class FakeGeminiProvider : GeminiProvider(mockk(relaxed = true), mockk(relaxed = true)) {
@@ -78,16 +79,45 @@ class AiRepositoryTest {
         ): Result<SimilarQuestionResult> = similarResult
     }
 
+    class FakeNvidiaProvider : NvidiaProvider(mockk(relaxed = true), mockk(relaxed = true)) {
+        var solutionResult: Result<String> = Result.success("Fake Nvidia Solution")
+        var similarResult: Result<SimilarQuestionResult> = Result.success(SimilarQuestionResult("", emptyMap(), "A", ""))
+
+        override suspend fun cozumIsteDetayli(
+            imageBytes: ByteArray?,
+            dersAdi: String,
+            konu: String,
+            correctAnswer: String?,
+            mistakeType: String?,
+            soruMetni: String?,
+            modelName: String,
+            apiKey: String,
+            customPromptTemplate: String?
+        ): Result<String> = solutionResult
+
+        override suspend fun generateSimilarQuestion(
+            imageBytes: ByteArray?,
+            dersAdi: String,
+            konu: String,
+            soruMetni: String?,
+            modelName: String,
+            apiKey: String,
+            customPromptTemplate: String?
+        ): Result<SimilarQuestionResult> = similarResult
+    }
+
     @Before
     fun setUp() {
         mockAyarlarDataStore = mockk(relaxed = true)
         fakeGeminiProvider = FakeGeminiProvider()
         fakeGroqProvider = FakeGroqProvider()
+        fakeNvidiaProvider = FakeNvidiaProvider()
 
         aiRepository = AiRepository(
             ayarlarDataStore = mockAyarlarDataStore,
             geminiProvider = fakeGeminiProvider,
-            groqProvider = fakeGroqProvider
+            groqProvider = fakeGroqProvider,
+            nvidiaProvider = fakeNvidiaProvider
         )
     }
 
@@ -132,7 +162,7 @@ class AiRepositoryTest {
 
         coEvery { mockAyarlarDataStore.getAiProvider() } returns AiProviderType.GROQ
         coEvery { mockAyarlarDataStore.getGroqApiKey() } returns "gsk_groq_key_456"
-        coEvery { mockAyarlarDataStore.getGroqModel() } returns "llama-3.2-11b-vision-preview"
+        coEvery { mockAyarlarDataStore.getGroqModel() } returns "meta-llama/llama-4-scout-17b-16e-instruct"
 
         val result = aiRepository.cozumIste(
             imageBytes = testBytes,
@@ -187,7 +217,7 @@ class AiRepositoryTest {
 
         coEvery { mockAyarlarDataStore.getAiProvider() } returns AiProviderType.GROQ
         coEvery { mockAyarlarDataStore.getGroqApiKey() } returns "groq_key"
-        coEvery { mockAyarlarDataStore.getGroqModel() } returns "llama-3.2-11b-vision-preview"
+        coEvery { mockAyarlarDataStore.getGroqModel() } returns "meta-llama/llama-4-scout-17b-16e-instruct"
 
         val result = aiRepository.generateSimilarQuestion(testBytes, "Geometri", "Üçgenler")
         assertTrue(result.isSuccess)

@@ -9,9 +9,12 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.serialization.json.Json
+import okhttp3.Cache
+import okhttp3.CacheControl
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
+import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
@@ -39,7 +42,51 @@ object AppModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(): OkHttpClient {
+    fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient {
+        // 10 MB HTTP cache — özellikle GET /models için offline fallback
+        val cacheSize = 10L * 1024 * 1024 // 10 MB
+        val cache = Cache(File(context.cacheDir, "http_cache"), cacheSize)
+
+        // Offline cache interceptor: GET /models isteklerini 7 gün cache'le, çevrimdışıyken cache'den servis et
+        val offlineCacheInterceptor = Interceptor { chain ->
+            var request = chain.request()
+            // listModels GET istekleri için cache-Control ekle
+            if (request.method == "GET" && request.url.toString().contains("/models")) {
+                request = request.newBuilder()
+                    .cacheControl(CacheControl.Builder().maxAge(1, TimeUnit.DAYS).build())
+                    .build()
+            }
+            val response = chain.proceed(request)
+            // Sunucu cache header göndermese bile 1 saat client-side cache
+            if (request.method == "GET" && request.url.toString().contains("/models")) {
+                response.newBuilder()
+                    .header("Cache-Control", "public, max-age=3600")
+                    .removeHeader("Pragma")
+                    .build()
+            } else {
+                response
+            }
+        }
+
+        val forceCacheOnOfflineInterceptor = Interceptor { chain ->
+            var request = chain.request()
+            // İnternet yoksa cache'den oku (max-stale 7 gün)
+            try {
+                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                val network = cm.activeNetwork
+                val caps = cm.getNetworkCapabilities(network)
+                val isOnline = caps != null && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                if (!isOnline && request.method == "GET") {
+                    request = request.newBuilder()
+                        .cacheControl(CacheControl.FORCE_CACHE)
+                        .build()
+                }
+            } catch (_: Exception) {
+                // ConnectivityManager hatasında normal devam
+            }
+            chain.proceed(request)
+        }
+
         // P0-1: Sadece DEBUG'da log, release'de NONE; ayrıca key redaction
         val redactingLogger = HttpLoggingInterceptor.Logger { message ->
             var redacted = message
@@ -77,11 +124,16 @@ object AppModule {
         }
 
         return OkHttpClient.Builder()
+            .cache(cache)
+            .addInterceptor(forceCacheOnOfflineInterceptor)
             .addInterceptor(apiKeyQuerySanitizer)
+            .addInterceptor(offlineCacheInterceptor)
             .addInterceptor(loggingInterceptor)
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(60, TimeUnit.SECONDS)
-            .writeTimeout(60, TimeUnit.SECONDS)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(60, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
             .build()
     }
 }

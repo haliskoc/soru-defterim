@@ -303,9 +303,11 @@ open class GeminiProvider @Inject constructor(
             if (parseResult.isSuccess) {
                 return@withContext parseResult
             }
+            // Parse başarısız olsa bile rawResult success; fallback boş metadata yerine hatayı ilet
+            return@withContext parseResult
         }
-
-        Result.success(QuestionMetadata())
+        // Ağ / kota / model hatasını gizleme, doğrudan ilet
+        return@withContext rawResult.map { QuestionMetadata() } as Result<QuestionMetadata>
     }
 
     /**
@@ -328,11 +330,16 @@ open class GeminiProvider @Inject constructor(
             }
 
             val exception = lastResult.exceptionOrNull()
+            // 404 MODEL_UNAVAILABLE asla retry edilmez
+            if (exception is AiException && exception.errorType == AiErrorType.MODEL_UNAVAILABLE && exception.message?.contains("404") == true) {
+                break
+            }
             val isRetryable = isRetryableException(exception)
 
             if (isRetryable && attempt < MAX_RETRIES - 1) {
-                val backoffMs = 1000L * (1L shl attempt) // 1s, 2s, 4s
-                delay(backoffMs)
+                val base = 1000L * (1L shl attempt) // 1s, 2s, 4s
+                val jitter = (0..500).random().toLong()
+                delay(base + jitter)
             } else {
                 break
             }
@@ -342,10 +349,16 @@ open class GeminiProvider @Inject constructor(
 
     private fun isRetryableException(throwable: Throwable?): Boolean {
         if (throwable == null) return false
+        // Cancellation asla retry edilmez
+        if (throwable is kotlinx.coroutines.CancellationException) return false
         if (throwable is AiException) {
-            return throwable.errorType == AiErrorType.QUOTA_EXCEEDED ||
-                    throwable.errorType == AiErrorType.MODEL_UNAVAILABLE ||
-                    throwable.errorType == AiErrorType.NETWORK_TIMEOUT
+            // 404 MODEL_UNAVAILABLE retry edilmez (model bulunamadı kalıcı hata)
+            // QUOTA_EXCEEDED de retry edilmez - kullanıcı beklemeli; ama transient 429 için 1 kez retry istenir.
+            // NETWORK_* ve 5xx transient
+            return throwable.errorType == AiErrorType.NETWORK_TIMEOUT ||
+                    throwable.errorType == AiErrorType.NETWORK_ERROR ||
+                    (throwable.errorType == AiErrorType.MODEL_UNAVAILABLE && !throwable.message.orEmpty().contains("404")) ||
+                    throwable.errorType == AiErrorType.QUOTA_EXCEEDED
         }
         val msg = throwable.message.orEmpty().lowercase()
         return msg.contains("429") ||
@@ -371,11 +384,20 @@ open class GeminiProvider @Inject constructor(
 
             // Koşullu görsel aktarımı: Görsel varsa ekle, yoksa sadece metin ilet
             if (imageBytes != null && imageBytes.isNotEmpty()) {
+                // 5MB üstü görsel istek boyutu aşar, erken hata ver
+                if (imageBytes.size > 5 * 1024 * 1024) {
+                    return Result.failure(
+                        AiException(
+                            AiErrorType.UNKNOWN,
+                            "Görsel boyutu çok büyük (${imageBytes.size / 1024}KB). Lütfen daha küçük bir görsel deneyin."
+                        )
+                    )
+                }
                 val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
                 parts.add(
                     GeminiPart(
-                        inline_data = GeminiInlineData(
-                            mime_type = "image/jpeg",
+                        inlineData = GeminiInlineData(
+                            mimeType = "image/jpeg",
                             data = base64Image
                         )
                     )
@@ -508,9 +530,15 @@ open class GeminiProvider @Inject constructor(
     }
 
     private fun mapToAiException(e: Exception): AiException {
+        if (e is kotlinx.coroutines.CancellationException) throw e
         return when (e) {
             is AiException -> e
             is SocketTimeoutException -> AiException(
+                AiErrorType.NETWORK_TIMEOUT,
+                "İstek zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.",
+                e
+            )
+            is InterruptedIOException -> AiException(
                 AiErrorType.NETWORK_TIMEOUT,
                 "İstek zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.",
                 e

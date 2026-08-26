@@ -14,5 +14,15 @@ app/build/
 *.aab
 build_artifacts/
 .kotlin/
+# Keystore / signing keys — asla commit etme
+*.jks
+*.keystore
+*.p12
+release-keystore.jks
+app/release-keystore.jks
+keystore.properties
+# Env & secrets
+.env
+google-services.json
 
 

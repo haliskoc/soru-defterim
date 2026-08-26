@@ -24,8 +24,10 @@ data class AyarlarUiState(
     val aiProvider: AiProviderType = AiProviderType.GEMINI,
     val geminiApiKey: String = "",
     val groqApiKey: String = "",
+    val nvidiaApiKey: String = "",
     val geminiModel: String = AiProviderType.GEMINI.defaultModel,
     val groqModel: String = AiProviderType.GROQ.defaultModel,
+    val nvidiaModel: String = AiProviderType.NVIDIA.defaultModel,
     val themeMode: Int = 0, // 0: Sistem, 1: Açık, 2: Koyu
     val isResetting: Boolean = false,
     val resetSuccess: Boolean = false,
@@ -33,6 +35,7 @@ data class AyarlarUiState(
     val isFetchingModels: Boolean = false,
     val fetchedGeminiModels: List<Pair<String, String>> = emptyList(),
     val fetchedGroqModels: List<Pair<String, String>> = emptyList(),
+    val fetchedNvidiaModels: List<Pair<String, String>> = emptyList(),
     val modelFetchStatus: String? = null,
     val isModelFetchError: Boolean = false,
     val isBackupLoading: Boolean = false,
@@ -43,7 +46,8 @@ data class AyarlarUiState(
 private data class DynamicModelsInfo(
     val isFetching: Boolean = false,
     val geminiModels: List<Pair<String, String>> = emptyList(),
-    val groqModels: List<Pair<String, String>> = emptyList()
+    val groqModels: List<Pair<String, String>> = emptyList(),
+    val nvidiaModels: List<Pair<String, String>> = emptyList()
 )
 
 private data class BackupState(
@@ -74,14 +78,20 @@ class AyarlarViewModel @Inject constructor(
         AyarlarPrefGroup1(alan, provider, geminiKey, groqKey, geminiMod)
     }
 
-    private val secondaryFlow = combine(
+    private val nvidiaCombinedFlow = combine(
         ayarlarDataStore.groqModel,
+        ayarlarDataStore.nvidiaApiKey,
+        ayarlarDataStore.nvidiaModel
+    ) { groqMod, nvidiaKey, nvidiaMod -> Triple(groqMod, nvidiaKey, nvidiaMod) }
+
+    private val secondaryFlow = combine(
+        nvidiaCombinedFlow,
         ayarlarDataStore.themeMode,
         _dynamicModelsState,
         _modelStatusState,
         _backupState
-    ) { groqMod, theme, dynModels, modelStatus, backup ->
-        AyarlarPrefGroup2(groqMod, theme, dynModels, modelStatus, backup)
+    ) { triple, theme, dynModels, modelStatus, backup ->
+        AyarlarPrefGroup2(triple.first, triple.second, triple.third, theme, dynModels, modelStatus, backup)
     }
 
     val uiState: StateFlow<AyarlarUiState> = combine(
@@ -93,12 +103,15 @@ class AyarlarViewModel @Inject constructor(
             aiProvider = p1.provider,
             geminiApiKey = p1.geminiKey,
             groqApiKey = p1.groqKey,
+            nvidiaApiKey = p2.nvidiaKey,
             geminiModel = p1.geminiMod,
             groqModel = p2.groqMod,
+            nvidiaModel = p2.nvidiaMod,
             themeMode = p2.theme,
             isFetchingModels = p2.dynModels.isFetching,
             fetchedGeminiModels = p2.dynModels.geminiModels,
             fetchedGroqModels = p2.dynModels.groqModels,
+            fetchedNvidiaModels = p2.dynModels.nvidiaModels,
             modelFetchStatus = p2.modelStatus.first,
             isModelFetchError = p2.modelStatus.second,
             isBackupLoading = p2.backup.isLoading,
@@ -135,6 +148,12 @@ class AyarlarViewModel @Inject constructor(
         }
     }
 
+    fun setNvidiaApiKey(key: String) {
+        viewModelScope.launch {
+            ayarlarDataStore.setNvidiaApiKey(key)
+        }
+    }
+
     fun setGeminiModel(model: String) {
         viewModelScope.launch {
             ayarlarDataStore.setGeminiModel(model)
@@ -144,6 +163,12 @@ class AyarlarViewModel @Inject constructor(
     fun setGroqModel(model: String) {
         viewModelScope.launch {
             ayarlarDataStore.setGroqModel(model)
+        }
+    }
+
+    fun setNvidiaModel(model: String) {
+        viewModelScope.launch {
+            ayarlarDataStore.setNvidiaModel(model)
         }
     }
 
@@ -164,9 +189,14 @@ class AyarlarViewModel @Inject constructor(
                     when (provider) {
                         AiProviderType.GEMINI -> current.copy(isFetching = false, geminiModels = models)
                         AiProviderType.GROQ -> current.copy(isFetching = false, groqModels = models)
+                        AiProviderType.NVIDIA -> current.copy(isFetching = false, nvidiaModels = models)
                     }
                 }
-                val providerLabel = if (provider == AiProviderType.GEMINI) "Google AI Studio" else "Groq"
+                val providerLabel = when (provider) {
+                    AiProviderType.GEMINI -> "Google AI Studio"
+                    AiProviderType.GROQ -> "Groq"
+                    AiProviderType.NVIDIA -> "NVIDIA Build"
+                }
                 _modelStatusState.value = "$providerLabel üzerinden ${models.size} güncel model başarıyla çekildi ✓" to false
             }.onFailure { e ->
                 _dynamicModelsState.update { it.copy(isFetching = false) }
@@ -272,6 +302,8 @@ private data class AyarlarPrefGroup1(
 
 private data class AyarlarPrefGroup2(
     val groqMod: String,
+    val nvidiaKey: String,
+    val nvidiaMod: String,
     val theme: Int,
     val dynModels: DynamicModelsInfo,
     val modelStatus: Pair<String?, Boolean>,

@@ -44,13 +44,16 @@ class AyarlarDataStore @Inject constructor(
         // Legacy plain keys (migration için saklı, artık yazılmıyor)
         private val KEY_GEMINI_API_KEY_LEGACY = stringPreferencesKey("gemini_api_key")
         private val KEY_GROQ_API_KEY_LEGACY = stringPreferencesKey("groq_api_key")
+        private val KEY_NVIDIA_API_KEY_LEGACY = stringPreferencesKey("nvidia_api_key")
         private val KEY_GEMINI_MODEL = stringPreferencesKey("gemini_model")
         private val KEY_GROQ_MODEL = stringPreferencesKey("groq_model")
+        private val KEY_NVIDIA_MODEL = stringPreferencesKey("nvidia_model")
         private val KEY_DARK_THEME = intPreferencesKey("dark_theme")
 
         // EncryptedSharedPreferences keys
         private const val ENC_GEMINI_API_KEY = "gemini_api_key"
         private const val ENC_GROQ_API_KEY = "groq_api_key"
+        private const val ENC_NVIDIA_API_KEY = "nvidia_api_key"
 
         // Auto backup preferences
         private val KEY_AUTO_BACKUP_ENABLED = booleanPreferencesKey("auto_backup_enabled")
@@ -68,7 +71,8 @@ class AyarlarDataStore @Inject constructor(
         const val DEFAULT_ALAN = "SAYISAL"
         const val DEFAULT_AI_PROVIDER = "GEMINI"
         const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-        const val DEFAULT_GROQ_MODEL = "llama-3.2-11b-vision-preview"
+        const val DEFAULT_GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+        const val DEFAULT_NVIDIA_MODEL = "meta/llama-3.1-405b-instruct"
         const val DEFAULT_DARK_THEME = 0 // 0: Sistem, 1: Açık, 2: Koyu
         const val DEFAULT_AUTO_BACKUP_ENABLED = false
         const val DEFAULT_WIFI_ONLY_BACKUP = true
@@ -84,6 +88,9 @@ class AyarlarDataStore @Inject constructor(
     private val _groqApiKeyFlow = MutableStateFlow(
         encryptedPrefs.getString(ENC_GROQ_API_KEY, "") ?: ""
     )
+    private val _nvidiaApiKeyFlow = MutableStateFlow(
+        encryptedPrefs.getString(ENC_NVIDIA_API_KEY, "") ?: ""
+    )
 
     private val encryptedListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         when (key) {
@@ -92,6 +99,9 @@ class AyarlarDataStore @Inject constructor(
             }
             ENC_GROQ_API_KEY -> {
                 _groqApiKeyFlow.value = encryptedPrefs.getString(ENC_GROQ_API_KEY, "") ?: ""
+            }
+            ENC_NVIDIA_API_KEY -> {
+                _nvidiaApiKeyFlow.value = encryptedPrefs.getString(ENC_NVIDIA_API_KEY, "") ?: ""
             }
         }
     }
@@ -115,8 +125,10 @@ class AyarlarDataStore @Inject constructor(
         val prefs = context.dataStore.data.first()
         val legacyGemini = prefs[KEY_GEMINI_API_KEY_LEGACY]?.trim().orEmpty()
         val legacyGroq = prefs[KEY_GROQ_API_KEY_LEGACY]?.trim().orEmpty()
+        val legacyNvidia = prefs[KEY_NVIDIA_API_KEY_LEGACY]?.trim().orEmpty()
         val encGemini = encryptedPrefs.getString(ENC_GEMINI_API_KEY, "") ?: ""
         val encGroq = encryptedPrefs.getString(ENC_GROQ_API_KEY, "") ?: ""
+        val encNvidia = encryptedPrefs.getString(ENC_NVIDIA_API_KEY, "") ?: ""
 
         var migrated = false
         val editor = encryptedPrefs.edit()
@@ -130,12 +142,25 @@ class AyarlarDataStore @Inject constructor(
             _groqApiKeyFlow.value = legacyGroq
             migrated = true
         }
+        if (encNvidia.isBlank() && legacyNvidia.isNotBlank()) {
+            editor.putString(ENC_NVIDIA_API_KEY, legacyNvidia)
+            _nvidiaApiKeyFlow.value = legacyNvidia
+            migrated = true
+        }
         if (migrated) {
             editor.apply()
             // Legacy plain key'leri temizle
             context.dataStore.edit { ds ->
                 if (legacyGemini.isNotBlank()) ds.remove(KEY_GEMINI_API_KEY_LEGACY)
                 if (legacyGroq.isNotBlank()) ds.remove(KEY_GROQ_API_KEY_LEGACY)
+                if (legacyNvidia.isNotBlank()) ds.remove(KEY_NVIDIA_API_KEY_LEGACY)
+            }
+        }
+        // Groq model migration: eski vision-preview -> yeni scout
+        val currentGroqModel = prefs[KEY_GROQ_MODEL]?.trim().orEmpty()
+        if (currentGroqModel == "llama-3.2-11b-vision-preview" || currentGroqModel == "llama-3.2-90b-vision-preview") {
+            context.dataStore.edit { ds ->
+                ds[KEY_GROQ_MODEL] = DEFAULT_GROQ_MODEL
             }
         }
     }
@@ -175,6 +200,10 @@ class AyarlarDataStore @Inject constructor(
 
     val groqApiKey: Flow<String> get() = groqApiKeyFlow
 
+    val nvidiaApiKeyFlow: Flow<String> = _nvidiaApiKeyFlow.asStateFlow()
+
+    val nvidiaApiKey: Flow<String> get() = nvidiaApiKeyFlow
+
     val geminiModelFlow: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[KEY_GEMINI_MODEL] ?: DEFAULT_GEMINI_MODEL
     }
@@ -186,6 +215,12 @@ class AyarlarDataStore @Inject constructor(
     }
 
     val groqModel: Flow<String> get() = groqModelFlow
+
+    val nvidiaModelFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_NVIDIA_MODEL] ?: DEFAULT_NVIDIA_MODEL
+    }
+
+    val nvidiaModel: Flow<String> get() = nvidiaModelFlow
 
     val darkThemeFlow: Flow<Int> = context.dataStore.data.map { preferences ->
         preferences[KEY_DARK_THEME] ?: DEFAULT_DARK_THEME
@@ -323,6 +358,12 @@ class AyarlarDataStore @Inject constructor(
         _groqApiKeyFlow.value = trimmed
     }
 
+    suspend fun setNvidiaApiKey(apiKey: String) {
+        val trimmed = apiKey.trim()
+        encryptedPrefs.edit().putString(ENC_NVIDIA_API_KEY, trimmed).apply()
+        _nvidiaApiKeyFlow.value = trimmed
+    }
+
     suspend fun setGeminiModel(model: String) {
         context.dataStore.edit { preferences ->
             preferences[KEY_GEMINI_MODEL] = model.trim()
@@ -330,8 +371,18 @@ class AyarlarDataStore @Inject constructor(
     }
 
     suspend fun setGroqModel(model: String) {
+        // Eski model otomatik migrate
+        val safe = model.trim().let {
+            if (it == "llama-3.2-11b-vision-preview" || it == "llama-3.2-90b-vision-preview") DEFAULT_GROQ_MODEL else it
+        }
         context.dataStore.edit { preferences ->
-            preferences[KEY_GROQ_MODEL] = model.trim()
+            preferences[KEY_GROQ_MODEL] = safe
+        }
+    }
+
+    suspend fun setNvidiaModel(model: String) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_NVIDIA_MODEL] = model.trim()
         }
     }
 
@@ -369,6 +420,7 @@ class AyarlarDataStore @Inject constructor(
         encryptedPrefs.edit().clear().apply()
         _geminiApiKeyFlow.value = ""
         _groqApiKeyFlow.value = ""
+        _nvidiaApiKeyFlow.value = ""
     }
 
     // ==========================================
@@ -379,8 +431,10 @@ class AyarlarDataStore @Inject constructor(
     suspend fun getAiProvider(): AiProviderType = aiProviderFlow.first()
     suspend fun getGeminiApiKey(): String = geminiApiKeyFlow.first()
     suspend fun getGroqApiKey(): String = groqApiKeyFlow.first()
+    suspend fun getNvidiaApiKey(): String = nvidiaApiKeyFlow.first()
     suspend fun getGeminiModel(): String = geminiModelFlow.first()
     suspend fun getGroqModel(): String = groqModelFlow.first()
+    suspend fun getNvidiaModel(): String = nvidiaModelFlow.first()
     suspend fun getDarkTheme(): Int = darkThemeFlow.first()
     suspend fun getAutoBackupEnabled(): Boolean = autoBackupEnabledFlow.first()
     suspend fun getWifiOnlyBackup(): Boolean = wifiOnlyBackupFlow.first()
@@ -390,6 +444,7 @@ class AyarlarDataStore @Inject constructor(
         return when (getAiProvider()) {
             AiProviderType.GEMINI -> getGeminiApiKey()
             AiProviderType.GROQ -> getGroqApiKey()
+            AiProviderType.NVIDIA -> getNvidiaApiKey()
         }
     }
 
@@ -397,6 +452,7 @@ class AyarlarDataStore @Inject constructor(
         return when (getAiProvider()) {
             AiProviderType.GEMINI -> getGeminiModel()
             AiProviderType.GROQ -> getGroqModel()
+            AiProviderType.NVIDIA -> getNvidiaModel()
         }
     }
 }

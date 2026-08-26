@@ -1,5 +1,6 @@
 package com.sorudefteri.ui.detay
 
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -7,10 +8,14 @@ import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.ai.AiRepository
 import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.data.ocr.OcrHelper
+import com.sorudefteri.data.worker.AiSolutionRetryWorker
+import com.sorudefteri.domain.model.AiErrorType
+import com.sorudefteri.domain.model.AiException
 import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.repository.SoruRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,9 +37,11 @@ data class SoruDetayUiState(
     val isAiLoading: Boolean = false,
     val aiError: String? = null,
     val isApiKeyMissing: Boolean = false,
+    val isAiQueuedForRetry: Boolean = false,
     val activeTab: DetayTab = DetayTab.SORU,
     val showDeleteDialog: Boolean = false,
     val showEditNoteDialog: Boolean = false,
+    val showManualSolutionDialog: Boolean = false,
     val zoomImagePath: String? = null,
     val zoomImageTitle: String? = null,
     val showDrawingDialog: Boolean = false,
@@ -58,7 +65,8 @@ class SoruDetayViewModel @Inject constructor(
     private val soruRepository: SoruRepository,
     private val aiRepository: AiRepository,
     private val gorselDepo: GorselDepo,
-    private val ocrHelper: OcrHelper
+    private val ocrHelper: OcrHelper,
+    @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
     private val soruId: Long = savedStateHandle.get<Long>("soruId")
@@ -285,7 +293,18 @@ class SoruDetayViewModel @Inject constructor(
                     it.copy(
                         isAiLoading = false,
                         isApiKeyMissing = true,
-                        aiError = "API anahtarı bulunamadı. Lütfen Ayarlar sayfasından Gemini veya Groq API anahtarınızı girin."
+                        aiError = "API anahtarı bulunamadı. Lütfen Ayarlar sayfasından Gemini, Groq veya NVIDIA Build API anahtarınızı girin."
+                    )
+                }
+                return@launch
+            }
+
+            // Validasyon: görsel ve metin ikisi de yoksa erken çık
+            if (!state.sendImageToAi && state.extractedOcrText.isNullOrBlank()) {
+                _uiState.update {
+                    it.copy(
+                        isAiLoading = false,
+                        aiError = "Gönderilecek veri yok: Lütfen 'Görseli AI'a gönder' açık olsun veya önce OCR ile metin çıkarın."
                     )
                 }
                 return@launch
@@ -306,16 +325,42 @@ class SoruDetayViewModel @Inject constructor(
                 _uiState.update {
                     it.copy(
                         isAiLoading = false,
-                        aiError = null
+                        aiError = null,
+                        isApiKeyMissing = false,
+                        isAiQueuedForRetry = false
                     )
                 }
             }.onFailure { throwable ->
                 val errorMessage = throwable.localizedMessage
                     ?: "Yapay zeka çözümü alınırken bir hata oluştu. Lütfen bağlantınızı veya API anahtarınızı kontrol edin."
+                val isAuthError = errorMessage.contains("API anahtarı", ignoreCase = true) || throwable is AiException && throwable.errorType == AiErrorType.INVALID_API_KEY
+                val isNetworkError = throwable is AiException && (throwable.errorType == AiErrorType.NETWORK_ERROR || throwable.errorType == AiErrorType.NETWORK_TIMEOUT)
+                        || errorMessage.contains("İnternet", ignoreCase = true) || errorMessage.contains("Ağ iletişim", ignoreCase = true)
+
+                // Çevrimdışı kuyruk: ağ hatası ise WorkManager ile otomatik yeniden dene
+                var queued = false
+                if (isNetworkError) {
+                    try {
+                        AiSolutionRetryWorker.enqueue(
+                            context = appContext,
+                            soruId = currentSoru.id,
+                            sendImageToAi = state.sendImageToAi,
+                            extractedText = state.extractedOcrText
+                        )
+                        queued = true
+                    } catch (_: Exception) {}
+                }
+
+                val displayError = if (queued) {
+                    "$errorMessage\n\n📡 İnternet yok — çözüm çevrimdışı kuyruğa alındı. Bağlantı gelince otomatik denenecek ve bildirim alacaksınız."
+                } else errorMessage
+
                 _uiState.update {
                     it.copy(
                         isAiLoading = false,
-                        aiError = errorMessage
+                        aiError = displayError,
+                        isApiKeyMissing = isAuthError,
+                        isAiQueuedForRetry = queued
                     )
                 }
             }
@@ -323,7 +368,35 @@ class SoruDetayViewModel @Inject constructor(
     }
 
     fun clearAiError() {
-        _uiState.update { it.copy(aiError = null, isApiKeyMissing = false) }
+        _uiState.update { it.copy(aiError = null, isApiKeyMissing = false, isAiQueuedForRetry = false) }
+    }
+
+    // Manuel çözüm girişi — harici AI (ChatGPT/Claude/Gemini web) veya elle yazılan çözüm
+    fun saveManualSolution(manualText: String) {
+        val currentSoru = _uiState.value.soru ?: return
+        val trimmed = manualText.trim()
+        if (trimmed.isBlank()) return
+        // 50000 karakter limiti (DB ve UI için güvenli)
+        val safeText = if (trimmed.length > 50000) trimmed.take(50000) else trimmed
+        viewModelScope.launch {
+            val updated = currentSoru.copy(
+                aiExplanation = safeText,
+                updatedAt = System.currentTimeMillis()
+            )
+            soruRepository.soruGuncelle(updated)
+            _uiState.update {
+                it.copy(
+                    aiError = null,
+                    isAiQueuedForRetry = false,
+                    showManualSolutionDialog = false,
+                    isAiLoading = false
+                )
+            }
+        }
+    }
+
+    fun setShowManualSolutionDialog(show: Boolean) {
+        _uiState.update { it.copy(showManualSolutionDialog = show) }
     }
 
     fun onaylaCozumu(extractedAnswer: String? = null) {

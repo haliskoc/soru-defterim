@@ -84,8 +84,10 @@ class AiPromptManagerTest {
         val rawText = "f(x)=2x2+5x-3 fonksıyonunun koklerı toplamı kactır?"
         val prompt = promptManager.buildOcrTemizlemePrompt(rawOcrText = rawText)
 
-        assertTrue(prompt.contains("[HAM OCR METNİ]:"))
+        assertTrue(prompt.contains("ham_ocr_metni"))
         assertTrue(prompt.contains(rawText))
+        // Injection guard: içerik veri olarak sarılmalı
+        assertTrue(prompt.contains("&lt;ham_ocr_metni&gt;") || prompt.contains("<ham_ocr_metni>"))
     }
 
     @Test
@@ -100,7 +102,7 @@ class AiPromptManagerTest {
 
         assertTrue(prompt.contains("Ders: Kimya"))
         assertTrue(prompt.contains("Konu: Gaz Yasaları"))
-        assertTrue(prompt.contains("Kaynak Soru Metni:"))
+        assertTrue(prompt.contains("kaynak_soru_metni"))
         assertTrue(prompt.contains("P1.V1 = P2.V2"))
     }
 

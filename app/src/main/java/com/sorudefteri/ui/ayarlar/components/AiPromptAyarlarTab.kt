@@ -65,18 +65,23 @@ fun AiPromptAyarlarTab(
     aiProvider: AiProviderType,
     geminiApiKey: String,
     groqApiKey: String,
+    nvidiaApiKey: String = "",
     geminiModel: String,
     groqModel: String,
+    nvidiaModel: String = AiProviderType.NVIDIA.defaultModel,
     isFetchingModels: Boolean,
     fetchedGeminiModels: List<Pair<String, String>>,
     fetchedGroqModels: List<Pair<String, String>>,
+    fetchedNvidiaModels: List<Pair<String, String>> = emptyList(),
     modelFetchStatus: String?,
     isModelFetchError: Boolean,
     onAiProviderSelected: (AiProviderType) -> Unit,
     onGeminiApiKeyChanged: (String) -> Unit,
     onGroqApiKeyChanged: (String) -> Unit,
+    onNvidiaApiKeyChanged: (String) -> Unit = {},
     onGeminiModelSelected: (String) -> Unit,
     onGroqModelSelected: (String) -> Unit,
+    onNvidiaModelSelected: (String) -> Unit = {},
     onFetchLiveModelsClick: (AiProviderType) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -84,8 +89,16 @@ fun AiPromptAyarlarTab(
     var isModelDropdownExpanded by remember { mutableStateOf(false) }
     var expandedPromptType by remember { mutableStateOf<AiPromptType?>(null) }
 
-    val currentKey = if (aiProvider == AiProviderType.GEMINI) geminiApiKey else groqApiKey
-    val onKeyChange = if (aiProvider == AiProviderType.GEMINI) onGeminiApiKeyChanged else onGroqApiKeyChanged
+    val currentKey = when (aiProvider) {
+        AiProviderType.GEMINI -> geminiApiKey
+        AiProviderType.GROQ -> groqApiKey
+        AiProviderType.NVIDIA -> nvidiaApiKey
+    }
+    val onKeyChange = when (aiProvider) {
+        AiProviderType.GEMINI -> onGeminiApiKeyChanged
+        AiProviderType.GROQ -> onGroqApiKeyChanged
+        AiProviderType.NVIDIA -> onNvidiaApiKeyChanged
+    }
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -179,12 +192,20 @@ fun AiPromptAyarlarTab(
                     fontWeight = FontWeight.Bold
                 )
 
-                val activeModel = if (aiProvider == AiProviderType.GEMINI) geminiModel else groqModel
-                val onModelSelected = if (aiProvider == AiProviderType.GEMINI) onGeminiModelSelected else onGroqModelSelected
-                val availableModels = if (aiProvider == AiProviderType.GEMINI) {
-                    if (fetchedGeminiModels.isNotEmpty()) fetchedGeminiModels else aiProvider.supportedModels
-                } else {
-                    if (fetchedGroqModels.isNotEmpty()) fetchedGroqModels else aiProvider.supportedModels
+                val activeModel = when (aiProvider) {
+                    AiProviderType.GEMINI -> geminiModel
+                    AiProviderType.GROQ -> groqModel
+                    AiProviderType.NVIDIA -> nvidiaModel
+                }
+                val onModelSelected = when (aiProvider) {
+                    AiProviderType.GEMINI -> onGeminiModelSelected
+                    AiProviderType.GROQ -> onGroqModelSelected
+                    AiProviderType.NVIDIA -> onNvidiaModelSelected
+                }
+                val availableModels = when (aiProvider) {
+                    AiProviderType.GEMINI -> if (fetchedGeminiModels.isNotEmpty()) fetchedGeminiModels else aiProvider.supportedModels
+                    AiProviderType.GROQ -> if (fetchedGroqModels.isNotEmpty()) fetchedGroqModels else aiProvider.supportedModels
+                    AiProviderType.NVIDIA -> if (fetchedNvidiaModels.isNotEmpty()) fetchedNvidiaModels else aiProvider.supportedModels
                 }
 
                 ExposedDropdownMenuBox(
