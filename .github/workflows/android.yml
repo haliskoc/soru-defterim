@@ -54,32 +54,40 @@ jobs:
 
       - name: Upload Test Results
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-results
           path: app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload Lint Reports
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: lint-reports
           path: app/build/reports/lint-results-debug.html
           if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload APK Artifacts
         if: success()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-builds
           path: app/build/outputs/apk/**/*.apk
           if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload App Bundle (AAB) Artifacts
         if: success()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: android-bundle-builds
           path: app/build/outputs/bundle/**/*.aab
           if-no-files-found: ignore
+          retention-days: 7
