@@ -48,7 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.sorudefteri.domain.model.SimilarQuestionResult
-import com.sorudefteri.ui.ortak.MathMarkdownText
+import com.sorudefteri.ui.ortak.math.MathMarkdownText
 
 @Composable
 fun SimilarQuestionDialog(

@@ -82,7 +82,8 @@ class GeminiProvider @Inject constructor(
                     }
                     .map { item ->
                         val cleanName = item.name.removePrefix("models/")
-                        cleanName to "${item.displayName.ifBlank { cleanName }} ($cleanName)"
+                        val label = item.displayName?.ifBlank { cleanName } ?: cleanName
+                        cleanName to "$label ($cleanName)"
                     }
 
                 if (supportedModels.isEmpty()) {

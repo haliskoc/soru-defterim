@@ -63,6 +63,7 @@ import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.filled.ZoomIn
 import com.sorudefteri.ui.ortak.DrawingCanvasDialog
 import com.sorudefteri.ui.ortak.ShareHelper
+import coil3.compose.AsyncImage
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -239,7 +240,8 @@ fun SoruDetayScreen(
                         IconButton(onClick = { viewModel.toggleCozumDurumu() }) {
                             Icon(
                                 imageVector = if (soru.isSolved) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
-                                contentDescription = if (soru.isSolved) SolvedGreen else MaterialTheme.colorScheme.onSurfaceVariant
+                                contentDescription = if (soru.isSolved) "Çözüldü" else "Çözülmedi",
+                                tint = if (soru.isSolved) SolvedGreen else MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
 
