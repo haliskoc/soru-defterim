@@ -4,16 +4,17 @@ import com.sorudefteri.domain.model.Alan
 import com.sorudefteri.domain.model.Ders
 
 /**
- * YKS Ders Taksonomisi (TYT ve AYT ders listeleri ve ad eşleştirmeleri)
+ * Kapsamlı Sınav ve Ders Taksonomisi (TYT, AYT, YDT, LGS ve KPSS)
  */
 object DersTaksonomisi {
 
     /**
-     * Tüm alanlar için ortak olan 9 TYT Dersi
+     * Tüm YKS alanları için ortak olan TYT Dersleri (Geometri dahil)
      */
     val tytDersleri: List<Ders> = listOf(
         Ders(id = "turkce", ad = "Türkçe", soruSayisi = 40, examType = "TYT", jsonKey = "turkce"),
         Ders(id = "matematik", ad = "Matematik", soruSayisi = 40, examType = "TYT", jsonKey = "matematik"),
+        Ders(id = "geometri", ad = "Geometri", soruSayisi = 10, examType = "TYT", jsonKey = "geometri"),
         Ders(id = "fizik", ad = "Fizik", soruSayisi = 7, examType = "TYT", jsonKey = "fizik"),
         Ders(id = "kimya", ad = "Kimya", soruSayisi = 7, examType = "TYT", jsonKey = "kimya"),
         Ders(id = "biyoloji", ad = "Biyoloji", soruSayisi = 6, examType = "TYT", jsonKey = "biyoloji"),
@@ -30,6 +31,7 @@ object DersTaksonomisi {
      */
     val aytSayisalDersleri: List<Ders> = listOf(
         Ders(id = "ayt_matematik", ad = "Matematik", soruSayisi = 40, examType = "AYT", jsonKey = "matematik"),
+        Ders(id = "ayt_geometri", ad = "Geometri", soruSayisi = 10, examType = "AYT", jsonKey = "geometri"),
         Ders(id = "ayt_fizik", ad = "Fizik", soruSayisi = 14, examType = "AYT", jsonKey = "fizik"),
         Ders(id = "ayt_kimya", ad = "Kimya", soruSayisi = 13, examType = "AYT", jsonKey = "kimya"),
         Ders(id = "ayt_biyoloji", ad = "Biyoloji", soruSayisi = 13, examType = "AYT", jsonKey = "biyoloji")
@@ -40,6 +42,7 @@ object DersTaksonomisi {
      */
     val aytEsitAgirlikDersleri: List<Ders> = listOf(
         Ders(id = "ayt_matematik", ad = "Matematik", soruSayisi = 40, examType = "AYT", jsonKey = "matematik"),
+        Ders(id = "ayt_geometri", ad = "Geometri", soruSayisi = 10, examType = "AYT", jsonKey = "geometri"),
         Ders(id = "ayt_edebiyat", ad = "Türk Dili ve Edebiyatı", soruSayisi = 24, examType = "AYT", jsonKey = "edebiyat"),
         Ders(id = "ayt_tarih1", ad = "Tarih-1", soruSayisi = 10, examType = "AYT", jsonKey = "tarih1"),
         Ders(id = "ayt_cografya1", ad = "Coğrafya-1", soruSayisi = 6, examType = "AYT", jsonKey = "cografya1")
@@ -68,11 +71,36 @@ object DersTaksonomisi {
     )
 
     /**
+     * LGS Dersleri (8. Sınıf)
+     */
+    val lgsDersleri: List<Ders> = listOf(
+        Ders(id = "lgs_turkce", ad = "Türkçe", soruSayisi = 20, examType = "LGS", jsonKey = "turkce"),
+        Ders(id = "lgs_matematik", ad = "Matematik", soruSayisi = 20, examType = "LGS", jsonKey = "matematik"),
+        Ders(id = "lgs_fen", ad = "Fen Bilimleri", soruSayisi = 20, examType = "LGS", jsonKey = "fen"),
+        Ders(id = "lgs_inkilap", ad = "T.C. İnkılap Tarihi", soruSayisi = 10, examType = "LGS", jsonKey = "inkilap"),
+        Ders(id = "lgs_din", ad = "Din Kültürü", soruSayisi = 10, examType = "LGS", jsonKey = "din_kulturu"),
+        Ders(id = "lgs_ingilizce", ad = "İngilizce", soruSayisi = 10, examType = "LGS", jsonKey = "ingilizce")
+    )
+
+    /**
+     * KPSS Dersleri (Genel Yetenek & Genel Kültür)
+     */
+    val kpssDersleri: List<Ders> = listOf(
+        Ders(id = "kpss_turkce", ad = "Genel Yetenek - Türkçe", soruSayisi = 30, examType = "KPSS", jsonKey = "turkce"),
+        Ders(id = "kpss_matematik", ad = "Genel Yetenek - Matematik", soruSayisi = 30, examType = "KPSS", jsonKey = "matematik"),
+        Ders(id = "kpss_tarih", ad = "Genel Kültür - Tarih", soruSayisi = 27, examType = "KPSS", jsonKey = "tarih"),
+        Ders(id = "kpss_cografya", ad = "Genel Kültür - Coğrafya", soruSayisi = 18, examType = "KPSS", jsonKey = "cografya"),
+        Ders(id = "kpss_vatandaslik", ad = "Genel Kültür - Vatandaşlık", soruSayisi = 9, examType = "KPSS", jsonKey = "vatandaslik"),
+        Ders(id = "kpss_guncel", ad = "Genel Kültür - Güncel Bilgiler", soruSayisi = 6, examType = "KPSS", jsonKey = "guncel")
+    )
+
+    /**
      * Tüm bilinen derslerin ID -> Ad sözlüğü
      */
     private val tumDersAdlari: Map<String, String> = mapOf(
         "turkce" to "Türkçe",
         "matematik" to "Matematik",
+        "geometri" to "Geometri",
         "fizik" to "Fizik",
         "kimya" to "Kimya",
         "biyoloji" to "Biyoloji",
@@ -82,6 +110,7 @@ object DersTaksonomisi {
         "din_kulturu" to "Din Kültürü ve Ahlak Bilgisi",
         "din" to "Din Kültürü ve Ahlak Bilgisi",
         "ayt_matematik" to "Matematik",
+        "ayt_geometri" to "Geometri",
         "ayt_fizik" to "Fizik",
         "ayt_kimya" to "Kimya",
         "ayt_biyoloji" to "Biyoloji",
@@ -100,7 +129,19 @@ object DersTaksonomisi {
         "ayt_din" to "Din Kültürü ve Ahlak Bilgisi",
         "ydt_ingilizce" to "YDT İngilizce",
         "ydt_almanca" to "YDT Almanca",
-        "ydt_fransizca" to "YDT Fransızca"
+        "ydt_fransizca" to "YDT Fransızca",
+        "lgs_turkce" to "Türkçe",
+        "lgs_matematik" to "Matematik",
+        "lgs_fen" to "Fen Bilimleri",
+        "lgs_inkilap" to "T.C. İnkılap Tarihi",
+        "lgs_din" to "Din Kültürü",
+        "lgs_ingilizce" to "İngilizce",
+        "kpss_turkce" to "Genel Yetenek - Türkçe",
+        "kpss_matematik" to "Genel Yetenek - Matematik",
+        "kpss_tarih" to "Genel Kültür - Tarih",
+        "kpss_cografya" to "Genel Kültür - Coğrafya",
+        "kpss_vatandaslik" to "Genel Kültür - Vatandaşlık",
+        "kpss_guncel" to "Genel Kültür - Güncel Bilgiler"
     )
 
     /**
@@ -111,7 +152,9 @@ object DersTaksonomisi {
             Alan.SAYISAL -> aytSayisalDersleri
             Alan.ESIT_AGIRLIK -> aytEsitAgirlikDersleri
             Alan.SOZEL -> aytSozelDersleri
-            Alan.DIL -> aytDilDersleri
+            Alan.YDT -> aytDilDersleri
+            Alan.LGS -> lgsDersleri
+            Alan.KPSS -> kpssDersleri
         }
     }
 
@@ -121,10 +164,11 @@ object DersTaksonomisi {
      * Sınav türü ve alana göre ders listesini döner
      */
     fun getDersler(examType: String, alan: Alan = Alan.SAYISAL): List<Ders> {
-        return if (examType.equals("TYT", ignoreCase = true)) {
-            tytDersleri
-        } else {
-            getAytDersleri(alan)
+        return when {
+            alan == Alan.LGS || examType.equals("LGS", ignoreCase = true) -> lgsDersleri
+            alan == Alan.KPSS || examType.equals("KPSS", ignoreCase = true) -> kpssDersleri
+            examType.equals("TYT", ignoreCase = true) -> tytDersleri
+            else -> getAytDersleri(alan)
         }
     }
 
@@ -133,12 +177,14 @@ object DersTaksonomisi {
      */
     fun getDersAdi(examType: String = "TYT", subjectId: String): String {
         val normalizedSubjectId = subjectId.lowercase().trim()
-        val allDersler = tytDersleri + aytSayisalDersleri + aytEsitAgirlikDersleri + aytSozelDersleri + aytDilDersleri
+        val allDersler = tytDersleri + aytSayisalDersleri + aytEsitAgirlikDersleri + aytSozelDersleri + aytDilDersleri + lgsDersleri + kpssDersleri
         return allDersler.find { it.id.equals(normalizedSubjectId, ignoreCase = true) }?.ad
             ?: tumDersAdlari[normalizedSubjectId]
-            ?: tumDersAdlari[normalizedSubjectId.removePrefix("ayt_").removePrefix("tyt_")]
+            ?: tumDersAdlari[normalizedSubjectId.removePrefix("ayt_").removePrefix("tyt_").removePrefix("lgs_").removePrefix("kpss_")]
             ?: subjectId.replace("ayt_", "AYT ")
                 .replace("tyt_", "TYT ")
+                .replace("lgs_", "LGS ")
+                .replace("kpss_", "KPSS ")
                 .replace('_', ' ')
                 .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
     }
@@ -147,3 +193,4 @@ object DersTaksonomisi {
 
     fun getDersName(subjectId: String): String = getDersAdi("TYT", subjectId)
 }
+

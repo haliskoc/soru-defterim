@@ -15,21 +15,32 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.io.OutputStream
+import java.security.SecureRandom
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
+import javax.crypto.Cipher
+import javax.crypto.CipherInputStream
+import javax.crypto.CipherOutputStream
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.PBEKeySpec
+import javax.crypto.spec.SecretKeySpec
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Serializable
 data class BackupManifest(
     val appSignature: String = "com.sorudefteri",
-    val version: Int = 1,
+    val version: Int = 2,
     val exportDate: Long = System.currentTimeMillis(),
     val questionCount: Int,
     val sorular: List<BackupSoruItem>
@@ -52,34 +63,68 @@ data class BackupSoruItem(
     val reviewStage: Int = 0,
     val nextReviewDate: Long? = null,
     val lastReviewedAt: Long? = null,
+    val kaynakYayin: String? = null,
+    val kaynakDeneme: String? = null,
+    val kaynakYil: Int? = null,
+    val kaynakSoruNo: Int? = null,
+    val studentAnswer: String? = null,
+    val difficulty: String? = null,
+    val ocrMetni: String? = null,
+    val isOcrUsed: Boolean = false,
+    val questionText: String? = null,
     val createdAt: Long = System.currentTimeMillis()
 )
 
 /**
- * Soruların, fotoğrafların, cevapların ve AI çözümlerinin tek bir .sdefteri (.zip) paketi
- * halinde dışa ve içe aktarılmasını sağlayan dayanıklı ve fail-safe yedekleme yöneticisi.
+ * Soruların, fotoğrafların, cevapların ve AI çözümlerinin tek bir .sdefteri paketi
+ * halinde dışa ve içe aktarılmasını sağlayan dayanıklı, AES-256-GCM şifreli yedekleme yöneticisi.
  */
 @Singleton
-class BackupManager @Inject constructor(
+open class BackupManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val soruRepository: SoruRepository,
     private val gorselDepo: GorselDepo,
     private val json: Json
 ) {
 
-    private val BUFFER_SIZE = 8192
+    companion object {
+        private const val BUFFER_SIZE = 8192
+        private val MAGIC_HEADER = "SDEFTERI_ENC_V1".toByteArray(Charsets.US_ASCII)
+        private const val SALT_LENGTH = 16
+        private const val IV_LENGTH = 12
+        private const val GCM_TAG_LENGTH_BITS = 128
+        private const val PBKDF2_ITERATIONS = 10000
+        private const val KEY_LENGTH_BITS = 256
+    }
 
     /**
-     * Tüm veritabanı kayıtlarını ve görselleri URI üzerinden verilen çıkış akışına ZIP (.sdefteri) olarak paketler.
+     * Verilen dosya veya Uri'nin şifreli bir .sdefteri paketi olup olmadığını tespit eder.
+     */
+    suspend fun isBackupEncrypted(sourceUri: Uri): Boolean = withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                val headerBuffer = ByteArray(MAGIC_HEADER.size)
+                val read = input.read(headerBuffer)
+                return@withContext read == MAGIC_HEADER.size && headerBuffer.contentEquals(MAGIC_HEADER)
+            } ?: false
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Tüm veritabanı kayıtlarını ve görselleri URI üzerinden verilen çıkış akışına
+     * opsiyonel AES-256-GCM şifrelemeli `.sdefteri` olarak paketler.
+     * @param password Opsiyonel parola (verilirse AES-256-GCM ile şifrelenir, verilmezse standart zip)
      * @return Dışa aktarılan soru sayısı
      */
-    suspend fun exportBackup(targetUri: Uri): Result<Int> = withContext(Dispatchers.IO) {
+    open suspend fun exportBackup(targetUri: Uri, password: String? = null): Result<Int> = withContext(Dispatchers.IO) {
         try {
             val outputStream = context.contentResolver.openOutputStream(targetUri)
-                ?: return@withContext Result.failure(Exception("Hedef dosya yazılamadı."))
+                ?: return@withContext Result.failure(Exception("Hedef dosya açılamadı veya yazılamadı."))
 
             outputStream.use { rawOut ->
-                exportBackupToStream(rawOut)
+                exportBackupToStream(rawOut, password)
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -88,14 +133,15 @@ class BackupManager @Inject constructor(
     }
 
     /**
-     * Bulut / Google Drive paylaşımı için yedek paketini geçici dosyaya yazar.
+     * Bulut / Google Drive senkronizasyonu veya yerel otomatik yedekleme için geçici dosyaya yazar.
+     * @param password Opsiyonel şifreleme parolası
      */
-    suspend fun exportBackupToTempFile(): Result<Pair<File, Int>> = withContext(Dispatchers.IO) {
+    suspend fun exportBackupToTempFile(password: String? = null): Result<Pair<File, Int>> = withContext(Dispatchers.IO) {
         try {
             val fileName = "soru_defterim_yedek_${System.currentTimeMillis()}.sdefteri"
             val tempFile = File(context.cacheDir, fileName)
             val result = FileOutputStream(tempFile).use { out ->
-                exportBackupToStream(out)
+                exportBackupToStream(out, password)
             }
             result.map { count -> tempFile to count }
         } catch (e: Exception) {
@@ -103,36 +149,27 @@ class BackupManager @Inject constructor(
         }
     }
 
-    private suspend fun exportBackupToStream(outputStream: OutputStream): Result<Int> = withContext(Dispatchers.IO) {
+    /**
+     * İç akışa yedekleme verilerini yazar. Parola varsa şifreleme katmanı uygulanır.
+     */
+    private suspend fun exportBackupToStream(outputStream: OutputStream, password: String?): Result<Int> = withContext(Dispatchers.IO) {
+        val tempZipFile = File(context.cacheDir, "temp_export_${UUID.randomUUID()}.zip")
         try {
             val sorular = soruRepository.getAllSorular().first()
             val backupItems = mutableListOf<BackupSoruItem>()
 
-            ZipOutputStream(BufferedOutputStream(outputStream)).use { zipOut ->
-                val buffer = ByteArray(BUFFER_SIZE)
+            // 1. Önce standart ZIP içeriğini geçici dosyaya oluştur
+            FileOutputStream(tempZipFile).use { fos ->
+                ZipOutputStream(BufferedOutputStream(fos)).use { zipOut ->
+                    val buffer = ByteArray(BUFFER_SIZE)
 
-                for ((index, soru) in sorular.withIndex()) {
-                    val soruFile = File(soru.imagePath)
-                    val uniqueImageName = "images/soru_${index}_${UUID.randomUUID()}.jpg"
+                    for ((index, soru) in sorular.withIndex()) {
+                        val soruFile = File(soru.imagePath)
+                        val uniqueImageName = "images/soru_${index}_${UUID.randomUUID()}.jpg"
 
-                    if (soruFile.exists() && soruFile.isFile) {
-                        zipOut.putNextEntry(ZipEntry(uniqueImageName))
-                        FileInputStream(soruFile).use { fileIn ->
-                            var len: Int
-                            while (fileIn.read(buffer).also { len = it } > 0) {
-                                zipOut.write(buffer, 0, len)
-                            }
-                        }
-                        zipOut.closeEntry()
-                    }
-
-                    var uniqueSolutionName: String? = null
-                    if (!soru.solutionImagePath.isNullOrBlank()) {
-                        val solutionFile = File(soru.solutionImagePath)
-                        if (solutionFile.exists() && solutionFile.isFile) {
-                            uniqueSolutionName = "images/cozum_${index}_${UUID.randomUUID()}.jpg"
-                            zipOut.putNextEntry(ZipEntry(uniqueSolutionName))
-                            FileInputStream(solutionFile).use { fileIn ->
+                        if (soruFile.exists() && soruFile.isFile) {
+                            zipOut.putNextEntry(ZipEntry(uniqueImageName))
+                            FileInputStream(soruFile).use { fileIn ->
                                 var len: Int
                                 while (fileIn.read(buffer).also { len = it } > 0) {
                                     zipOut.write(buffer, 0, len)
@@ -140,104 +177,216 @@ class BackupManager @Inject constructor(
                             }
                             zipOut.closeEntry()
                         }
+
+                        var uniqueSolutionName: String? = null
+                        if (!soru.solutionImagePath.isNullOrBlank()) {
+                            val solutionFile = File(soru.solutionImagePath)
+                            if (solutionFile.exists() && solutionFile.isFile) {
+                                uniqueSolutionName = "images/cozum_${index}_${UUID.randomUUID()}.jpg"
+                                zipOut.putNextEntry(ZipEntry(uniqueSolutionName))
+                                FileInputStream(solutionFile).use { fileIn ->
+                                    var len: Int
+                                    while (fileIn.read(buffer).also { len = it } > 0) {
+                                        zipOut.write(buffer, 0, len)
+                                    }
+                                }
+                                zipOut.closeEntry()
+                            }
+                        }
+
+                        backupItems.add(
+                            BackupSoruItem(
+                                imageName = uniqueImageName,
+                                solutionImageName = uniqueSolutionName,
+                                correctAnswer = soru.correctAnswer,
+                                examType = soru.examType,
+                                subjectId = soru.subjectId,
+                                topic = soru.topic,
+                                mistakeType = soru.mistakeType?.name,
+                                note = soru.note,
+                                isSolved = soru.isSolved,
+                                solvedAt = soru.solvedAt,
+                                aiExplanation = soru.aiExplanation,
+                                isFavorite = soru.isFavorite,
+                                reviewStage = soru.reviewStage,
+                                nextReviewDate = soru.nextReviewDate,
+                                lastReviewedAt = soru.lastReviewedAt,
+                                kaynakYayin = soru.kaynakYayin,
+                                kaynakDeneme = soru.kaynakDeneme,
+                                kaynakYil = soru.kaynakYil,
+                                kaynakSoruNo = soru.kaynakSoruNo,
+                                studentAnswer = soru.studentAnswer,
+                                difficulty = soru.difficulty,
+                                ocrMetni = soru.ocrMetni,
+                                isOcrUsed = soru.isOcrUsed,
+                                questionText = soru.questionText,
+                                createdAt = soru.createdAt
+                            )
+                        )
                     }
 
-                    backupItems.add(
-                        BackupSoruItem(
-                            imageName = uniqueImageName,
-                            solutionImageName = uniqueSolutionName,
-                            correctAnswer = soru.correctAnswer,
-                            examType = soru.examType,
-                            subjectId = soru.subjectId,
-                            topic = soru.topic,
-                            mistakeType = soru.mistakeType?.name,
-                            note = soru.note,
-                            isSolved = soru.isSolved,
-                            solvedAt = soru.solvedAt,
-                            aiExplanation = soru.aiExplanation,
-                            isFavorite = soru.isFavorite,
-                            reviewStage = soru.reviewStage,
-                            nextReviewDate = soru.nextReviewDate,
-                            lastReviewedAt = soru.lastReviewedAt,
-                            createdAt = soru.createdAt
-                        )
+                    // Manifest dosyasını ZIP kök dizinine ekle
+                    val manifest = BackupManifest(
+                        questionCount = backupItems.size,
+                        sorular = backupItems
                     )
+                    val manifestJson = json.encodeToString(manifest)
+                    zipOut.putNextEntry(ZipEntry("backup_manifest.json"))
+                    zipOut.write(manifestJson.toByteArray(Charsets.UTF_8))
+                    zipOut.closeEntry()
+                    zipOut.flush()
+                }
+            }
+
+            // 2. Parola belirtilmişse AES-256-GCM ile şifrele, değilse düz zip yaz
+            if (!password.isNullOrBlank()) {
+                val secureRandom = SecureRandom()
+                val salt = ByteArray(SALT_LENGTH).also { secureRandom.nextBytes(it) }
+                val iv = ByteArray(IV_LENGTH).also { secureRandom.nextBytes(it) }
+
+                val secretKey = deriveKey(password.toCharArray(), salt)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                    init(Cipher.ENCRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
                 }
 
-                // Manifest dosyasını kök dizine ekle
-                val manifest = BackupManifest(
-                    questionCount = backupItems.size,
-                    sorular = backupItems
-                )
-                val manifestJson = json.encodeToString(manifest)
-                zipOut.putNextEntry(ZipEntry("backup_manifest.json"))
-                zipOut.write(manifestJson.toByteArray(Charsets.UTF_8))
-                zipOut.closeEntry()
-                zipOut.flush()
+                // Format: [MAGIC_HEADER 15B][SALT 16B][IV 12B][CIPHERTEXT + GCM TAG]
+                outputStream.write(MAGIC_HEADER)
+                outputStream.write(salt)
+                outputStream.write(iv)
+
+                CipherOutputStream(outputStream, cipher).use { cipherOut ->
+                    FileInputStream(tempZipFile).use { fis ->
+                        val buffer = ByteArray(BUFFER_SIZE)
+                        var len: Int
+                        while (fis.read(buffer).also { len = it } > 0) {
+                            cipherOut.write(buffer, 0, len)
+                        }
+                    }
+                    cipherOut.flush()
+                }
+            } else {
+                // Şifresiz standart ZIP
+                FileInputStream(tempZipFile).use { fis ->
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    var len: Int
+                    while (fis.read(buffer).also { len = it } > 0) {
+                        outputStream.write(buffer, 0, len)
+                    }
+                }
+                outputStream.flush()
             }
 
             Result.success(sorular.size)
         } catch (e: Exception) {
             e.printStackTrace()
             Result.failure(e)
+        } finally {
+            try {
+                if (tempZipFile.exists()) tempZipFile.delete()
+            } catch (_: Exception) {}
         }
     }
 
     /**
-     * Seçilen .sdefteri (.zip) yedek dosyasını açar, doğrular, görselleri kalıcı depoya kopyalar
-     * ve soruları veritabanına ekler.
+     * Seçilen .sdefteri yedek dosyasını açar, doğrular, görselleri kalıcı depoya kopyalar
+     * ve soruları veritabanına aktarır.
+     * @param sourceUri İçe aktarılacak dosya Uri'si
+     * @param password Şifreli dosya ise parola, şifresiz ise null
      * @return İçe aktarılan soru sayısı
      */
-    suspend fun importBackup(sourceUri: Uri): Result<Int> = withContext(Dispatchers.IO) {
+    open suspend fun importBackup(sourceUri: Uri, password: String? = null): Result<Int> = withContext(Dispatchers.IO) {
         val tempExtractDir = File(context.cacheDir, "temp_import_${UUID.randomUUID()}")
         try {
             tempExtractDir.mkdirs()
 
-            val inputStream = context.contentResolver.openInputStream(sourceUri)
+            val rawInputStream = context.contentResolver.openInputStream(sourceUri)
                 ?: return@withContext Result.failure(Exception("Yedek dosyası açılamadı."))
 
-            // 1. ZIP içeriğini geçici klasöre aç
-            inputStream.use { rawIn ->
-                ZipInputStream(BufferedInputStream(rawIn)).use { zipIn ->
-                    var entry: ZipEntry? = zipIn.nextEntry
-                    val buffer = ByteArray(BUFFER_SIZE)
+            // Dosya akışını tamponlayarak başlığı kontrol et
+            val bufferedIn = BufferedInputStream(rawInputStream)
+            bufferedIn.mark(MAGIC_HEADER.size + 1)
+            val headerBuffer = ByteArray(MAGIC_HEADER.size)
+            val readHeaderSize = bufferedIn.read(headerBuffer)
+            val isEncrypted = readHeaderSize == MAGIC_HEADER.size && headerBuffer.contentEquals(MAGIC_HEADER)
 
-                    while (entry != null) {
-                        val newFile = File(tempExtractDir, entry.name)
+            val zipInputStream: ZipInputStream = if (isEncrypted) {
+                if (password.isNullOrBlank()) {
+                    return@withContext Result.failure(
+                        SecurityException("Bu yedek dosyası şifreli (.sdefteri). Lütfen şifre çözme parolasını girin.")
+                    )
+                }
 
-                        // Path traversal güvenlik kontrolü
-                        if (!newFile.canonicalPath.startsWith(tempExtractDir.canonicalPath)) {
-                            throw SecurityException("Güvensiz zip içeriği tespit edildi.")
-                        }
+                val salt = ByteArray(SALT_LENGTH)
+                val iv = ByteArray(IV_LENGTH)
+                val readSalt = bufferedIn.read(salt)
+                val readIv = bufferedIn.read(iv)
 
-                        if (entry.isDirectory) {
-                            newFile.mkdirs()
-                        } else {
-                            newFile.parentFile?.mkdirs()
-                            FileOutputStream(newFile).use { out ->
-                                var len: Int
-                                while (zipIn.read(buffer).also { len = it } > 0) {
-                                    out.write(buffer, 0, len)
-                                }
+                if (readSalt != SALT_LENGTH || readIv != IV_LENGTH) {
+                    return@withContext Result.failure(Exception("Bozuk şifreli yedek başlığı."))
+                }
+
+                val secretKey = deriveKey(password.toCharArray(), salt)
+                val cipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+                    init(Cipher.DECRYPT_MODE, secretKey, GCMParameterSpec(GCM_TAG_LENGTH_BITS, iv))
+                }
+
+                ZipInputStream(BufferedInputStream(CipherInputStream(bufferedIn, cipher)))
+            } else {
+                // Şifreli değil, başa geri sar
+                bufferedIn.reset()
+                ZipInputStream(bufferedIn)
+            }
+
+            // 1. ZIP içeriğini Zip Slip korumasıyla geçici klasöre aç
+            zipInputStream.use { zipIn ->
+                var entry: ZipEntry?
+                val buffer = ByteArray(BUFFER_SIZE)
+
+                try {
+                    entry = zipIn.nextEntry
+                } catch (e: Exception) {
+                    return@withContext Result.failure(
+                        SecurityException("Yedek şifresi hatalı veya dosya bozulmuş: ${e.localizedMessage}")
+                    )
+                }
+
+                val canonicalDestDir = tempExtractDir.canonicalFile
+
+                while (entry != null) {
+                    val destinationFile = File(tempExtractDir, entry.name).canonicalFile
+
+                    // Gelişmiş Zip Slip Path Traversal Koruması
+                    if (!destinationFile.path.startsWith(canonicalDestDir.path + File.separator) && destinationFile != canonicalDestDir) {
+                        throw SecurityException("Güvensiz zip içeriği tespit edildi (Path Traversal Saldırısı): ${entry.name}")
+                    }
+
+                    if (entry.isDirectory) {
+                        destinationFile.mkdirs()
+                    } else {
+                        destinationFile.parentFile?.mkdirs()
+                        FileOutputStream(destinationFile).use { out ->
+                            var len: Int
+                            while (zipIn.read(buffer).also { len = it } > 0) {
+                                out.write(buffer, 0, len)
                             }
                         }
-                        zipIn.closeEntry()
-                        entry = zipIn.nextEntry
                     }
+                    zipIn.closeEntry()
+                    entry = zipIn.nextEntry
                 }
             }
 
             // 2. Manifest kontrolü
             val manifestFile = File(tempExtractDir, "backup_manifest.json")
             if (!manifestFile.exists()) {
-                return@withContext Result.failure(Exception("Geçersiz yedek dosyası: backup_manifest.json bulunamadı."))
+                return@withContext Result.failure(Exception("Geçersiz yedek paketi: backup_manifest.json bulunamadı."))
             }
 
             val manifestText = manifestFile.readText(Charsets.UTF_8)
             val manifest = try {
                 json.decodeFromString<BackupManifest>(manifestText)
             } catch (e: Exception) {
-                return@withContext Result.failure(Exception("Yedek dosyası ayrıştırılamadı: ${e.localizedMessage}"))
+                return@withContext Result.failure(Exception("Yedek manifesti ayrıştırılamadı: ${e.localizedMessage}"))
             }
 
             if (manifest.appSignature != "com.sorudefteri") {
@@ -250,7 +399,7 @@ class BackupManager @Inject constructor(
             for (item in manifest.sorular) {
                 val imageFile = File(tempExtractDir, item.imageName)
                 if (!imageFile.exists() || !imageFile.isFile) {
-                    continue // Eksik görsel varsa bu soruyu atla
+                    continue // Eksik soru görseli varsa atla
                 }
 
                 val permanentSoruPath = gorselDepo.kaydetDosyadan(imageFile, isSolution = false)
@@ -265,7 +414,7 @@ class BackupManager @Inject constructor(
 
                 newSorular.add(
                     Soru(
-                        id = 0L, // Yeni ID otomatik atanacak
+                        id = 0L,
                         imagePath = permanentSoruPath,
                         solutionImagePath = permanentSolutionPath,
                         correctAnswer = item.correctAnswer,
@@ -281,6 +430,15 @@ class BackupManager @Inject constructor(
                         reviewStage = item.reviewStage,
                         nextReviewDate = item.nextReviewDate,
                         lastReviewedAt = item.lastReviewedAt,
+                        kaynakYayin = item.kaynakYayin,
+                        kaynakDeneme = item.kaynakDeneme,
+                        kaynakYil = item.kaynakYil,
+                        kaynakSoruNo = item.kaynakSoruNo,
+                        studentAnswer = item.studentAnswer,
+                        difficulty = item.difficulty,
+                        ocrMetni = item.ocrMetni,
+                        isOcrUsed = item.isOcrUsed,
+                        questionText = item.questionText,
                         createdAt = item.createdAt,
                         updatedAt = System.currentTimeMillis()
                     )
@@ -296,10 +454,20 @@ class BackupManager @Inject constructor(
             e.printStackTrace()
             Result.failure(e)
         } finally {
-            // Geçici klasörü temizle
             try {
                 tempExtractDir.deleteRecursively()
             } catch (_: Exception) {}
         }
     }
+
+    /**
+     * PBKDF2WithHmacSHA256 kullanarak paroladan 256-bit AES anahtarı türetir.
+     */
+    private fun deriveKey(password: CharArray, salt: ByteArray): SecretKeySpec {
+        val keySpec = PBEKeySpec(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH_BITS)
+        val keyFactory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val keyBytes = keyFactory.generateSecret(keySpec).encoded
+        return SecretKeySpec(keyBytes, "AES")
+    }
 }
+

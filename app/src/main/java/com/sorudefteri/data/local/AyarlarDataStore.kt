@@ -1,45 +1,143 @@
 package com.sorudefteri.data.local
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.sorudefteri.data.ai.AiPromptType
 import com.sorudefteri.domain.model.AiProviderType
 import com.sorudefteri.domain.model.Alan
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
 private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "soru_defteri_ayarlar")
 
 /**
- * Kullanıcı tercihlerini ve API ayarlarını yöneten DataStore bileşeni
+ * Kullanıcı tercihlerini ve API ayarlarını yöneten DataStore bileşeni.
+ * P0-1: API anahtarları EncryptedSharedPreferences ile AES256-GCM şifreli tutulur.
+ * Diğer tercihler (alan, theme, model, özel sistem promptları) normal DataStore'da saklanır.
  */
 @Singleton
 class AyarlarDataStore @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val encryptedPrefs: SharedPreferences
 ) {
 
     companion object {
         private val KEY_ALAN = stringPreferencesKey("alan")
         private val KEY_AI_PROVIDER = stringPreferencesKey("ai_provider")
-        private val KEY_GEMINI_API_KEY = stringPreferencesKey("gemini_api_key")
-        private val KEY_GROQ_API_KEY = stringPreferencesKey("groq_api_key")
+        // Legacy plain keys (migration için saklı, artık yazılmıyor)
+        private val KEY_GEMINI_API_KEY_LEGACY = stringPreferencesKey("gemini_api_key")
+        private val KEY_GROQ_API_KEY_LEGACY = stringPreferencesKey("groq_api_key")
         private val KEY_GEMINI_MODEL = stringPreferencesKey("gemini_model")
         private val KEY_GROQ_MODEL = stringPreferencesKey("groq_model")
         private val KEY_DARK_THEME = intPreferencesKey("dark_theme")
+
+        // EncryptedSharedPreferences keys
+        private const val ENC_GEMINI_API_KEY = "gemini_api_key"
+        private const val ENC_GROQ_API_KEY = "groq_api_key"
+
+        // Auto backup preferences
+        private val KEY_AUTO_BACKUP_ENABLED = booleanPreferencesKey("auto_backup_enabled")
+        private val KEY_WIFI_ONLY_BACKUP = booleanPreferencesKey("wifi_only_backup")
+
+        // Özel System Prompt preferences
+        private val KEY_PROMPT_SORU_URETIMI = stringPreferencesKey("prompt_soru_uretimi")
+        private val KEY_PROMPT_COZUM_URETIMI = stringPreferencesKey("prompt_cozum_uretimi")
+        private val KEY_PROMPT_OCR_TEMIZLEME = stringPreferencesKey("prompt_ocr_temizleme")
+        private val KEY_PROMPT_BENZER_SORU = stringPreferencesKey("prompt_benzer_soru")
+
+        // Onboarding
+        private val KEY_ONBOARDING_SEEN = booleanPreferencesKey("onboarding_seen")
 
         const val DEFAULT_ALAN = "SAYISAL"
         const val DEFAULT_AI_PROVIDER = "GEMINI"
         const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
         const val DEFAULT_GROQ_MODEL = "llama-3.2-11b-vision-preview"
         const val DEFAULT_DARK_THEME = 0 // 0: Sistem, 1: Açık, 2: Koyu
+        const val DEFAULT_AUTO_BACKUP_ENABLED = false
+        const val DEFAULT_WIFI_ONLY_BACKUP = true
+        const val DEFAULT_ONBOARDING_SEEN = false
+    }
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Encrypted flows - MutableStateFlow ile anlık + güncellenebilir
+    private val _geminiApiKeyFlow = MutableStateFlow(
+        encryptedPrefs.getString(ENC_GEMINI_API_KEY, "") ?: ""
+    )
+    private val _groqApiKeyFlow = MutableStateFlow(
+        encryptedPrefs.getString(ENC_GROQ_API_KEY, "") ?: ""
+    )
+
+    private val encryptedListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        when (key) {
+            ENC_GEMINI_API_KEY -> {
+                _geminiApiKeyFlow.value = encryptedPrefs.getString(ENC_GEMINI_API_KEY, "") ?: ""
+            }
+            ENC_GROQ_API_KEY -> {
+                _groqApiKeyFlow.value = encryptedPrefs.getString(ENC_GROQ_API_KEY, "") ?: ""
+            }
+        }
+    }
+
+    init {
+        encryptedPrefs.registerOnSharedPreferenceChangeListener(encryptedListener)
+        // Migration: plain DataStore'daki eski API key'leri şifreli store'a taşı (one-shot)
+        scope.launch {
+            try {
+                migrateLegacyKeysIfNeeded()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    /**
+     * Legacy plain DataStore'dan encrypted prefs'e tek seferlik taşıma.
+     * Eğer encrypted boş ama plain dolu ise kopyala, sonra plain'den sil.
+     */
+    private suspend fun migrateLegacyKeysIfNeeded() {
+        val prefs = context.dataStore.data.first()
+        val legacyGemini = prefs[KEY_GEMINI_API_KEY_LEGACY]?.trim().orEmpty()
+        val legacyGroq = prefs[KEY_GROQ_API_KEY_LEGACY]?.trim().orEmpty()
+        val encGemini = encryptedPrefs.getString(ENC_GEMINI_API_KEY, "") ?: ""
+        val encGroq = encryptedPrefs.getString(ENC_GROQ_API_KEY, "") ?: ""
+
+        var migrated = false
+        val editor = encryptedPrefs.edit()
+        if (encGemini.isBlank() && legacyGemini.isNotBlank()) {
+            editor.putString(ENC_GEMINI_API_KEY, legacyGemini)
+            _geminiApiKeyFlow.value = legacyGemini
+            migrated = true
+        }
+        if (encGroq.isBlank() && legacyGroq.isNotBlank()) {
+            editor.putString(ENC_GROQ_API_KEY, legacyGroq)
+            _groqApiKeyFlow.value = legacyGroq
+            migrated = true
+        }
+        if (migrated) {
+            editor.apply()
+            // Legacy plain key'leri temizle
+            context.dataStore.edit { ds ->
+                if (legacyGemini.isNotBlank()) ds.remove(KEY_GEMINI_API_KEY_LEGACY)
+                if (legacyGroq.isNotBlank()) ds.remove(KEY_GROQ_API_KEY_LEGACY)
+            }
+        }
     }
 
     // ==========================================
@@ -68,15 +166,12 @@ class AyarlarDataStore @Inject constructor(
         preferences[KEY_AI_PROVIDER] ?: DEFAULT_AI_PROVIDER
     }
 
-    val geminiApiKeyFlow: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[KEY_GEMINI_API_KEY] ?: ""
-    }
+    // P0-1: Şifreli kaynak
+    val geminiApiKeyFlow: Flow<String> = _geminiApiKeyFlow.asStateFlow()
 
     val geminiApiKey: Flow<String> get() = geminiApiKeyFlow
 
-    val groqApiKeyFlow: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[KEY_GROQ_API_KEY] ?: ""
-    }
+    val groqApiKeyFlow: Flow<String> = _groqApiKeyFlow.asStateFlow()
 
     val groqApiKey: Flow<String> get() = groqApiKeyFlow
 
@@ -97,6 +192,96 @@ class AyarlarDataStore @Inject constructor(
     }
 
     val themeMode: Flow<Int> get() = darkThemeFlow
+
+    val autoBackupEnabledFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_AUTO_BACKUP_ENABLED] ?: DEFAULT_AUTO_BACKUP_ENABLED
+    }
+
+    val isAutoBackupEnabled: Flow<Boolean> get() = autoBackupEnabledFlow
+
+    val wifiOnlyBackupFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_WIFI_ONLY_BACKUP] ?: DEFAULT_WIFI_ONLY_BACKUP
+    }
+
+    val isWifiOnlyBackup: Flow<Boolean> get() = wifiOnlyBackupFlow
+
+    val isOnboardingSeenFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_ONBOARDING_SEEN] ?: DEFAULT_ONBOARDING_SEEN
+    }
+
+    val isOnboardingSeen: Flow<Boolean> get() = isOnboardingSeenFlow
+
+    // Custom Prompts Flows
+    val promptSoruUretimiFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_PROMPT_SORU_URETIMI] ?: ""
+    }
+
+    val promptCozumUretimiFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_PROMPT_COZUM_URETIMI] ?: ""
+    }
+
+    val promptOcrTemizlemeFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_PROMPT_OCR_TEMIZLEME] ?: ""
+    }
+
+    val promptBenzerSoruFlow: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_PROMPT_BENZER_SORU] ?: ""
+    }
+
+    // ==========================================
+    // Custom Prompt Helpers
+    // ==========================================
+
+    fun getCustomPrompt(type: AiPromptType): Flow<String> {
+        return when (type) {
+            AiPromptType.SORU_URETIMI -> promptSoruUretimiFlow
+            AiPromptType.COZUM_URETIMI -> promptCozumUretimiFlow
+            AiPromptType.OCR_TEMIZLEME -> promptOcrTemizlemeFlow
+            AiPromptType.BENZER_SORU -> promptBenzerSoruFlow
+        }
+    }
+
+    suspend fun getCustomPromptValue(type: AiPromptType): String {
+        return getCustomPrompt(type).first()
+    }
+
+    suspend fun setCustomPrompt(type: AiPromptType, prompt: String) {
+        val trimmed = prompt.trim()
+        val key = when (type) {
+            AiPromptType.SORU_URETIMI -> KEY_PROMPT_SORU_URETIMI
+            AiPromptType.COZUM_URETIMI -> KEY_PROMPT_COZUM_URETIMI
+            AiPromptType.OCR_TEMIZLEME -> KEY_PROMPT_OCR_TEMIZLEME
+            AiPromptType.BENZER_SORU -> KEY_PROMPT_BENZER_SORU
+        }
+        context.dataStore.edit { preferences ->
+            if (trimmed.isBlank()) {
+                preferences.remove(key)
+            } else {
+                preferences[key] = trimmed
+            }
+        }
+    }
+
+    suspend fun resetPromptToDefault(type: AiPromptType) {
+        val key = when (type) {
+            AiPromptType.SORU_URETIMI -> KEY_PROMPT_SORU_URETIMI
+            AiPromptType.COZUM_URETIMI -> KEY_PROMPT_COZUM_URETIMI
+            AiPromptType.OCR_TEMIZLEME -> KEY_PROMPT_OCR_TEMIZLEME
+            AiPromptType.BENZER_SORU -> KEY_PROMPT_BENZER_SORU
+        }
+        context.dataStore.edit { preferences ->
+            preferences.remove(key)
+        }
+    }
+
+    suspend fun resetAllPromptsToDefault() {
+        context.dataStore.edit { preferences ->
+            preferences.remove(KEY_PROMPT_SORU_URETIMI)
+            preferences.remove(KEY_PROMPT_COZUM_URETIMI)
+            preferences.remove(KEY_PROMPT_OCR_TEMIZLEME)
+            preferences.remove(KEY_PROMPT_BENZER_SORU)
+        }
+    }
 
     // ==========================================
     // Setters
@@ -127,15 +312,15 @@ class AyarlarDataStore @Inject constructor(
     }
 
     suspend fun setGeminiApiKey(apiKey: String) {
-        context.dataStore.edit { preferences ->
-            preferences[KEY_GEMINI_API_KEY] = apiKey.trim()
-        }
+        val trimmed = apiKey.trim()
+        encryptedPrefs.edit().putString(ENC_GEMINI_API_KEY, trimmed).apply()
+        _geminiApiKeyFlow.value = trimmed
     }
 
     suspend fun setGroqApiKey(apiKey: String) {
-        context.dataStore.edit { preferences ->
-            preferences[KEY_GROQ_API_KEY] = apiKey.trim()
-        }
+        val trimmed = apiKey.trim()
+        encryptedPrefs.edit().putString(ENC_GROQ_API_KEY, trimmed).apply()
+        _groqApiKeyFlow.value = trimmed
     }
 
     suspend fun setGeminiModel(model: String) {
@@ -158,10 +343,32 @@ class AyarlarDataStore @Inject constructor(
 
     suspend fun setThemeMode(mode: Int) = setDarkTheme(mode)
 
+    suspend fun setAutoBackupEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_AUTO_BACKUP_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setWifiOnlyBackup(wifiOnly: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_WIFI_ONLY_BACKUP] = wifiOnly
+        }
+    }
+
+    suspend fun setOnboardingSeen(seen: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_ONBOARDING_SEEN] = seen
+        }
+    }
+
     suspend fun clearSettings() {
         context.dataStore.edit { preferences ->
             preferences.clear()
         }
+        // Encrypted prefs'i de temizle
+        encryptedPrefs.edit().clear().apply()
+        _geminiApiKeyFlow.value = ""
+        _groqApiKeyFlow.value = ""
     }
 
     // ==========================================
@@ -175,6 +382,9 @@ class AyarlarDataStore @Inject constructor(
     suspend fun getGeminiModel(): String = geminiModelFlow.first()
     suspend fun getGroqModel(): String = groqModelFlow.first()
     suspend fun getDarkTheme(): Int = darkThemeFlow.first()
+    suspend fun getAutoBackupEnabled(): Boolean = autoBackupEnabledFlow.first()
+    suspend fun getWifiOnlyBackup(): Boolean = wifiOnlyBackupFlow.first()
+    suspend fun getIsOnboardingSeen(): Boolean = isOnboardingSeenFlow.first()
 
     suspend fun getActiveApiKey(): String {
         return when (getAiProvider()) {

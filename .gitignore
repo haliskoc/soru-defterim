@@ -13,5 +13,6 @@ app/build/
 *.apk
 *.aab
 build_artifacts/
+.kotlin/
 
 

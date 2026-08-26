@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.data.local.AyarlarDataStore
+import com.sorudefteri.data.ocr.OcrHelper
 import com.sorudefteri.data.repository.SoruRepository
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.KonuKatalog
@@ -27,14 +28,21 @@ import java.io.File
 import javax.inject.Inject
 
 data class SoruEklemeUiState(
+    val editingSoruId: Long? = null,
     val soruImagePath: String? = null,
     val solutionImagePath: String? = null,
     val examType: String = "TYT", // "TYT" or "AYT"
     val subjectId: String = "matematik",
     val topic: String = "",
     val mistakeType: HataTipi? = null,
+    val difficulty: String? = null,
     val correctAnswer: String? = null,
+    val studentAnswer: String? = null,
     val note: String = "",
+    val kaynakYayin: String = "",
+    val kaynakDeneme: String = "",
+    val kaynakYil: String = "",
+    val kaynakSoruNo: String = "",
     val topicSuggestions: List<String> = emptyList(),
     val catalogUnits: List<KonuUnite> = emptyList(),
     val frequentTopics: List<String> = emptyList(),
@@ -47,8 +55,20 @@ data class SoruEklemeUiState(
     val isSaved: Boolean = false,
     val isAutoTagging: Boolean = false,
     val autoTagSuccessMessage: String? = null,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    // Koşullu OCR & Metin Çıkarımı
+    val isOcrExtracting: Boolean = false,
+    val extractedText: String? = null,
+    val sendImageToAi: Boolean = true,
+    val isCleaningOcr: Boolean = false,
+    val ocrStatusMessage: String? = null,
+    // Kırpma / Döndürme Dialogu
+    val isCropperOpen: Boolean = false,
+    val cropTargetIsSolution: Boolean = false
 ) {
+    val isEditMode: Boolean
+        get() = editingSoruId != null
+
     val canSave: Boolean
         get() = !soruImagePath.isNullOrBlank() && topic.isNotBlank() && !isSaving
 
@@ -65,7 +85,8 @@ class SoruEklemeViewModel @Inject constructor(
     private val gorselDepo: GorselDepo,
     private val konuKatalog: KonuKatalog,
     private val ayarlarDataStore: AyarlarDataStore,
-    private val aiRepository: AiRepository
+    private val aiRepository: AiRepository,
+    private val ocrHelper: OcrHelper
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SoruEklemeUiState())
@@ -185,7 +206,7 @@ class SoruEklemeViewModel @Inject constructor(
         if (currentPath != null) {
             viewModelScope.launch { gorselDepo.gorselSil(currentPath) }
         }
-        _uiState.update { it.copy(soruImagePath = null) }
+        _uiState.update { it.copy(soruImagePath = null, extractedText = null) }
     }
 
     fun removeSolutionImage() {
@@ -263,8 +284,16 @@ class SoruEklemeViewModel @Inject constructor(
         _uiState.update { it.copy(mistakeType = mistakeType) }
     }
 
+    fun setDifficulty(difficulty: String?) {
+        _uiState.update { it.copy(difficulty = difficulty) }
+    }
+
     fun setCorrectAnswer(answer: String?) {
         _uiState.update { it.copy(correctAnswer = answer) }
+    }
+
+    fun setStudentAnswer(answer: String?) {
+        _uiState.update { it.copy(studentAnswer = answer) }
     }
 
     fun setNote(note: String) {
@@ -275,9 +304,91 @@ class SoruEklemeViewModel @Inject constructor(
         _uiState.update { it.copy(errorMessage = null) }
     }
 
+    fun clearErrorMessage() = clearError()
+
     fun clearAutoTagStatus() {
         _uiState.update { it.copy(autoTagSuccessMessage = null) }
     }
+
+    fun clearAutoTagMessage() = clearAutoTagStatus()
+
+    fun clearOcrText() {
+        _uiState.update { it.copy(extractedText = null, ocrStatusMessage = null) }
+    }
+
+    /**
+     * Koşullu OCR Metin Ayıklama Servisi
+     */
+    fun extractTextFromQuestionImage() {
+        val currentImagePath = _uiState.value.soruImagePath
+        if (currentImagePath.isNullOrBlank()) {
+            _uiState.update { it.copy(errorMessage = "Metin ayıklamak için önce bir soru görseli ekleyin.") }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isOcrExtracting = true, ocrStatusMessage = null) }
+            val result = ocrHelper.recognizeText(currentImagePath)
+            result.onSuccess { text ->
+                _uiState.update {
+                    it.copy(
+                        isOcrExtracting = false,
+                        extractedText = text,
+                        ocrStatusMessage = if (text.isNotBlank()) "Metin başarıyla ayıklandı ✓" else "Görselde okunabilir metin bulunamadı."
+                    )
+                }
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        isOcrExtracting = false,
+                        ocrStatusMessage = "OCR hatası: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun performOcrOnQuestionImage() = extractTextFromQuestionImage()
+
+    fun updateExtractedText(newText: String) {
+        _uiState.update { it.copy(extractedText = newText) }
+    }
+
+    fun updateExtractedOcrText(newText: String) = updateExtractedText(newText)
+
+    fun setSendImageToAi(sendImage: Boolean) {
+        _uiState.update { it.copy(sendImageToAi = sendImage) }
+    }
+
+    fun toggleSendImageToAi(sendImage: Boolean) = setSendImageToAi(sendImage)
+
+    fun cleanOcrWithAi() {
+        val rawText = _uiState.value.extractedText
+        if (rawText.isNullOrBlank()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isCleaningOcr = true, ocrStatusMessage = null) }
+            val result = aiRepository.cleanOcrText(rawText)
+            result.onSuccess { cleaned ->
+                _uiState.update {
+                    it.copy(
+                        isCleaningOcr = false,
+                        extractedText = cleaned,
+                        ocrStatusMessage = "Metin ve formüller LaTeX olarak düzenlendi ✓"
+                    )
+                }
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        isCleaningOcr = false,
+                        ocrStatusMessage = "Düzenleme başarısız: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun cleanOcrTextWithAi() = cleanOcrWithAi()
 
     /**
      * Soru görselini yapay zekaya analiz ettirerek Ders, Konu, Sınav Türü ve Doğru Cevabı otomatik belirler.
@@ -369,6 +480,73 @@ class SoruEklemeViewModel @Inject constructor(
         }
     }
 
+    fun setKaynakYayin(yayin: String) {
+        _uiState.update { it.copy(kaynakYayin = yayin) }
+    }
+
+    fun setKaynakDeneme(deneme: String) {
+        _uiState.update { it.copy(kaynakDeneme = deneme) }
+    }
+
+    fun setKaynakYil(yil: String) {
+        _uiState.update { it.copy(kaynakYil = yil) }
+    }
+
+    fun setKaynakSoruNo(no: String) {
+        _uiState.update { it.copy(kaynakSoruNo = no) }
+    }
+
+    fun openCropper(isSolution: Boolean) {
+        _uiState.update { it.copy(isCropperOpen = true, cropTargetIsSolution = isSolution) }
+    }
+
+    fun closeCropper() {
+        _uiState.update { it.copy(isCropperOpen = false) }
+    }
+
+    fun applyCroppedImage(newPath: String) {
+        val isSolution = _uiState.value.cropTargetIsSolution
+        _uiState.update {
+            if (isSolution) {
+                it.copy(solutionImagePath = newPath, isCropperOpen = false)
+            } else {
+                it.copy(soruImagePath = newPath, isCropperOpen = false)
+            }
+        }
+    }
+
+    fun loadSoruForEdit(soruId: Long) {
+        viewModelScope.launch {
+            try {
+                val soru = soruRepository.getSoru(soruId) ?: return@launch
+                _uiState.update {
+                    it.copy(
+                        editingSoruId = soru.id,
+                        soruImagePath = soru.imagePath,
+                        solutionImagePath = soru.solutionImagePath,
+                        examType = soru.examType,
+                        subjectId = soru.subjectId,
+                        topic = soru.topic,
+                        mistakeType = soru.mistakeType,
+                        correctAnswer = soru.correctAnswer,
+                        studentAnswer = soru.studentAnswer,
+                        difficulty = soru.difficulty,
+                        note = soru.note ?: "",
+                        kaynakYayin = soru.kaynakYayin ?: "",
+                        kaynakDeneme = soru.kaynakDeneme ?: "",
+                        kaynakYil = soru.kaynakYil?.toString() ?: "",
+                        kaynakSoruNo = soru.kaynakSoruNo?.toString() ?: "",
+                        extractedText = soru.ocrMetni ?: soru.questionText,
+                        sendImageToAi = !soru.isOcrUsed
+                    )
+                }
+                updateTopicSuggestions()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = "Soru yüklenemedi: ${e.localizedMessage}") }
+            }
+        }
+    }
+
     fun saveSoru(onSuccess: () -> Unit) {
         val state = _uiState.value
         val imagePath = state.soruImagePath
@@ -386,7 +564,13 @@ class SoruEklemeViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, errorMessage = null) }
             try {
+                val yilParsed = state.kaynakYil.trim().toIntOrNull()
+                val soruNoParsed = state.kaynakSoruNo.trim().toIntOrNull()
+
+                val existingSoru = state.editingSoruId?.let { soruRepository.getSoru(it) }
+
                 val soru = Soru(
+                    id = state.editingSoruId ?: 0L,
                     imagePath = imagePath,
                     solutionImagePath = state.solutionImagePath,
                     correctAnswer = state.correctAnswer,
@@ -394,15 +578,33 @@ class SoruEklemeViewModel @Inject constructor(
                     subjectId = state.subjectId,
                     topic = state.topic.trim(),
                     mistakeType = state.mistakeType,
+                    difficulty = state.difficulty,
+                    studentAnswer = state.studentAnswer,
                     note = state.note.trim().ifBlank { null },
-                    isSolved = false,
-                    solvedAt = null,
-                    aiExplanation = null,
-                    createdAt = System.currentTimeMillis(),
+                    isSolved = existingSoru?.isSolved ?: false,
+                    solvedAt = existingSoru?.solvedAt,
+                    aiExplanation = existingSoru?.aiExplanation,
+                    isFavorite = existingSoru?.isFavorite ?: false,
+                    reviewStage = existingSoru?.reviewStage ?: 0,
+                    nextReviewDate = existingSoru?.nextReviewDate,
+                    lastReviewedAt = existingSoru?.lastReviewedAt,
+                    kaynakYayin = state.kaynakYayin.trim().ifBlank { null },
+                    kaynakDeneme = state.kaynakDeneme.trim().ifBlank { null },
+                    kaynakYil = yilParsed,
+                    kaynakSoruNo = soruNoParsed,
+                    ocrMetni = state.extractedText?.trim()?.ifBlank { null },
+                    isOcrUsed = !state.extractedText.isNullOrBlank() && !state.sendImageToAi,
+                    questionText = state.extractedText?.trim()?.ifBlank { null },
+                    createdAt = existingSoru?.createdAt ?: System.currentTimeMillis(),
                     updatedAt = System.currentTimeMillis()
                 )
 
-                soruRepository.soruEkle(soru)
+                if (state.editingSoruId != null) {
+                    soruRepository.updateSoru(soru)
+                } else {
+                    soruRepository.soruEkle(soru)
+                }
+
                 _uiState.update { it.copy(isSaving = false, isSaved = true) }
                 onSuccess()
             } catch (e: Exception) {

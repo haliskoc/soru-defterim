@@ -27,6 +27,15 @@ data class SoruEntity(
     val reviewStage: Int = 0,
     val nextReviewDate: Long? = null,
     val lastReviewedAt: Long? = null,
+    val kaynakYayin: String? = null,
+    val kaynakDeneme: String? = null,
+    val kaynakYil: Int? = null,
+    val kaynakSoruNo: Int? = null,
+    val studentAnswer: String? = null,
+    val difficulty: String? = null,
+    val ocrMetni: String? = null,
+    val isOcrUsed: Boolean = false,
+    val questionText: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 ) {
@@ -51,6 +60,15 @@ data class SoruEntity(
             reviewStage = reviewStage,
             nextReviewDate = nextReviewDate,
             lastReviewedAt = lastReviewedAt,
+            kaynakYayin = kaynakYayin,
+            kaynakDeneme = kaynakDeneme,
+            kaynakYil = kaynakYil,
+            kaynakSoruNo = kaynakSoruNo,
+            studentAnswer = studentAnswer,
+            difficulty = difficulty,
+            ocrMetni = ocrMetni,
+            isOcrUsed = isOcrUsed,
+            questionText = questionText,
             createdAt = createdAt,
             updatedAt = updatedAt
         )
@@ -78,6 +96,15 @@ fun Soru.toEntity(): SoruEntity {
         reviewStage = reviewStage,
         nextReviewDate = nextReviewDate,
         lastReviewedAt = lastReviewedAt,
+        kaynakYayin = kaynakYayin,
+        kaynakDeneme = kaynakDeneme,
+        kaynakYil = kaynakYil,
+        kaynakSoruNo = kaynakSoruNo,
+        studentAnswer = studentAnswer,
+        difficulty = difficulty,
+        ocrMetni = ocrMetni,
+        isOcrUsed = isOcrUsed,
+        questionText = questionText,
         createdAt = createdAt,
         updatedAt = updatedAt
     )

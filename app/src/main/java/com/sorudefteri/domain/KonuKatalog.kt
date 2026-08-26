@@ -58,36 +58,23 @@ class KonuKatalog @Inject constructor(
 
             val rootJson = JSONObject(jsonString)
 
-            // Parse TYT
-            if (rootJson.has("tyt")) {
-                val tytObj = rootJson.getJSONObject("tyt")
-                tytObj.keys().forEach { subjectKey ->
-                    val subjectObj = tytObj.getJSONObject(subjectKey)
-                    val unitMap = parseUnits(subjectObj)
-                    val normalizedKey = normalizeKey(subjectKey)
-                    cache["TYT_$normalizedKey"] = unitMap
+            // Supported exam sections: tyt, ayt, lgs, kpss
+            val sections = listOf("tyt", "ayt", "lgs", "kpss")
+            for (section in sections) {
+                if (rootJson.has(section)) {
+                    val sectionObj = rootJson.getJSONObject(section)
+                    val examPrefix = section.uppercase(Locale.ROOT)
+                    sectionObj.keys().forEach { subjectKey ->
+                        val subjectObj = sectionObj.getJSONObject(subjectKey)
+                        val unitMap = parseUnits(subjectObj)
+                        val normalizedKey = normalizeKey(subjectKey)
+                        cache["${examPrefix}_$normalizedKey"] = unitMap
 
-                    // Ayrıca dersin 'ad' değerini de alias olarak ekle
-                    val displayName = subjectObj.optString("ad", "")
-                    if (displayName.isNotBlank()) {
-                        cache["TYT_${normalizeKey(displayName)}"] = unitMap
-                    }
-                }
-            }
-
-            // Parse AYT
-            if (rootJson.has("ayt")) {
-                val aytObj = rootJson.getJSONObject("ayt")
-                aytObj.keys().forEach { subjectKey ->
-                    val subjectObj = aytObj.getJSONObject(subjectKey)
-                    val unitMap = parseUnits(subjectObj)
-                    val normalizedKey = normalizeKey(subjectKey)
-                    cache["AYT_$normalizedKey"] = unitMap
-
-                    // Ayrıca dersin 'ad' değerini de alias olarak ekle
-                    val displayName = subjectObj.optString("ad", "")
-                    if (displayName.isNotBlank()) {
-                        cache["AYT_${normalizeKey(displayName)}"] = unitMap
+                        // Display name alias
+                        val displayName = subjectObj.optString("ad", "")
+                        if (displayName.isNotBlank()) {
+                            cache["${examPrefix}_${normalizeKey(displayName)}"] = unitMap
+                        }
                     }
                 }
             }
@@ -129,6 +116,8 @@ class KonuKatalog @Inject constructor(
             .removePrefix("ayt_")
             .removePrefix("tyt_")
             .removePrefix("ydt_")
+            .removePrefix("lgs_")
+            .removePrefix("kpss_")
             .replace("ç", "c")
             .replace("ğ", "g")
             .replace("ı", "i")
@@ -143,16 +132,23 @@ class KonuKatalog @Inject constructor(
     }
 
     private fun findMatchingUnitMap(examType: String, subjectId: String): Map<String, List<String>> {
-        val cleanExam = if (examType.equals("AYT", ignoreCase = true)) "AYT" else "TYT"
+        val cleanExam = when (examType.uppercase(Locale.ROOT)) {
+            "LGS" -> "LGS"
+            "KPSS" -> "KPSS"
+            "AYT" -> "AYT"
+            else -> "TYT"
+        }
         val normalized = normalizeKey(subjectId)
         val cache = getCache()
 
-        // 1. Doğrudan tam eşleşme
+        // 1. Doğrudan tam eşleşme (örn: TYT_MATEMATIK, LGS_FEN, KPSS_TARIH)
         cache["${cleanExam}_$normalized"]?.let { return it }
 
-        // 2. TYT / AYT çapraz kontrolü
-        val otherExam = if (cleanExam == "AYT") "TYT" else "AYT"
-        cache["${otherExam}_$normalized"]?.let { return it }
+        // 2. Çapraz sınav türü kontrolü
+        val otherExams = listOf("TYT", "AYT", "LGS", "KPSS").filter { it != cleanExam }
+        for (other in otherExams) {
+            cache["${other}_$normalized"]?.let { return it }
+        }
 
         // 3. İçeren anahtar kontrolü
         for ((key, map) in cache) {
@@ -161,8 +157,25 @@ class KonuKatalog @Inject constructor(
             }
         }
 
+        // 4. Genel arama
+        for ((key, map) in cache) {
+            if (key.contains(normalized) || (normalized.length >= 3 && key.endsWith(normalized))) {
+                return map
+            }
+        }
+
         return emptyMap()
     }
+
+    /**
+     * Kataloğun önbelleğe yüklenip yüklenmediğini döner.
+     */
+    fun isKatalogLoaded(): Boolean = unitelerCache != null
+
+    /**
+     * Kataloğun boş olup olmadığını döner.
+     */
+    fun isKatalogEmpty(): Boolean = getCache().isEmpty()
 
     /**
      * Belirtilen sınav türü ve derse ait ünite -> konu listesi haritasını döner.
@@ -181,6 +194,22 @@ class KonuKatalog @Inject constructor(
         return unitMap.map { (uniteAdi, konular) ->
             KonuUnite(uniteAdi = uniteAdi, konular = konular)
         }
+    }
+
+    /**
+     * Güvenli ünite listesi: Eğer konu bulunamazsa "Katalog hazırlanıyor..." EmptyState desteği sağlar.
+     */
+    fun getUniteListWithFallback(examType: String, subjectId: String): List<KonuUnite> {
+        val list = getUniteList(examType, subjectId)
+        if (list.isEmpty()) {
+            return listOf(
+                KonuUnite(
+                    uniteAdi = "Genel Konular",
+                    konular = listOf("Katalog hazırlanıyor...")
+                )
+            )
+        }
+        return list
     }
 
     /**

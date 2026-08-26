@@ -10,10 +10,12 @@ import com.sorudefteri.domain.model.HataTipi
 import com.sorudefteri.domain.model.SortOrder
 import com.sorudefteri.domain.model.Soru
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -29,12 +31,16 @@ data class KutuphaneUiState(
     val selectedExamType: String? = null, // null: Tümü, "TYT", "AYT"
     val selectedSubjectId: String? = null,
     val selectedMistakeType: HataTipi? = null,
+    val selectedPublisher: String? = null,
+    val selectedExamName: String? = null,
     val onlyUnsolved: Boolean = false,
     val onlyFavorites: Boolean = false,
     val onlyDueReview: Boolean = false,
     val sortOrder: SortOrder = SortOrder.DATE_DESC,
     val isLoading: Boolean = true,
     val availableSubjects: List<Ders> = emptyList(),
+    val availablePublishers: List<String> = emptyList(),
+    val availableExamNames: List<String> = emptyList(),
     val totalCount: Int = 0,
     val solvedCount: Int = 0,
     val unsolvedCount: Int = 0,
@@ -52,6 +58,8 @@ private data class FilterParams(
     val examType: String?,
     val subjectId: String?,
     val mistakeType: HataTipi?,
+    val publisher: String?,
+    val examName: String?,
     val onlyUnsolved: Boolean,
     val onlyFavorites: Boolean,
     val onlyDueReview: Boolean,
@@ -60,15 +68,19 @@ private data class FilterParams(
     val isSelectionMode: Boolean
 )
 
+@OptIn(FlowPreview::class)
 @HiltViewModel
 class KutuphaneViewModel @Inject constructor(
     private val soruRepository: SoruRepository
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
+    private val _debouncedSearchQuery = _searchQuery.debounce(300L)
     private val _selectedExamType = MutableStateFlow<String?>(null)
     private val _selectedSubjectId = MutableStateFlow<String?>(null)
     private val _selectedMistakeType = MutableStateFlow<HataTipi?>(null)
+    private val _selectedPublisher = MutableStateFlow<String?>(null)
+    private val _selectedExamName = MutableStateFlow<String?>(null)
     private val _onlyUnsolved = MutableStateFlow(false)
     private val _onlyFavorites = MutableStateFlow(false)
     private val _onlyDueReview = MutableStateFlow(false)
@@ -76,32 +88,43 @@ class KutuphaneViewModel @Inject constructor(
     private val _selectedSoruIds = MutableStateFlow<Set<Long>>(emptySet())
     private val _isSelectionMode = MutableStateFlow(false)
 
+    private var lastDeletedSoru: Soru? = null
+
     private val filterParamsFlow = combine(
         combine(
-            _searchQuery,
+            _debouncedSearchQuery,
             _selectedExamType,
             _selectedSubjectId,
             _selectedMistakeType,
-            _onlyUnsolved
-        ) { query, examType, subjectId, mistakeType, onlyUnsolved ->
-            Tuple5(query, examType, subjectId, mistakeType, onlyUnsolved)
+            _selectedPublisher
+        ) { query, examType, subjectId, mistakeType, publisher ->
+            Tuple5(query, examType, subjectId, mistakeType, publisher)
         },
         combine(
+            _selectedExamName,
+            _onlyUnsolved,
             _onlyFavorites,
             _onlyDueReview,
-            _sortOrder,
+            _sortOrder
+        ) { examName, onlyUnsolved, onlyFavorites, onlyDueReview, sortOrder ->
+            Tuple5(examName, onlyUnsolved, onlyFavorites, onlyDueReview, sortOrder)
+        },
+        combine(
             _selectedSoruIds,
             _isSelectionMode
-        ) { onlyFavorites, onlyDueReview, sortOrder, selectedIds, isSelectionMode ->
-            Tuple5(onlyFavorites, onlyDueReview, sortOrder, selectedIds, isSelectionMode)
+        ) { selectedIds, isSelectionMode ->
+            selectedIds to isSelectionMode
         }
-    ) { (query, examType, subjectId, mistakeType, onlyUnsolved),
-        (onlyFavorites, onlyDueReview, sortOrder, selectedIds, isSelectionMode) ->
+    ) { (query, examType, subjectId, mistakeType, publisher),
+        (examName, onlyUnsolved, onlyFavorites, onlyDueReview, sortOrder),
+        (selectedIds, isSelectionMode) ->
         FilterParams(
             query = query,
             examType = examType,
             subjectId = subjectId,
             mistakeType = mistakeType,
+            publisher = publisher,
+            examName = examName,
             onlyUnsolved = onlyUnsolved,
             onlyFavorites = onlyFavorites,
             onlyDueReview = onlyDueReview,
@@ -121,6 +144,9 @@ class KutuphaneViewModel @Inject constructor(
             DersTaksonomisi.getDersler(filters.examType, Alan.SAYISAL)
         }
 
+        val availablePublishers = sorular.mapNotNull { it.kaynakYayin?.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+        val availableExamNames = sorular.mapNotNull { it.kaynakDeneme?.trim() }.filter { it.isNotBlank() }.distinct().sorted()
+
         val trLocale = Locale("tr", "TR")
         val cleanQuery = filters.query.lowercase(trLocale).trim()
         val hasQuery = cleanQuery.isNotBlank()
@@ -129,6 +155,8 @@ class KutuphaneViewModel @Inject constructor(
             val matchesExamType = filters.examType == null || soru.examType.equals(filters.examType, ignoreCase = true)
             val matchesSubject = filters.subjectId == null || soru.subjectId.equals(filters.subjectId, ignoreCase = true)
             val matchesMistake = filters.mistakeType == null || soru.mistakeType == filters.mistakeType
+            val matchesPublisher = filters.publisher == null || soru.kaynakYayin.equals(filters.publisher, ignoreCase = true)
+            val matchesExamName = filters.examName == null || soru.kaynakDeneme.equals(filters.examName, ignoreCase = true)
             val matchesSolved = !filters.onlyUnsolved || !soru.isSolved
             val matchesFavorites = !filters.onlyFavorites || soru.isFavorite
             val matchesDueReview = !filters.onlyDueReview || soru.isDueForReview
@@ -139,14 +167,18 @@ class KutuphaneViewModel @Inject constructor(
                 val dersName = DersTaksonomisi.getDersAdi(soru.subjectId).lowercase(trLocale)
                 val topic = soru.topic.lowercase(trLocale)
                 val note = soru.note?.lowercase(trLocale) ?: ""
+                val publisher = soru.kaynakYayin?.lowercase(trLocale) ?: ""
+                val deneme = soru.kaynakDeneme?.lowercase(trLocale) ?: ""
 
                 dersName.contains(cleanQuery) ||
                         topic.contains(cleanQuery) ||
                         note.contains(cleanQuery) ||
+                        publisher.contains(cleanQuery) ||
+                        deneme.contains(cleanQuery) ||
                         soru.examType.lowercase(trLocale).contains(cleanQuery)
             }
 
-            matchesExamType && matchesSubject && matchesMistake && matchesSolved && matchesFavorites && matchesDueReview && matchesQuery
+            matchesExamType && matchesSubject && matchesMistake && matchesPublisher && matchesExamName && matchesSolved && matchesFavorites && matchesDueReview && matchesQuery
         }
 
         val sorted = when (filters.sortOrder) {
@@ -170,16 +202,20 @@ class KutuphaneViewModel @Inject constructor(
         KutuphaneUiState(
             tumSorular = sorular,
             filteredSorular = sorted,
-            searchQuery = filters.query,
+            searchQuery = _searchQuery.value,
             selectedExamType = filters.examType,
             selectedSubjectId = filters.subjectId,
             selectedMistakeType = filters.mistakeType,
+            selectedPublisher = filters.publisher,
+            selectedExamName = filters.examName,
             onlyUnsolved = filters.onlyUnsolved,
             onlyFavorites = filters.onlyFavorites,
             onlyDueReview = filters.onlyDueReview,
             sortOrder = filters.sortOrder,
             isLoading = false,
             availableSubjects = availableSubjects,
+            availablePublishers = availablePublishers,
+            availableExamNames = availableExamNames,
             totalCount = total,
             solvedCount = solved,
             unsolvedCount = unsolved,
@@ -214,6 +250,14 @@ class KutuphaneViewModel @Inject constructor(
 
     fun onMistakeTypeSelected(mistakeType: HataTipi?) {
         _selectedMistakeType.value = mistakeType
+    }
+
+    fun onPublisherSelected(publisher: String?) {
+        _selectedPublisher.value = publisher
+    }
+
+    fun onExamNameSelected(examName: String?) {
+        _selectedExamName.value = examName
     }
 
     fun onOnlyUnsolvedToggle(onlyUnsolved: Boolean) {
@@ -323,7 +367,16 @@ class KutuphaneViewModel @Inject constructor(
 
     fun deleteSoru(soru: Soru) {
         viewModelScope.launch {
+            lastDeletedSoru = soru
             soruRepository.soruSil(soru)
+        }
+    }
+
+    fun undoDelete() {
+        val toRestore = lastDeletedSoru ?: return
+        viewModelScope.launch {
+            soruRepository.soruEkle(toRestore)
+            lastDeletedSoru = null
         }
     }
 }

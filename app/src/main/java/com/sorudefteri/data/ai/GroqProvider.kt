@@ -7,6 +7,10 @@ import com.sorudefteri.data.ai.dto.GroqContentPart
 import com.sorudefteri.data.ai.dto.GroqImageUrl
 import com.sorudefteri.data.ai.dto.GroqMessage
 import com.sorudefteri.data.ai.dto.GroqModelListResponse
+import com.sorudefteri.domain.model.AiErrorType
+import com.sorudefteri.domain.model.AiException
+import com.sorudefteri.domain.model.QuestionMetadata
+import com.sorudefteri.domain.model.SimilarQuestionResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -16,17 +20,20 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Groq OpenAI uyumlu API üzerinden görsel destekli soru çözümü sağlayan servis.
+ * Groq OpenAI uyumlu API üzerinden görsel ve metin tabanlı soru çözümü, soru üretimi,
+ * OCR temizleme ve benzer soru türetme servisi.
  */
 @Singleton
-class GroqProvider @Inject constructor(
-    private val okHttpClient: OkHttpClient
+open class GroqProvider @Inject constructor(
+    private val okHttpClient: OkHttpClient,
+    private val promptManager: AiPromptManager
 ) : CozumProvider {
 
     private val json = Json {
@@ -38,13 +45,18 @@ class GroqProvider @Inject constructor(
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
+    companion object {
+        const val FALLBACK_MODEL = "llama-3.2-11b-vision-preview"
+        const val MAX_RETRIES = 3
+    }
+
     /**
      * Groq API'sinden güncel model listesini çeker.
      */
-    suspend fun listModels(apiKey: String): Result<List<Pair<String, String>>> = withContext(Dispatchers.IO) {
+    open suspend fun listModels(apiKey: String): Result<List<Pair<String, String>>> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             return@withContext Result.failure(
-                IllegalArgumentException("Groq API anahtarı boş olamaz.")
+                AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı boş olamaz.")
             )
         }
 
@@ -64,7 +76,11 @@ class GroqProvider @Inject constructor(
                         json.decodeFromString<GroqModelListResponse>(responseBodyString)
                     } catch (e: Exception) {
                         return@withContext Result.failure(
-                            Exception("Model listesi çözümlenemedi: ${e.localizedMessage}", e)
+                            AiException(
+                                AiErrorType.PARSING_FAILED,
+                                "Model listesi çözümlenemedi: ${e.localizedMessage}",
+                                e
+                            )
                         )
                     }
 
@@ -74,16 +90,21 @@ class GroqProvider @Inject constructor(
                         .map { item -> item.id to item.id }
 
                     if (models.isEmpty()) {
-                        Result.failure(Exception("Kullanılabilir Groq modeli bulunamadı."))
+                        Result.failure(
+                            AiException(AiErrorType.MODEL_UNAVAILABLE, "Kullanılabilir Groq modeli bulunamadı.")
+                        )
                     } else {
                         Result.success(models)
                     }
                 } else {
-                    Result.failure(Exception("Groq modelleri alınamadı: HTTP ${response.code}"))
+                    val errorType = if (response.code in listOf(401, 403)) AiErrorType.INVALID_API_KEY else AiErrorType.MODEL_UNAVAILABLE
+                    Result.failure(
+                        AiException(errorType, "Groq modelleri alınamadı: HTTP ${response.code}")
+                    )
                 }
             }
         } catch (e: Exception) {
-            Result.failure(e)
+            Result.failure(mapToAiException(e))
         }
     }
 
@@ -94,37 +115,208 @@ class GroqProvider @Inject constructor(
         correctAnswer: String?,
         modelName: String,
         apiKey: String
+    ): Result<String> {
+        return cozumIsteDetayli(
+            imageBytes = imageBytes,
+            dersAdi = dersAdi,
+            konu = konu,
+            correctAnswer = correctAnswer,
+            mistakeType = null,
+            soruMetni = null,
+            modelName = modelName,
+            apiKey = apiKey
+        )
+    }
+
+    /**
+     * Görsel ve/veya metin tabanlı detaylı çözüm üretir.
+     */
+    open suspend fun cozumIsteDetayli(
+        imageBytes: ByteArray?,
+        dersAdi: String,
+        konu: String,
+        correctAnswer: String?,
+        mistakeType: String? = null,
+        soruMetni: String? = null,
+        modelName: String,
+        apiKey: String,
+        customPromptTemplate: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             return@withContext Result.failure(
-                IllegalArgumentException("Groq API anahtarı boş olamaz. Lütfen Ayarlar sayfasından anahtarınızı girin.")
+                AiException(
+                    AiErrorType.INVALID_API_KEY,
+                    "Groq API anahtarı boş olamaz. Lütfen Ayarlar sayfasından anahtarınızı girin."
+                )
             )
         }
 
-        val effectiveModel = modelName.ifBlank { "llama-3.2-11b-vision-preview" }
+        val prompt = promptManager.buildCozumUretimiPrompt(
+            dersAdi = dersAdi,
+            konu = konu,
+            soruMetni = soruMetni,
+            correctAnswer = correctAnswer,
+            mistakeType = mistakeType,
+            customTemplate = customPromptTemplate
+        )
+        val effectiveModel = modelName.ifBlank { FALLBACK_MODEL }
+        executeGroqWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+    }
 
-        val maxRetries = 3
-        var lastResult: Result<String> = Result.failure(Exception("Bilinmeyen hata"))
+    /**
+     * OCR metnini temizler ve formülleri LaTeX formatına dönüştürür.
+     */
+    open suspend fun cleanOcrText(
+        rawOcrText: String,
+        modelName: String,
+        apiKey: String,
+        customPromptTemplate: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı boş olamaz.")
+            )
+        }
 
-        for (attempt in 0 until maxRetries) {
-            lastResult = executeGroqSolve(imageBytes, dersAdi, konu, correctAnswer, effectiveModel, apiKey)
+        val prompt = promptManager.buildOcrTemizlemePrompt(rawOcrText, customPromptTemplate)
+        val effectiveModel = modelName.ifBlank { FALLBACK_MODEL }
+        executeGroqWithRetry(null, prompt, effectiveModel, apiKey)
+    }
+
+    /**
+     * Benzer soru türetir (Question Cloner).
+     */
+    open suspend fun generateSimilarQuestion(
+        imageBytes: ByteArray?,
+        dersAdi: String,
+        konu: String,
+        soruMetni: String? = null,
+        modelName: String,
+        apiKey: String,
+        customPromptTemplate: String? = null
+    ): Result<SimilarQuestionResult> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı boş olamaz.")
+            )
+        }
+
+        val prompt = promptManager.buildBenzerSoruPrompt(dersAdi, konu, soruMetni, customPromptTemplate)
+        val effectiveModel = modelName.ifBlank { FALLBACK_MODEL }
+
+        val rawResult = executeGroqWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+        rawResult.mapCatching { rawText ->
+            val parseResult = AiJsonParser.cleanAndParseJson(
+                rawText = rawText,
+                serializer = SimilarQuestionResult.serializer(),
+                fallbackParser = { AiJsonParser.parseSimilarQuestionFallback(it) }
+            )
+            parseResult.getOrThrow()
+        }
+    }
+
+    /**
+     * Sıfırdan soru üretir.
+     */
+    open suspend fun generateQuestion(
+        dersAdi: String,
+        konu: String,
+        zorluk: String,
+        alan: String,
+        sinavTipi: String,
+        modelName: String,
+        apiKey: String,
+        customPromptTemplate: String? = null
+    ): Result<SimilarQuestionResult> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı boş olamaz.")
+            )
+        }
+
+        val prompt = promptManager.buildSoruUretimiPrompt(
+            dersAdi = dersAdi,
+            konu = konu,
+            zorluk = zorluk,
+            alan = alan,
+            sinavTipi = sinavTipi,
+            customTemplate = customPromptTemplate
+        )
+        val effectiveModel = modelName.ifBlank { FALLBACK_MODEL }
+
+        val rawResult = executeGroqWithRetry(null, prompt, effectiveModel, apiKey)
+        rawResult.mapCatching { rawText ->
+            val parseResult = AiJsonParser.cleanAndParseJson(
+                rawText = rawText,
+                serializer = SimilarQuestionResult.serializer(),
+                fallbackParser = { AiJsonParser.parseSimilarQuestionFallback(it) }
+            )
+            parseResult.getOrThrow()
+        }
+    }
+
+    /**
+     * Görselden sınav türü, ders, konu ve cevap şıkkını tespit eder (Auto-Tagging).
+     */
+    open suspend fun detectMetadata(
+        imageBytes: ByteArray,
+        modelName: String,
+        apiKey: String
+    ): Result<QuestionMetadata> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı boş olamaz.")
+            )
+        }
+
+        val effectiveModel = modelName.ifBlank { FALLBACK_MODEL }
+        val prompt = """
+            Görseldeki YKS (TYT veya AYT) sorusunu incele ve JSON formatında şu bilgileri çıkar:
+            1. examType: "TYT" veya "AYT"
+            2. subjectId: ["turkce", "matematik", "fizik", "kimya", "biyoloji", "tarih", "cografya", "felsefe", "din_kulturu", "ayt_matematik", "ayt_fizik", "ayt_kimya", "ayt_biyoloji", "ayt_edebiyat", "ayt_tarih1", "ayt_cografya1", "ydt_ingilizce"] değerlerinden en uygun olanı.
+            3. topic: Sorunun ait olduğu net YKS konu başlığı (Örn: "Türev", "Paragrafta Anlam", "Kalıtım", "Optik", "Trigonometri", "Polinomlar").
+            4. correctAnswer: Görsel üzerinde işaretlenmiş doğru cevap şıkkı veya bariz doğru cevap varsa "A", "B", "C", "D", "E" veya null.
+
+            SADECE geçerli bir JSON objesi döndür:
+            {"examType": "TYT", "subjectId": "matematik", "topic": "Fonksiyonlar", "correctAnswer": "C"}
+        """.trimIndent()
+
+        val rawResult = executeGroqWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+        if (rawResult.isSuccess) {
+            val rawText = rawResult.getOrNull().orEmpty()
+            val parseResult = AiJsonParser.cleanAndParseJson(
+                rawText = rawText,
+                serializer = QuestionMetadata.serializer(),
+                fallbackParser = { AiJsonParser.parseQuestionMetadataFallback(it) }
+            )
+            if (parseResult.isSuccess) {
+                return@withContext parseResult
+            }
+        }
+
+        Result.success(QuestionMetadata())
+    }
+
+    private suspend fun executeGroqWithRetry(
+        imageBytes: ByteArray?,
+        prompt: String,
+        modelName: String,
+        apiKey: String
+    ): Result<String> {
+        var lastResult: Result<String> = Result.failure(
+            AiException(AiErrorType.UNKNOWN, "Bilinmeyen bir hata oluştu.")
+        )
+
+        for (attempt in 0 until MAX_RETRIES) {
+            lastResult = executeGroqRequest(imageBytes, prompt, modelName, apiKey)
             if (lastResult.isSuccess) {
-                return@withContext lastResult
+                return lastResult
             }
 
             val exception = lastResult.exceptionOrNull()
-            val msg = exception?.message.orEmpty().lowercase()
-            val isRetryable = msg.contains("429") ||
-                    msg.contains("rate limit") ||
-                    msg.contains("500") ||
-                    msg.contains("502") ||
-                    msg.contains("503") ||
-                    msg.contains("504") ||
-                    msg.contains("zaman aşımı") ||
-                    msg.contains("timeout") ||
-                    exception is SocketTimeoutException
+            val isRetryable = isRetryableException(exception)
 
-            if (isRetryable && attempt < maxRetries - 1) {
+            if (isRetryable && attempt < MAX_RETRIES - 1) {
                 val backoffMs = 1000L * (1L shl attempt)
                 delay(backoffMs)
             } else {
@@ -132,67 +324,55 @@ class GroqProvider @Inject constructor(
             }
         }
 
-        return@withContext lastResult
+        return lastResult
     }
 
-    private fun executeGroqSolve(
-        imageBytes: ByteArray,
-        dersAdi: String,
-        konu: String,
-        correctAnswer: String?,
+    private fun isRetryableException(throwable: Throwable?): Boolean {
+        if (throwable == null) return false
+        if (throwable is AiException) {
+            return throwable.errorType == AiErrorType.QUOTA_EXCEEDED ||
+                    throwable.errorType == AiErrorType.MODEL_UNAVAILABLE ||
+                    throwable.errorType == AiErrorType.NETWORK_TIMEOUT
+        }
+        val msg = throwable.message.orEmpty().lowercase()
+        return msg.contains("429") ||
+                msg.contains("rate limit") ||
+                msg.contains("500") ||
+                msg.contains("502") ||
+                msg.contains("503") ||
+                msg.contains("504") ||
+                msg.contains("timeout") ||
+                throwable is SocketTimeoutException ||
+                throwable is InterruptedIOException
+    }
+
+    private fun executeGroqRequest(
+        imageBytes: ByteArray?,
+        prompt: String,
         modelName: String,
         apiKey: String
     ): Result<String> {
-        val answerInfo = if (!correctAnswer.isNullOrBlank()) {
-            "Öğrencinin belirttiği / Sorunun doğru cevap şıkkı: $correctAnswer"
-        } else {
-            "Doğru cevap şıkkı belirtilmemiş. Lütfen soruyu çözerek doğru şıkkı ve sonucu net olarak belirle."
-        }
-
-        val prompt = """
-            Sen Türkiye YKS (TYT / AYT) sınavlarına hazırlanan öğrenciler için alanında uzman, pedagojik formasyona sahip kıdemli bir öğretmensin.
-            Görseldeki soruyu öğrencinin eksiksiz anlayacağı şekilde, adım adım ve pedagojik yöntemlerle açıkla.
-
-            Ders: $dersAdi
-            Konu: $konu
-            $answerInfo
-
-            Lütfen çözümü aşağıdaki yapılandırılmış format ve başlıklarla sun:
-
-            🎯 **Doğru Cevap:** [Net doğru cevap şıkkı ve sonuç]
-
-            📚 **Temel Kavramlar & Formüller:**
-            - Soruyu çözmek için gereken temel kurallar, formüller veya kavramlar.
-
-            📝 **Adım Adım Ayrıntılı Çözüm:**
-            1. Soruda verilenler ve istenenlerin analizi.
-            2. Adım adım matematiksel/mantıksal işlem süreci (tüm adımları sade ve net göster).
-            3. Sonuca ulaşma ve doğru şıkla eşleştirme.
-
-            💡 **Püf Noktaları & Sınav Taktikleri (Önemli İpuçları):**
-            - YKS'de bu soru tipinde yapılan yaygın çeldirici hatalar.
-            - Hızlı çözüm için pratik ipucu veya pratik kontrol yöntemi.
-        """.trimIndent()
-
         return try {
-            val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
-            val dataUrl = "data:image/jpeg;base64,$base64Image"
+            val contentParts = mutableListOf<GroqContentPart>()
+            contentParts.add(GroqContentPart(type = "text", text = prompt))
+
+            if (imageBytes != null && imageBytes.isNotEmpty()) {
+                val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+                val dataUrl = "data:image/jpeg;base64,$base64Image"
+                contentParts.add(
+                    GroqContentPart(
+                        type = "image_url",
+                        image_url = GroqImageUrl(url = dataUrl)
+                    )
+                )
+            }
 
             val requestBody = GroqChatRequest(
                 model = modelName,
                 messages = listOf(
                     GroqMessage(
                         role = "user",
-                        content = listOf(
-                            GroqContentPart(
-                                type = "text",
-                                text = prompt
-                            ),
-                            GroqContentPart(
-                                type = "image_url",
-                                image_url = GroqImageUrl(url = dataUrl)
-                            )
-                        )
+                        content = contentParts
                     )
                 ),
                 temperature = 0.2
@@ -215,14 +395,21 @@ class GroqProvider @Inject constructor(
                         val groqResponse = try {
                             json.decodeFromString<GroqChatResponse>(responseBodyString)
                         } catch (e: Exception) {
-                            return Result.failure<String>(
-                                Exception("Groq API yanıtı çözümlenemedi: ${e.localizedMessage}", e)
+                            return Result.failure(
+                                AiException(
+                                    AiErrorType.PARSING_FAILED,
+                                    "Groq API yanıtı çözümlenemedi: ${e.localizedMessage}",
+                                    e
+                                )
                             )
                         }
 
                         if (groqResponse.error != null) {
-                            return Result.failure<String>(
-                                Exception(groqResponse.error.message ?: "Groq API hatası oluştu.")
+                            return Result.failure(
+                                AiException(
+                                    AiErrorType.MODEL_UNAVAILABLE,
+                                    groqResponse.error.message ?: "Groq API hatası oluştu."
+                                )
                             )
                         }
 
@@ -233,29 +420,46 @@ class GroqProvider @Inject constructor(
                             ?.trim()
 
                         if (solutionText.isNullOrBlank()) {
-                            Result.failure<String>(Exception("AI modelinden geçerli bir yanıt alınamadı. Lütfen soruyu tekrar göndermeyi deneyin."))
+                            Result.failure(
+                                AiException(
+                                    AiErrorType.MODEL_UNAVAILABLE,
+                                    "AI modelinden geçerli bir yanıt alınamadı. Lütfen soruyu tekrar göndermeyi deneyin."
+                                )
+                            )
                         } else {
                             Result.success(solutionText)
                         }
                     }
                     400 -> {
-                        Result.failure<String>(
-                            Exception("Geçersiz istek veya hatalı model parametresi (HTTP 400). Lütfen Groq model ayarlarınızı kontrol edin.")
+                        Result.failure(
+                            AiException(
+                                AiErrorType.UNKNOWN,
+                                "Geçersiz istek veya hatalı model parametresi (HTTP 400). Lütfen Groq model ayarlarınızı kontrol edin."
+                            )
                         )
                     }
                     401, 403 -> {
-                        Result.failure<String>(
-                            Exception("Geçersiz Groq API Anahtarı veya yetkisiz erişim. Lütfen Ayarlar sayfasından anahtarınızı kontrol edin.")
+                        Result.failure(
+                            AiException(
+                                AiErrorType.INVALID_API_KEY,
+                                "Geçersiz Groq API Anahtarı veya yetkisiz erişim. Lütfen Ayarlar sayfasından anahtarınızı kontrol edin."
+                            )
                         )
                     }
                     429 -> {
-                        Result.failure<String>(
-                            Exception("Groq API kullanım kotanız doldu veya istek sınırı aşıldı (Rate limit). Lütfen biraz bekleyip tekrar deneyin.")
+                        Result.failure(
+                            AiException(
+                                AiErrorType.QUOTA_EXCEEDED,
+                                "Groq API kullanım kotanız doldu veya istek sınırı aşıldı (Rate limit). Lütfen biraz bekleyip tekrar deneyin."
+                            )
                         )
                     }
                     500, 502, 503, 504 -> {
-                        Result.failure<String>(
-                            Exception("Groq sunucularında geçici bir kesinti yaşanıyor (HTTP ${response.code}). Lütfen daha sonra tekrar deneyin.")
+                        Result.failure(
+                            AiException(
+                                AiErrorType.MODEL_UNAVAILABLE,
+                                "Groq sunucularında geçici bir kesinti yaşanıyor (HTTP ${response.code}). Lütfen daha sonra tekrar deneyin."
+                            )
                         )
                     }
                     else -> {
@@ -265,101 +469,43 @@ class GroqProvider @Inject constructor(
                             null
                         }
                         val errorDetail = parsedError ?: responseBodyString.take(200).ifBlank { "HTTP ${response.code}" }
-                        Result.failure<String>(
-                            Exception("Groq API Hatası ($errorDetail). Lütfen ayarlarınızı ve internet bağlantınızı kontrol edin.")
+                        Result.failure(
+                            AiException(
+                                AiErrorType.UNKNOWN,
+                                "Groq API Hatası ($errorDetail). Lütfen ayarlarınızı ve internet bağlantınızı kontrol edin."
+                            )
                         )
                     }
                 }
             }
-        } catch (e: SocketTimeoutException) {
-            Result.failure<String>(
-                Exception("İstek zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.", e)
-            )
-        } catch (e: UnknownHostException) {
-            Result.failure<String>(
-                Exception("İnternet bağlantısı yok veya sunucuya erişilemiyor. Lütfen ağ bağlantınızı kontrol edin.", e)
-            )
-        } catch (e: IOException) {
-            Result.failure<String>(
-                Exception("Ağ iletişim hatası oluştu: ${e.localizedMessage ?: "Sunucuya bağlanılamadı."}", e)
-            )
         } catch (e: Exception) {
-            Result.failure<String>(
-                Exception("Çözüm alınırken beklenmeyen bir hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}", e)
+            Result.failure(mapToAiException(e))
+        }
+    }
+
+    private fun mapToAiException(e: Exception): AiException {
+        return when (e) {
+            is AiException -> e
+            is SocketTimeoutException -> AiException(
+                AiErrorType.NETWORK_TIMEOUT,
+                "İstek zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.",
+                e
             )
-        }
-    }
-
-    suspend fun detectMetadata(
-        imageBytes: ByteArray,
-        modelName: String,
-        apiKey: String
-    ): Result<com.sorudefteri.domain.model.QuestionMetadata> = withContext(Dispatchers.IO) {
-        val effectiveModel = modelName.ifBlank { "llama-3.2-11b-vision-preview" }
-        val prompt = """
-            Görseldeki YKS (TYT veya AYT) sorusunu incele ve JSON formatında şu bilgileri çıkar:
-            1. examType: "TYT" veya "AYT"
-            2. subjectId: ["turkce", "matematik", "fizik", "kimya", "biyoloji", "tarih", "cografya", "felsefe", "din_kulturu", "ayt_matematik", "ayt_fizik", "ayt_kimya", "ayt_biyoloji", "ayt_edebiyat", "ayt_tarih1", "ayt_cografya1", "ydt_ingilizce"] değerlerinden en uygun olanı.
-            3. topic: Sorunun ait olduğu net YKS konu başlığı (Örn: "Türev", "Paragrafta Anlam", "Kalıtım", "Optik", "Trigonometri", "Polinomlar").
-            4. correctAnswer: Görsel üzerinde işaretlenmiş doğru cevap şıkkı veya bariz doğru cevap varsa "A", "B", "C", "D", "E" veya null.
-
-            SADECE geçerli bir JSON objesi döndür:
-            {"examType": "TYT", "subjectId": "matematik", "topic": "Fonksiyonlar", "correctAnswer": "C"}
-        """.trimIndent()
-
-        val rawResult = executeGroqSolve(imageBytes, "", "", null, effectiveModel, apiKey)
-        rawResult.mapCatching { rawText ->
-            val jsonStart = rawText.indexOf('{')
-            val jsonEnd = rawText.lastIndexOf('}')
-            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-                val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
-                json.decodeFromString<com.sorudefteri.domain.model.QuestionMetadata>(cleanJson)
-            } else {
-                com.sorudefteri.domain.model.QuestionMetadata()
-            }
-        }
-    }
-
-    suspend fun generateSimilarQuestion(
-        imageBytes: ByteArray,
-        dersAdi: String,
-        konu: String,
-        modelName: String,
-        apiKey: String
-    ): Result<com.sorudefteri.domain.model.SimilarQuestionResult> = withContext(Dispatchers.IO) {
-        val effectiveModel = modelName.ifBlank { "llama-3.2-11b-vision-preview" }
-        val prompt = """
-            Sen uzman bir YKS (TYT / AYT) soru yazarısın.
-            Görseldeki soruyu analiz et. Bu soruyla TAM OLARAK AYNI KAZANIMI ve zorluk seviyesini ölçen, fakat sayıları/metni/değişkenleri FARKLI yepyeni ve özgün bir soru üret.
-            Ders: $dersAdi, Konu: $konu
-            Matematiksel formülleri standart LaTeX formatında ($...$) yaz.
-            A, B, C, D, E olmak üzere 5 şık ver.
-
-            SADECE geçerli bir JSON objesi döndür, format:
-            {
-              "questionText": "Soru metni ve öncüller...",
-              "options": {
-                "A": "Şık A",
-                "B": "Şık B",
-                "C": "Şık C",
-                "D": "Şık D",
-                "E": "Şık E"
-              },
-              "correctAnswer": "A",
-              "solution": "Adım adım ayrıntılı çözüm..."
-            }
-        """.trimIndent()
-
-        val rawResult = executeGroqSolve(imageBytes, dersAdi, konu, null, effectiveModel, apiKey)
-        rawResult.mapCatching { rawText ->
-            val jsonStart = rawText.indexOf('{')
-            val jsonEnd = rawText.lastIndexOf('}')
-            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-                val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
-                json.decodeFromString<com.sorudefteri.domain.model.SimilarQuestionResult>(cleanJson)
-            } else {
-                throw Exception("Benzer soru formatı çözümlenemedi.")
-            }
+            is UnknownHostException -> AiException(
+                AiErrorType.NETWORK_ERROR,
+                "İnternet bağlantısı yok veya sunucuya erişilemiyor. Lütfen ağ bağlantınızı kontrol edin.",
+                e
+            )
+            is IOException -> AiException(
+                AiErrorType.NETWORK_ERROR,
+                "Ağ iletişim hatası oluştu: ${e.localizedMessage ?: "Sunucuya bağlanılamadı."}",
+                e
+            )
+            else -> AiException(
+                AiErrorType.UNKNOWN,
+                "Çözüm alınırken beklenmeyen bir hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}",
+                e
+            )
         }
     }
 }

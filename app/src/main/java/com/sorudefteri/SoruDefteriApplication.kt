@@ -1,6 +1,8 @@
 package com.sorudefteri
 
 import android.app.Application
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -9,20 +11,35 @@ import coil3.disk.directory
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
+import com.sorudefteri.data.worker.ReminderScheduler
 import dagger.hilt.android.HiltAndroidApp
 import okhttp3.OkHttpClient
 import javax.inject.Inject
 
 /**
  * Main Application class for Soru Defterim.
- * Configures Hilt dependency injection and Coil 3 ImageLoader with OkHttpClient,
- * memory cache (25% of available RAM) and disk cache to prevent RAM bottlenecks and OOMs.
+ * Configures Hilt dependency injection, Coil 3 ImageLoader with OkHttpClient,
+ * WorkManager Configuration with HiltWorkerFactory, and schedules daily Spaced Repetition reminders.
  */
 @HiltAndroidApp
-class SoruDefteriApplication : Application(), SingletonImageLoader.Factory {
+class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Configuration.Provider {
 
     @Inject
     lateinit var okHttpClient: OkHttpClient
+
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .build()
+
+    override fun onCreate() {
+        super.onCreate()
+        // Her gün saat 19:00'da tetiklenecek Aralıklı Tekrar bildirimini zamanla
+        ReminderScheduler.scheduleDailyReminder(this)
+    }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
         return ImageLoader.Builder(context)

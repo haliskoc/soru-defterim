@@ -1,8 +1,12 @@
 package com.sorudefteri.data.ai
 
 import com.sorudefteri.data.local.AyarlarDataStore
-import com.sorudefteri.domain.model.AiProviderType
 import com.sorudefteri.domain.DersTaksonomisi
+import com.sorudefteri.domain.model.AiErrorType
+import com.sorudefteri.domain.model.AiException
+import com.sorudefteri.domain.model.AiProviderType
+import com.sorudefteri.domain.model.QuestionMetadata
+import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.repository.AiRepository as AiRepositoryInterface
 import kotlinx.coroutines.Dispatchers
@@ -16,7 +20,7 @@ import javax.inject.Singleton
 /**
  * AI Soru Çözüm Katmanı Deposu (Repository).
  * AyarlarDataStore üzerinden aktif sağlayıcı (Gemini / Groq), model ve API anahtarı bilgilerini okuyarak
- * soru görselini ilgili sağlayıcıya iletir ve adım adım çözümü döndürür.
+ * soru görselini/metnini ilgili sağlayıcıya iletir.
  */
 @Singleton
 class AiRepository @Inject constructor(
@@ -27,32 +31,119 @@ class AiRepository @Inject constructor(
 
     /**
      * Domain Soru nesnesi üzerinden AI çözümü üretir.
+     * Koşullu OCR desteği: sendImage = false ise görsel okunmaz, doğrudan extractedText iletilir.
      */
-    override suspend fun getAiSolution(soru: Soru): Result<String> {
-        val dersAdi = DersTaksonomisi.getDersAdi(soru.subjectId)
-        return cozumIste(
-            imagePath = soru.imagePath,
+    override suspend fun getAiSolution(
+        soru: Soru,
+        sendImage: Boolean,
+        extractedText: String?
+    ): Result<String> {
+        val dersAdi = DersTaksonomisi.getDersAdi(soru.examType, soru.subjectId)
+        val mistakeName = soru.mistakeType?.displayName
+
+        if (!sendImage && !extractedText.isNullOrBlank()) {
+            return getAiSolutionFromText(
+                dersAdi = dersAdi,
+                konu = soru.topic,
+                soruMetni = extractedText,
+                correctAnswer = soru.correctAnswer,
+                mistakeType = mistakeName
+            )
+        }
+
+        // Görseli diskten oku
+        val file = File(soru.imagePath)
+        val imageBytes = if (file.exists() && file.canRead()) {
+            withContext(Dispatchers.IO) {
+                try {
+                    file.readBytes()
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        } else {
+            null
+        }
+
+        if (sendImage && imageBytes == null) {
+            return Result.failure(
+                FileNotFoundException("Soru görseli bulunamadı veya okunamıyor: ${soru.imagePath}")
+            )
+        }
+
+        return cozumIsteGelismi(
+            imageBytes = if (sendImage) imageBytes else null,
             dersAdi = dersAdi,
             konu = soru.topic,
-            correctAnswer = soru.correctAnswer
+            correctAnswer = soru.correctAnswer,
+            mistakeType = mistakeName,
+            soruMetni = extractedText
         )
+    }
+
+    /**
+     * Metin tabanlı sorularda veya OCR çıktısı ile doğrudan AI çözümü üretir (Görsel gönderilmez).
+     */
+    override suspend fun getAiSolutionFromText(
+        dersAdi: String,
+        konu: String,
+        soruMetni: String,
+        correctAnswer: String?,
+        mistakeType: String?
+    ): Result<String> {
+        if (soruMetni.isBlank()) {
+            return Result.failure(IllegalArgumentException("Soru metni boş olamaz."))
+        }
+        return cozumIsteGelismi(
+            imageBytes = null,
+            dersAdi = dersAdi,
+            konu = konu,
+            correctAnswer = correctAnswer,
+            mistakeType = mistakeType,
+            soruMetni = soruMetni
+        )
+    }
+
+    /**
+     * OCR ile okunan ham metni düzeltir ve matematiksel LaTeX formüllerini iyileştirir.
+     */
+    override suspend fun cleanOcrText(rawOcrText: String): Result<String> {
+        if (rawOcrText.isBlank()) {
+            return Result.success("")
+        }
+
+        val providerType = ayarlarDataStore.getAiProvider()
+        return when (providerType) {
+            AiProviderType.GEMINI -> {
+                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
+                geminiProvider.cleanOcrText(rawOcrText, model, apiKey)
+            }
+            AiProviderType.GROQ -> {
+                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
+                groqProvider.cleanOcrText(rawOcrText, model, apiKey)
+            }
+        }
     }
 
     /**
      * Aktif AI sağlayıcısı üzerinden görselden sınav türü, ders, konu ve cevap şıkkı tespiti yapar (Auto-Tagging).
      */
-    override suspend fun detectQuestionMetadata(imageBytes: ByteArray): Result<com.sorudefteri.domain.model.QuestionMetadata> {
+    override suspend fun detectQuestionMetadata(imageBytes: ByteArray): Result<QuestionMetadata> {
         val providerType = ayarlarDataStore.getAiProvider()
         return when (providerType) {
             AiProviderType.GEMINI -> {
                 val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(IllegalStateException("Gemini API anahtarı girilmemiş."))
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı girilmemiş."))
                 val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
                 geminiProvider.detectMetadata(imageBytes, model, apiKey)
             }
             AiProviderType.GROQ -> {
                 val apiKey = ayarlarDataStore.getGroqApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(IllegalStateException("Groq API anahtarı girilmemiş."))
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
                 val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
                 groqProvider.detectMetadata(imageBytes, model, apiKey)
             }
@@ -60,26 +151,70 @@ class AiRepository @Inject constructor(
     }
 
     /**
-     * Mevcut soru görselinden ve kazanımlarından yola çıkarak birebir benzer yeni bir soru türetir (Question Cloner).
+     * Mevcut soru görselinden ve/veya metninden yola çıkarak benzer soru türetir.
+     */
+    override suspend fun generateSimilarQuestion(
+        imageBytes: ByteArray?,
+        dersAdi: String,
+        konu: String,
+        soruMetni: String?
+    ): Result<SimilarQuestionResult> {
+        val providerType = ayarlarDataStore.getAiProvider()
+        return when (providerType) {
+            AiProviderType.GEMINI -> {
+                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
+                geminiProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
+            }
+            AiProviderType.GROQ -> {
+                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
+                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
+                groqProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
+            }
+        }
+    }
+
+    /**
+     * Geriye dönük uyumluluk: imageBytes ByteArray olan imza.
      */
     override suspend fun generateSimilarQuestion(
         imageBytes: ByteArray,
         dersAdi: String,
         konu: String
-    ): Result<com.sorudefteri.domain.model.SimilarQuestionResult> {
+    ): Result<SimilarQuestionResult> {
+        return generateSimilarQuestion(
+            imageBytes = imageBytes,
+            dersAdi = dersAdi,
+            konu = konu,
+            soruMetni = null
+        )
+    }
+
+    /**
+     * Konu ve kriterlere göre sıfırdan özgün soru üretir.
+     */
+    override suspend fun generateQuestion(
+        dersAdi: String,
+        konu: String,
+        zorluk: String,
+        alan: String,
+        sinavTipi: String
+    ): Result<SimilarQuestionResult> {
         val providerType = ayarlarDataStore.getAiProvider()
         return when (providerType) {
             AiProviderType.GEMINI -> {
                 val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(IllegalStateException("Gemini API anahtarı girilmemiş."))
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı girilmemiş."))
                 val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
-                geminiProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, model, apiKey)
+                geminiProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, model, apiKey)
             }
             AiProviderType.GROQ -> {
                 val apiKey = ayarlarDataStore.getGroqApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(IllegalStateException("Groq API anahtarı girilmemiş."))
+                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
                 val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
-                groqProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, model, apiKey)
+                groqProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, model, apiKey)
             }
         }
     }
@@ -100,7 +235,7 @@ class AiRepository @Inject constructor(
             AiProviderType.GEMINI -> {
                 val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
                 if (apiKey.isBlank()) {
-                    Result.failure(IllegalArgumentException("Gemini API anahtarı girilmemiş."))
+                    Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı girilmemiş."))
                 } else {
                     geminiProvider.listModels(apiKey)
                 }
@@ -108,7 +243,7 @@ class AiRepository @Inject constructor(
             AiProviderType.GROQ -> {
                 val apiKey = ayarlarDataStore.getGroqApiKey().trim()
                 if (apiKey.isBlank()) {
-                    Result.failure(IllegalArgumentException("Groq API anahtarı girilmemiş."))
+                    Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
                 } else {
                     groqProvider.listModels(apiKey)
                 }
@@ -117,13 +252,68 @@ class AiRepository @Inject constructor(
     }
 
     /**
-     * Disk üzerindeki soru görseli dosya yolundan çözüm üretir.
-     *
-     * @param imagePath Soru görselinin cihazdaki mutlak dosya yolu.
-     * @param dersAdi Sorunun ait olduğu ders adı.
-     * @param konu Sorunun ait olduğu konu başlığı.
-     * @param correctAnswer Varsa doğru cevap şıkkı (örn. "A", "B", "C", "D", "E") veya null.
-     * @return Başarılı ise çözüm metni [Result.success], aksi takdirde hata detayı [Result.failure].
+     * Gelişmiş çözüm isteme merkezi metodu.
+     */
+    private suspend fun cozumIsteGelismi(
+        imageBytes: ByteArray?,
+        dersAdi: String,
+        konu: String,
+        correctAnswer: String?,
+        mistakeType: String?,
+        soruMetni: String?
+    ): Result<String> {
+        val providerType = ayarlarDataStore.getAiProvider()
+
+        return when (providerType) {
+            AiProviderType.GEMINI -> {
+                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
+                if (apiKey.isBlank()) {
+                    return Result.failure(
+                        AiException(
+                            AiErrorType.INVALID_API_KEY,
+                            "API anahtarı bulunamadı. Lütfen Ayarlar bölümünden Gemini API anahtarınızı girin."
+                        )
+                    )
+                }
+                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
+                geminiProvider.cozumIsteDetayli(
+                    imageBytes = imageBytes,
+                    dersAdi = dersAdi,
+                    konu = konu,
+                    correctAnswer = correctAnswer,
+                    mistakeType = mistakeType,
+                    soruMetni = soruMetni,
+                    modelName = model,
+                    apiKey = apiKey
+                )
+            }
+            AiProviderType.GROQ -> {
+                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
+                if (apiKey.isBlank()) {
+                    return Result.failure(
+                        AiException(
+                            AiErrorType.INVALID_API_KEY,
+                            "API anahtarı bulunamadı. Lütfen Ayarlar bölümünden Groq API anahtarınızı girin."
+                        )
+                    )
+                }
+                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
+                groqProvider.cozumIsteDetayli(
+                    imageBytes = imageBytes,
+                    dersAdi = dersAdi,
+                    konu = konu,
+                    correctAnswer = correctAnswer,
+                    mistakeType = mistakeType,
+                    soruMetni = soruMetni,
+                    modelName = model,
+                    apiKey = apiKey
+                )
+            }
+        }
+    }
+
+    /**
+     * Eski imza: Dosya yolundan çözüm üretir.
      */
     suspend fun cozumIste(
         imagePath: String,
@@ -155,13 +345,7 @@ class AiRepository @Inject constructor(
     }
 
     /**
-     * Bellekteki görsel byte dizisinden çözüm üretir.
-     *
-     * @param imageBytes Soru görselinin byte dizisi.
-     * @param dersAdi Sorunun ait olduğu ders adı.
-     * @param konu Sorunun ait olduğu konu başlığı.
-     * @param correctAnswer Varsa doğru cevap şıkkı veya null.
-     * @return Başarılı ise çözüm metni [Result.success], aksi takdirde hata detayı [Result.failure].
+     * Eski imza: Byte dizisinden çözüm üretir.
      */
     suspend fun cozumIste(
         imageBytes: ByteArray,
@@ -169,47 +353,13 @@ class AiRepository @Inject constructor(
         konu: String,
         correctAnswer: String? = null
     ): Result<String> {
-        if (imageBytes.isEmpty()) {
-            return Result.failure(IllegalArgumentException("Soru görseli verisi boş olamaz."))
-        }
-
-        val providerType = ayarlarDataStore.getAiProvider()
-
-        return when (providerType) {
-            AiProviderType.GEMINI -> {
-                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
-                if (apiKey.isBlank()) {
-                    return Result.failure(
-                        IllegalStateException("API anahtarı bulunamadı. Lütfen Ayarlar bölümünden API anahtarınızı girin.")
-                    )
-                }
-                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
-                geminiProvider.cozumIste(
-                    imageBytes = imageBytes,
-                    dersAdi = dersAdi,
-                    konu = konu,
-                    correctAnswer = correctAnswer,
-                    modelName = model,
-                    apiKey = apiKey
-                )
-            }
-            AiProviderType.GROQ -> {
-                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
-                if (apiKey.isBlank()) {
-                    return Result.failure(
-                        IllegalStateException("API anahtarı bulunamadı. Lütfen Ayarlar bölümünden API anahtarınızı girin.")
-                    )
-                }
-                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
-                groqProvider.cozumIste(
-                    imageBytes = imageBytes,
-                    dersAdi = dersAdi,
-                    konu = konu,
-                    correctAnswer = correctAnswer,
-                    modelName = model,
-                    apiKey = apiKey
-                )
-            }
-        }
+        return cozumIsteGelismi(
+            imageBytes = imageBytes,
+            dersAdi = dersAdi,
+            konu = konu,
+            correctAnswer = correctAnswer,
+            mistakeType = null,
+            soruMetni = null
+        )
     }
 }

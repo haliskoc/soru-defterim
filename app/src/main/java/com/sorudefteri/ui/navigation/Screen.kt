@@ -13,6 +13,12 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import kotlinx.serialization.Serializable
 
 /**
+ * Type-safe navigation destination for Onboarding & Track Selection screen.
+ */
+@Serializable
+object OnboardingNav
+
+/**
  * Type-safe navigation destination for Kütüphane (Question Archive) screen.
  */
 @Serializable
@@ -33,6 +39,12 @@ data class SoruEkleNav(
  */
 @Serializable
 data class SoruDetayNav(val soruId: Long)
+
+/**
+ * Type-safe navigation destination for Soru Düzenleme (Edit Question) screen.
+ */
+@Serializable
+data class SoruDuzenleNav(val soruId: Long)
 
 /**
  * Type-safe navigation destination for Kamera (CameraX Capture) screen.

@@ -20,6 +20,15 @@ data class Soru(
     val reviewStage: Int = 0, // 0: Yeni, 1: 1 Gün, 2: 3 Gün, 3: 7 Gün, 4: 14 Gün, 5: 30 Gün (Usta)
     val nextReviewDate: Long? = null, // Sonraki tekrar zamanı (timestamp)
     val lastReviewedAt: Long? = null,
+    val kaynakYayin: String? = null,
+    val kaynakDeneme: String? = null,
+    val kaynakYil: Int? = null,
+    val kaynakSoruNo: Int? = null,
+    val studentAnswer: String? = null,
+    val difficulty: String? = null,
+    val ocrMetni: String? = null,
+    val isOcrUsed: Boolean = false,
+    val questionText: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 ) {

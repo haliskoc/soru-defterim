@@ -40,12 +40,19 @@ class BackupManifestSerializationTest {
             reviewStage = 3,
             nextReviewDate = 1700604800000L,
             lastReviewedAt = 1700000000000L,
+            kaynakYayin = "Apotemi",
+            kaynakDeneme = "Fen Denemeleri",
+            kaynakYil = 2024,
+            kaynakSoruNo = 7,
+            ocrMetni = "Lorentz kuvveti formülü nedir?",
+            isOcrUsed = true,
+            questionText = "Lorentz kuvveti formülü nedir?",
             createdAt = 1699000000000L
         )
 
         val manifest = BackupManifest(
             appSignature = "com.sorudefteri",
-            version = 1,
+            version = 2,
             exportDate = 1700000000000L,
             questionCount = 1,
             sorular = listOf(originalItem)
@@ -56,12 +63,13 @@ class BackupManifestSerializationTest {
         assertTrue("JSON imza içermeli", jsonString.contains("com.sorudefteri"))
         assertTrue("JSON soru görseli içermeli", jsonString.contains("soru_0_uuid123.jpg"))
         assertTrue("JSON formülü içermeli", jsonString.contains("Lorentz kuvveti"))
+        assertTrue("JSON kaynak yayın içermeli", jsonString.contains("Apotemi"))
 
         // JSON'dan geri oku (Deserialize)
         val decodedManifest = json.decodeFromString<BackupManifest>(jsonString)
 
         assertEquals("com.sorudefteri", decodedManifest.appSignature)
-        assertEquals(1, decodedManifest.version)
+        assertEquals(2, decodedManifest.version)
         assertEquals(1, decodedManifest.questionCount)
         assertEquals(1, decodedManifest.sorular.size)
 
@@ -79,6 +87,13 @@ class BackupManifestSerializationTest {
         assertEquals(3, decodedItem.reviewStage)
         assertEquals(1700604800000L, decodedItem.nextReviewDate)
         assertEquals(originalItem.aiExplanation, decodedItem.aiExplanation)
+        assertEquals("Apotemi", decodedItem.kaynakYayin)
+        assertEquals("Fen Denemeleri", decodedItem.kaynakDeneme)
+        assertEquals(2024, decodedItem.kaynakYil)
+        assertEquals(7, decodedItem.kaynakSoruNo)
+        assertEquals("Lorentz kuvveti formülü nedir?", decodedItem.ocrMetni)
+        assertEquals(true, decodedItem.isOcrUsed)
+        assertEquals("Lorentz kuvveti formülü nedir?", decodedItem.questionText)
     }
 
     @Test

@@ -26,7 +26,9 @@ object DatabaseModule {
         )
             .addMigrations(
                 SoruDatabase.MIGRATION_1_2,
-                SoruDatabase.MIGRATION_2_3
+                SoruDatabase.MIGRATION_2_3,
+                SoruDatabase.MIGRATION_3_4,
+                SoruDatabase.MIGRATION_4_5
             )
             .fallbackToDestructiveMigrationOnDowngrade()
             .build()

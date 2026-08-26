@@ -180,10 +180,10 @@ class AyarlarViewModel @Inject constructor(
         _modelStatusState.value = null to false
     }
 
-    fun exportBackup(targetUri: Uri) {
+    fun exportBackup(targetUri: Uri, password: String? = null) {
         viewModelScope.launch {
             _backupState.value = BackupState(isLoading = true, message = "Yedek paketi (.sdefteri) hazırlanıyor...")
-            val result = backupManager.exportBackup(targetUri)
+            val result = backupManager.exportBackup(targetUri, password)
             result.onSuccess { count ->
                 _backupState.value = BackupState(
                     isLoading = false,
@@ -200,10 +200,10 @@ class AyarlarViewModel @Inject constructor(
         }
     }
 
-    fun shareBackupToDriveOrCloud(context: android.content.Context) {
+    fun shareBackupToDriveOrCloud(context: android.content.Context, password: String? = null) {
         viewModelScope.launch {
             _backupState.value = BackupState(isLoading = true, message = "Google Drive / Bulut yedek paketi hazırlanıyor...")
-            val result = backupManager.exportBackupToTempFile()
+            val result = backupManager.exportBackupToTempFile(password)
             result.onSuccess { (file, count) ->
                 _backupState.value = BackupState(
                     isLoading = false,
@@ -221,10 +221,10 @@ class AyarlarViewModel @Inject constructor(
         }
     }
 
-    fun importBackup(sourceUri: Uri) {
+    fun importBackup(sourceUri: Uri, password: String? = null) {
         viewModelScope.launch {
             _backupState.value = BackupState(isLoading = true, message = "Yedek paketi açılıyor ve görseller aktarılıyor...")
-            val result = backupManager.importBackup(sourceUri)
+            val result = backupManager.importBackup(sourceUri, password)
             result.onSuccess { count ->
                 _backupState.value = BackupState(
                     isLoading = false,
@@ -245,10 +245,15 @@ class AyarlarViewModel @Inject constructor(
         _backupState.value = BackupState()
     }
 
-    fun resetAllData(onSuccess: () -> Unit) {
+    fun clearResetSuccess() {}
+
+    fun clearErrorMessage() {}
+
+    fun resetAllData(onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
             try {
                 soruRepository.deleteAllSorular()
+                ayarlarDataStore.clearSettings()
                 onSuccess()
             } catch (e: Exception) {
                 e.printStackTrace()

@@ -87,6 +87,17 @@ interface SoruRepository {
     suspend fun insertAllSorular(sorular: List<Soru>): List<Long>
     fun getFavoriteSorular(): Flow<List<Soru>>
     fun getDueReviewSorular(): Flow<List<Soru>>
+    suspend fun getDueReviewSorularList(currentTime: Long = System.currentTimeMillis()): List<Soru>
+
+    fun getPagedSorular(
+        query: String? = null,
+        examType: String? = null,
+        subjectId: String? = null,
+        mistakeType: String? = null,
+        isSolved: Boolean? = null,
+        isFavorite: Boolean? = null,
+        kaynak: String? = null
+    ): Flow<androidx.paging.PagingData<Soru>>
 
     fun getDistinctTopics(subjectId: String): Flow<List<String>>
 

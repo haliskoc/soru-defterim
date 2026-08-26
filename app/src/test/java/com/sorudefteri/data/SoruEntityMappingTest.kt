@@ -33,6 +33,13 @@ class SoruEntityMappingTest {
             reviewStage = 4,
             nextReviewDate = 1701200000000L,
             lastReviewedAt = 1700000000000L,
+            kaynakYayin = "3D Yayınları",
+            kaynakDeneme = "Türkiye Geneli Deneme 1",
+            kaynakYil = 2024,
+            kaynakSoruNo = 15,
+            ocrMetni = "Buna göre mRNA üzerindeki kodon dizilimi hangisidir?",
+            isOcrUsed = true,
+            questionText = "Buna göre mRNA üzerindeki kodon dizilimi hangisidir?",
             createdAt = 1699000000000L,
             updatedAt = 1700000000000L
         )
@@ -51,6 +58,13 @@ class SoruEntityMappingTest {
         assertEquals(true, entity.isFavorite)
         assertEquals(4, entity.reviewStage)
         assertEquals(1701200000000L, entity.nextReviewDate)
+        assertEquals("3D Yayınları", entity.kaynakYayin)
+        assertEquals("Türkiye Geneli Deneme 1", entity.kaynakDeneme)
+        assertEquals(2024, entity.kaynakYil)
+        assertEquals(15, entity.kaynakSoruNo)
+        assertEquals("Buna göre mRNA üzerindeki kodon dizilimi hangisidir?", entity.ocrMetni)
+        assertEquals(true, entity.isOcrUsed)
+        assertEquals("Buna göre mRNA üzerindeki kodon dizilimi hangisidir?", entity.questionText)
 
         // Entity -> Domain
         val mappedDomain = entity.toDomain()
@@ -67,6 +81,13 @@ class SoruEntityMappingTest {
         assertEquals(domainSoru.reviewStage, mappedDomain.reviewStage)
         assertEquals(domainSoru.nextReviewDate, mappedDomain.nextReviewDate)
         assertEquals(domainSoru.aiExplanation, mappedDomain.aiExplanation)
+        assertEquals(domainSoru.kaynakYayin, mappedDomain.kaynakYayin)
+        assertEquals(domainSoru.kaynakDeneme, mappedDomain.kaynakDeneme)
+        assertEquals(domainSoru.kaynakYil, mappedDomain.kaynakYil)
+        assertEquals(domainSoru.kaynakSoruNo, mappedDomain.kaynakSoruNo)
+        assertEquals(domainSoru.ocrMetni, mappedDomain.ocrMetni)
+        assertEquals(domainSoru.isOcrUsed, mappedDomain.isOcrUsed)
+        assertEquals(domainSoru.questionText, mappedDomain.questionText)
     }
 
     @Test

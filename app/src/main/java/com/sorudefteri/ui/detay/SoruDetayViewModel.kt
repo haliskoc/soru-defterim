@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.ai.AiRepository
 import com.sorudefteri.data.images.GorselDepo
+import com.sorudefteri.data.ocr.OcrHelper
 import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.repository.SoruRepository
@@ -42,7 +43,13 @@ data class SoruDetayUiState(
     val similarQuestionError: String? = null,
     val showSimilarQuestionDialog: Boolean = false,
     val userSelectedSimilarOption: String? = null,
-    val isSimilarAnswerRevealed: Boolean = false
+    val isSimilarAnswerRevealed: Boolean = false,
+    // Koşullu OCR & AI İletim Alanları
+    val isOcrLoading: Boolean = false,
+    val extractedOcrText: String? = null,
+    val sendImageToAi: Boolean = true,
+    val isCleaningOcr: Boolean = false,
+    val ocrMessage: String? = null
 )
 
 @HiltViewModel
@@ -50,7 +57,8 @@ class SoruDetayViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val soruRepository: SoruRepository,
     private val aiRepository: AiRepository,
-    private val gorselDepo: GorselDepo
+    private val gorselDepo: GorselDepo,
+    private val ocrHelper: OcrHelper
 ) : ViewModel() {
 
     private val soruId: Long = savedStateHandle.get<Long>("soruId")
@@ -191,8 +199,76 @@ class SoruDetayViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Koşullu OCR Metin Ayıklama Servisi
+     */
+    fun performOcrOnQuestionImage() {
+        val currentSoru = _uiState.value.soru ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isOcrLoading = true, ocrMessage = null) }
+            val result = ocrHelper.recognizeText(currentSoru.imagePath)
+            result.onSuccess { text ->
+                _uiState.update {
+                    it.copy(
+                        isOcrLoading = false,
+                        extractedOcrText = text,
+                        ocrMessage = if (text.isNotBlank()) "Metin başarıyla ayıklandı ✓" else "Görselde okunabilir metin bulunamadı."
+                    )
+                }
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        isOcrLoading = false,
+                        ocrMessage = "OCR hatası: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun updateExtractedOcrText(newText: String) {
+        _uiState.update { it.copy(extractedOcrText = newText) }
+    }
+
+    fun setSendImageToAi(sendImage: Boolean) {
+        _uiState.update { it.copy(sendImageToAi = sendImage) }
+    }
+
+    /**
+     * OCR ile okunan metni AI ile temizler ve LaTeX formatına dönüştürür.
+     */
+    fun cleanExtractedOcrWithAi() {
+        val rawText = _uiState.value.extractedOcrText
+        if (rawText.isNullOrBlank()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isCleaningOcr = true, ocrMessage = null) }
+            val result = aiRepository.cleanOcrText(rawText)
+            result.onSuccess { cleaned ->
+                _uiState.update {
+                    it.copy(
+                        isCleaningOcr = false,
+                        extractedOcrText = cleaned,
+                        ocrMessage = "Metin ve formüller LaTeX olarak düzenlendi ✓"
+                    )
+                }
+            }.onFailure { e ->
+                _uiState.update {
+                    it.copy(
+                        isCleaningOcr = false,
+                        ocrMessage = "Düzenleme başarısız: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * AI çözüm isteği (Koşullu OCR destekli: Görsel toggle'ı ve ayıklanan metin desteğiyle).
+     */
     fun requestAiSolution() {
         val currentSoru = _uiState.value.soru ?: return
+        val state = _uiState.value
 
         viewModelScope.launch {
             _uiState.update {
@@ -215,7 +291,12 @@ class SoruDetayViewModel @Inject constructor(
                 return@launch
             }
 
-            val result = aiRepository.getAiSolution(currentSoru)
+            val result = aiRepository.getAiSolution(
+                soru = currentSoru,
+                sendImage = state.sendImageToAi,
+                extractedText = state.extractedOcrText
+            )
+
             result.onSuccess { explanation ->
                 val updated = currentSoru.copy(
                     aiExplanation = explanation,
@@ -245,10 +326,6 @@ class SoruDetayViewModel @Inject constructor(
         _uiState.update { it.copy(aiError = null, isApiKeyMissing = false) }
     }
 
-    /**
-     * AI çözümünü onaylar, soruyu çözüldü olarak işaretler ve varsa belirlenen doğru şıkkı kaydeder.
-     * Böylece çözüm yerel veritabanında kalıcı kalır ve tekrar API isteği yapılması gerekmez.
-     */
     fun onaylaCozumu(extractedAnswer: String? = null) {
         val currentSoru = _uiState.value.soru ?: return
         viewModelScope.launch {
@@ -279,8 +356,16 @@ class SoruDetayViewModel @Inject constructor(
         _uiState.update { it.copy(showDeleteDialog = show) }
     }
 
+    fun showDeleteConfirmDialog(show: Boolean) = setShowDeleteDialog(show)
+
     fun setShowEditNoteDialog(show: Boolean) {
         _uiState.update { it.copy(showEditNoteDialog = show) }
+    }
+
+    fun showEditNoteDialog(show: Boolean) = setShowEditNoteDialog(show)
+
+    fun clearOcrMessage() {
+        _uiState.update { it.copy(ocrMessage = null) }
     }
 
     fun setShowDrawingDialog(show: Boolean) {
@@ -310,6 +395,7 @@ class SoruDetayViewModel @Inject constructor(
      */
     fun generateSimilarQuestion() {
         val currentSoru = _uiState.value.soru ?: return
+        val state = _uiState.value
 
         viewModelScope.launch {
             _uiState.update {
@@ -333,19 +419,19 @@ class SoruDetayViewModel @Inject constructor(
                 return@launch
             }
 
-            val bytes = gorselDepo.getGorselBytes(currentSoru.imagePath)
-            if (bytes == null || bytes.isEmpty()) {
-                _uiState.update {
-                    it.copy(
-                        isGeneratingSimilar = false,
-                        similarQuestionError = "Soru görseli okunamadı."
-                    )
-                }
-                return@launch
+            val bytes = if (state.sendImageToAi) {
+                gorselDepo.getGorselBytes(currentSoru.imagePath)
+            } else {
+                null
             }
 
             val dersAdi = com.sorudefteri.domain.DersTaksonomisi.getDersAdi(currentSoru.examType, currentSoru.subjectId)
-            val result = aiRepository.generateSimilarQuestion(bytes, dersAdi, currentSoru.topic)
+            val result = aiRepository.generateSimilarQuestion(
+                imageBytes = bytes,
+                dersAdi = dersAdi,
+                konu = currentSoru.topic,
+                soruMetni = state.extractedOcrText
+            )
             result.onSuccess { similar ->
                 _uiState.update {
                     it.copy(

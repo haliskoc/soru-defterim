@@ -1,0 +1,85 @@
+name: Android CI / CD Release Pipeline
+
+on:
+  push:
+    branches: [ "main", "master", "develop" ]
+  pull_request:
+    branches: [ "main", "master", "develop" ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build, Lint, Test & Package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17 (Eclipse Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: 'gradle'
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x gradlew
+
+      - name: Run Android Lint (lintDebug)
+        run: ./gradlew lintDebug --stacktrace --continue
+        continue-on-error: true
+
+      - name: Run Unit Tests (testDebugUnitTest)
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Build Release APK & App Bundle (AAB)
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > app/release-keystore.jks
+            export KEYSTORE_PATH="$(pwd)/app/release-keystore.jks"
+            export KEYSTORE_PASSWORD="${{ secrets.KEYSTORE_PASSWORD }}"
+            export KEY_ALIAS="${{ secrets.KEY_ALIAS }}"
+            export KEY_PASSWORD="${{ secrets.KEY_PASSWORD }}"
+            ./gradlew assembleRelease bundleRelease --stacktrace
+          else
+            echo "No release keystore secret found. Building assembleDebug & assembleRelease (fallback)..."
+            ./gradlew assembleDebug assembleRelease bundleRelease --stacktrace || ./gradlew assembleDebug --stacktrace
+          fi
+
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: app/build/reports/tests/testDebugUnitTest/
+          if-no-files-found: ignore
+
+      - name: Upload Lint Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-reports
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+
+      - name: Upload APK Artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-builds
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: ignore
+
+      - name: Upload App Bundle (AAB) Artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-bundle-builds
+          path: app/build/outputs/bundle/**/*.aab
+          if-no-files-found: ignore

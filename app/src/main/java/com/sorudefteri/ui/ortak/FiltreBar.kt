@@ -52,6 +52,12 @@ fun FiltreBar(
     onSubjectSelected: (String?) -> Unit,
     selectedMistakeType: HataTipi?,
     onMistakeTypeSelected: (HataTipi?) -> Unit,
+    selectedPublisher: String? = null,
+    availablePublishers: List<String> = emptyList(),
+    onPublisherSelected: (String?) -> Unit = {},
+    selectedExamName: String? = null,
+    availableExamNames: List<String> = emptyList(),
+    onExamNameSelected: (String?) -> Unit = {},
     onlyUnsolved: Boolean,
     onOnlyUnsolvedToggle: (Boolean) -> Unit,
     onlyFavorites: Boolean = false,
@@ -64,10 +70,14 @@ fun FiltreBar(
     val scrollState = rememberScrollState()
     var subjectMenuExpanded by remember { mutableStateOf(false) }
     var mistakeMenuExpanded by remember { mutableStateOf(false) }
+    var publisherMenuExpanded by remember { mutableStateOf(false) }
+    var examNameMenuExpanded by remember { mutableStateOf(false) }
 
     val hasActiveFilter = selectedExamType != null ||
             selectedSubjectId != null ||
             selectedMistakeType != null ||
+            selectedPublisher != null ||
+            selectedExamName != null ||
             onlyUnsolved ||
             onlyFavorites ||
             onlyDueReview
@@ -287,6 +297,116 @@ fun FiltreBar(
                             }
                         }
                     )
+                }
+            }
+        }
+
+        // Kaynak / Yayın Filtresi Dropdown
+        if (availablePublishers.isNotEmpty()) {
+            Box {
+                val isPublisherSelected = selectedPublisher != null
+                FilterChip(
+                    selected = isPublisherSelected,
+                    onClick = { publisherMenuExpanded = true },
+                    label = { Text(text = if (isPublisherSelected) "Yayın: $selectedPublisher" else "Yayın") },
+                    trailingIcon = {
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    colors = if (isPublisherSelected) {
+                        FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    } else FilterChipDefaults.filterChipColors()
+                )
+
+                DropdownMenu(
+                    expanded = publisherMenuExpanded,
+                    onDismissRequest = { publisherMenuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Tüm Yayınlar", fontWeight = FontWeight.Bold) },
+                        onClick = {
+                            onPublisherSelected(null)
+                            publisherMenuExpanded = false
+                        },
+                        leadingIcon = {
+                            if (selectedPublisher == null) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    )
+
+                    availablePublishers.forEach { pub ->
+                        val isSelected = pub == selectedPublisher
+                        DropdownMenuItem(
+                            text = { Text(pub, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                            onClick = {
+                                onPublisherSelected(pub)
+                                publisherMenuExpanded = false
+                            },
+                            leadingIcon = {
+                                if (isSelected) {
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+
+        // Deneme Adı Filtresi Dropdown
+        if (availableExamNames.isNotEmpty()) {
+            Box {
+                val isExamNameSelected = selectedExamName != null
+                FilterChip(
+                    selected = isExamNameSelected,
+                    onClick = { examNameMenuExpanded = true },
+                    label = { Text(text = if (isExamNameSelected) "Deneme: $selectedExamName" else "Deneme") },
+                    trailingIcon = {
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+                    },
+                    colors = if (isExamNameSelected) {
+                        FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    } else FilterChipDefaults.filterChipColors()
+                )
+
+                DropdownMenu(
+                    expanded = examNameMenuExpanded,
+                    onDismissRequest = { examNameMenuExpanded = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Tüm Denemeler", fontWeight = FontWeight.Bold) },
+                        onClick = {
+                            onExamNameSelected(null)
+                            examNameMenuExpanded = false
+                        },
+                        leadingIcon = {
+                            if (selectedExamName == null) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    )
+
+                    availableExamNames.forEach { deneme ->
+                        val isSelected = deneme == selectedExamName
+                        DropdownMenuItem(
+                            text = { Text(deneme, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) },
+                            onClick = {
+                                onExamNameSelected(deneme)
+                                examNameMenuExpanded = false
+                            },
+                            leadingIcon = {
+                                if (isSelected) {
+                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        )
+                    }
                 }
             }
         }

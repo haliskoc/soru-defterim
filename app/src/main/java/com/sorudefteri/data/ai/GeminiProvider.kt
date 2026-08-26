@@ -3,11 +3,14 @@ package com.sorudefteri.data.ai
 import android.util.Base64
 import com.sorudefteri.data.ai.dto.GeminiContent
 import com.sorudefteri.data.ai.dto.GeminiInlineData
-import com.sorudefteri.data.ai.dto.GeminiModelItem
 import com.sorudefteri.data.ai.dto.GeminiModelListResponse
 import com.sorudefteri.data.ai.dto.GeminiPart
 import com.sorudefteri.data.ai.dto.GeminiRequest
 import com.sorudefteri.data.ai.dto.GeminiResponse
+import com.sorudefteri.domain.model.AiErrorType
+import com.sorudefteri.domain.model.AiException
+import com.sorudefteri.domain.model.QuestionMetadata
+import com.sorudefteri.domain.model.SimilarQuestionResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -17,17 +20,20 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
+import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Google Gemini API üzerinden görsel tabanlı soru çözümü sağlayan servis.
+ * Google Gemini API üzerinden görsel ve metin tabanlı soru çözümü, soru üretimi,
+ * OCR temizleme ve benzer soru türetme servisi.
  */
 @Singleton
-class GeminiProvider @Inject constructor(
-    private val okHttpClient: OkHttpClient
+open class GeminiProvider @Inject constructor(
+    private val okHttpClient: OkHttpClient,
+    private val promptManager: AiPromptManager
 ) : CozumProvider {
 
     private val json = Json {
@@ -41,22 +47,24 @@ class GeminiProvider @Inject constructor(
 
     companion object {
         const val FALLBACK_MODEL = "gemini-2.5-flash"
+        const val MAX_RETRIES = 3
     }
 
     /**
      * Google Gemini API'sinden kullanıcının API anahtarına açık tüm güncel modelleri canlı çeker.
      */
-    suspend fun listModels(apiKey: String): Result<List<Pair<String, String>>> = withContext(Dispatchers.IO) {
+    open suspend fun listModels(apiKey: String): Result<List<Pair<String, String>>> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) {
             return@withContext Result.failure(
-                IllegalArgumentException("Gemini API anahtarı boş olamaz.")
+                AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı boş olamaz.")
             )
         }
 
         try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models?key=$apiKey"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models"
             val httpRequest = Request.Builder()
                 .url(url)
+                .addHeader("x-goog-api-key", apiKey)
                 .get()
                 .build()
 
@@ -69,7 +77,10 @@ class GeminiProvider @Inject constructor(
                         else -> "HTTP ${response.code}"
                     }
                     return@withContext Result.failure(
-                        Exception("Gemini modelleri çekilemedi ($errorDetail). Lütfen API anahtarınızı kontrol edin.")
+                        AiException(
+                            if (response.code in listOf(401, 403)) AiErrorType.INVALID_API_KEY else AiErrorType.MODEL_UNAVAILABLE,
+                            "Gemini modelleri çekilemedi ($errorDetail). Lütfen API anahtarınızı kontrol edin."
+                        )
                     )
                 }
 
@@ -99,12 +110,13 @@ class GeminiProvider @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Result.failure(
-                Exception("Gemini modelleri alınamadı: ${e.localizedMessage ?: "Bağlantı hatası"}", e)
-            )
+            Result.failure(mapToAiException(e))
         }
     }
 
+    /**
+     * CozumProvider standart arayüz metodunun uygulanması.
+     */
     override suspend fun cozumIste(
         imageBytes: ByteArray,
         dersAdi: String,
@@ -112,46 +124,213 @@ class GeminiProvider @Inject constructor(
         correctAnswer: String?,
         modelName: String,
         apiKey: String
-    ): Result<String> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) {
-            return@withContext Result.failure(
-                IllegalArgumentException("Google Gemini API Anahtarı bulunamadı. Lütfen Ayarlar sayfasından API anahtarınızı girin.")
-            )
-        }
-
-        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
-        executeGenerateContentWithRetry(imageBytes, dersAdi, konu, correctAnswer, effectiveModel, apiKey)
+    ): Result<String> {
+        return cozumIsteDetayli(
+            imageBytes = imageBytes,
+            dersAdi = dersAdi,
+            konu = konu,
+            correctAnswer = correctAnswer,
+            mistakeType = null,
+            soruMetni = null,
+            modelName = modelName,
+            apiKey = apiKey
+        )
     }
 
-    private suspend fun executeGenerateContentWithRetry(
-        imageBytes: ByteArray,
+    /**
+     * Görsel ve/veya metin tabanlı (Koşullu OCR destekli) detaylı çözüm üretme.
+     */
+    open suspend fun cozumIsteDetayli(
+        imageBytes: ByteArray?,
         dersAdi: String,
         konu: String,
         correctAnswer: String?,
+        mistakeType: String? = null,
+        soruMetni: String? = null,
         modelName: String,
         apiKey: String,
-        maxRetries: Int = 3
+        customPromptTemplate: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(
+                    AiErrorType.INVALID_API_KEY,
+                    "Google Gemini API Anahtarı bulunamadı. Lütfen Ayarlar sayfasından API anahtarınızı girin."
+                )
+            )
+        }
+
+        val prompt = promptManager.buildCozumUretimiPrompt(
+            dersAdi = dersAdi,
+            konu = konu,
+            soruMetni = soruMetni,
+            correctAnswer = correctAnswer,
+            mistakeType = mistakeType,
+            customTemplate = customPromptTemplate
+        )
+
+        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        executeGenerateContentWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+    }
+
+    /**
+     * OCR çıktısındaki hataları düzelten ve matematiksel formülleri LaTeX formatına çeviren servis.
+     */
+    open suspend fun cleanOcrText(
+        rawOcrText: String,
+        modelName: String,
+        apiKey: String,
+        customPromptTemplate: String? = null
+    ): Result<String> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı boş olamaz.")
+            )
+        }
+
+        val prompt = promptManager.buildOcrTemizlemePrompt(rawOcrText, customPromptTemplate)
+        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        // OCR temizleme sadece metin tabanlıdır, görsel göndermeye gerek yoktur
+        executeGenerateContentWithRetry(null, prompt, effectiveModel, apiKey)
+    }
+
+    /**
+     * Mevcut bir sorunun kazanımını koruyarak yeni sayılar/senaryo ile benzer soru türetir (Question Cloner).
+     */
+    open suspend fun generateSimilarQuestion(
+        imageBytes: ByteArray?,
+        dersAdi: String,
+        konu: String,
+        soruMetni: String? = null,
+        modelName: String,
+        apiKey: String,
+        customPromptTemplate: String? = null
+    ): Result<SimilarQuestionResult> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı boş olamaz.")
+            )
+        }
+
+        val prompt = promptManager.buildBenzerSoruPrompt(dersAdi, konu, soruMetni, customPromptTemplate)
+        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+
+        val rawResult = executeGenerateContentWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+        rawResult.mapCatching { rawText ->
+            val parseResult = AiJsonParser.cleanAndParseJson(
+                rawText = rawText,
+                serializer = SimilarQuestionResult.serializer(),
+                fallbackParser = { AiJsonParser.parseSimilarQuestionFallback(it) }
+            )
+            parseResult.getOrThrow()
+        }
+    }
+
+    /**
+     * Konu, zorluk, alan ve sınav tipine göre sıfırdan test sorusu üretir.
+     */
+    open suspend fun generateQuestion(
+        dersAdi: String,
+        konu: String,
+        zorluk: String,
+        alan: String,
+        sinavTipi: String,
+        modelName: String,
+        apiKey: String,
+        customPromptTemplate: String? = null
+    ): Result<SimilarQuestionResult> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı boş olamaz.")
+            )
+        }
+
+        val prompt = promptManager.buildSoruUretimiPrompt(
+            dersAdi = dersAdi,
+            konu = konu,
+            zorluk = zorluk,
+            alan = alan,
+            sinavTipi = sinavTipi,
+            customTemplate = customPromptTemplate
+        )
+        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+
+        val rawResult = executeGenerateContentWithRetry(null, prompt, effectiveModel, apiKey)
+        rawResult.mapCatching { rawText ->
+            val parseResult = AiJsonParser.cleanAndParseJson(
+                rawText = rawText,
+                serializer = SimilarQuestionResult.serializer(),
+                fallbackParser = { AiJsonParser.parseSimilarQuestionFallback(it) }
+            )
+            parseResult.getOrThrow()
+        }
+    }
+
+    /**
+     * Soru görselinden sınav türü, ders, konu ve cevap şıkkını tespit eder (Auto-Tagging).
+     */
+    open suspend fun detectMetadata(
+        imageBytes: ByteArray,
+        modelName: String,
+        apiKey: String
+    ): Result<QuestionMetadata> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı boş olamaz.")
+            )
+        }
+
+        val prompt = """
+            Görseldeki YKS (TYT veya AYT) sorusunu incele ve JSON formatında şu bilgileri çıkar:
+            1. examType: "TYT" veya "AYT"
+            2. subjectId: ["turkce", "matematik", "fizik", "kimya", "biyoloji", "tarih", "cografya", "felsefe", "din_kulturu", "ayt_matematik", "ayt_fizik", "ayt_kimya", "ayt_biyoloji", "ayt_edebiyat", "ayt_tarih1", "ayt_cografya1", "ydt_ingilizce"] değerlerinden en uygun olanı.
+            3. topic: Sorunun ait olduğu net YKS konu başlığı (Örn: "Türev", "Paragrafta Anlam", "Kalıtım", "Optik", "Trigonometri", "Polinomlar").
+            4. correctAnswer: Görsel üzerinde işaretlenmiş doğru cevap şıkkı veya bariz doğru cevap varsa "A", "B", "C", "D", "E" veya null.
+
+            SADECE geçerli bir JSON objesi döndür:
+            {"examType": "TYT", "subjectId": "matematik", "topic": "Fonksiyonlar", "correctAnswer": "C"}
+        """.trimIndent()
+
+        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val rawResult = executeGenerateContentWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+        if (rawResult.isSuccess) {
+            val rawText = rawResult.getOrNull().orEmpty()
+            val parseResult = AiJsonParser.cleanAndParseJson(
+                rawText = rawText,
+                serializer = QuestionMetadata.serializer(),
+                fallbackParser = { AiJsonParser.parseQuestionMetadataFallback(it) }
+            )
+            if (parseResult.isSuccess) {
+                return@withContext parseResult
+            }
+        }
+
+        Result.success(QuestionMetadata())
+    }
+
+    /**
+     * Exponential backoff ile 3 kez otomatik tekrar deneme (Retry) mantığı.
+     */
+    private suspend fun executeGenerateContentWithRetry(
+        imageBytes: ByteArray?,
+        prompt: String,
+        modelName: String,
+        apiKey: String
     ): Result<String> {
-        var lastResult: Result<String> = Result.failure(Exception("Bilinmeyen hata"))
-        for (attempt in 0 until maxRetries) {
-            lastResult = executeGenerateContent(imageBytes, dersAdi, konu, correctAnswer, modelName, apiKey)
+        var lastResult: Result<String> = Result.failure(
+            AiException(AiErrorType.UNKNOWN, "Bilinmeyen bir hata oluştu.")
+        )
+
+        for (attempt in 0 until MAX_RETRIES) {
+            lastResult = executeGenerateContent(imageBytes, prompt, modelName, apiKey)
             if (lastResult.isSuccess) {
                 return lastResult
             }
 
             val exception = lastResult.exceptionOrNull()
-            val msg = exception?.message.orEmpty().lowercase()
-            val isRetryable = msg.contains("429") ||
-                    msg.contains("rate limit") ||
-                    msg.contains("500") ||
-                    msg.contains("502") ||
-                    msg.contains("503") ||
-                    msg.contains("504") ||
-                    msg.contains("zaman aşımı") ||
-                    msg.contains("timeout") ||
-                    exception is SocketTimeoutException
+            val isRetryable = isRetryableException(exception)
 
-            if (isRetryable && attempt < maxRetries - 1) {
+            if (isRetryable && attempt < MAX_RETRIES - 1) {
                 val backoffMs = 1000L * (1L shl attempt) // 1s, 2s, 4s
                 delay(backoffMs)
             } else {
@@ -161,71 +340,61 @@ class GeminiProvider @Inject constructor(
         return lastResult
     }
 
+    private fun isRetryableException(throwable: Throwable?): Boolean {
+        if (throwable == null) return false
+        if (throwable is AiException) {
+            return throwable.errorType == AiErrorType.QUOTA_EXCEEDED ||
+                    throwable.errorType == AiErrorType.MODEL_UNAVAILABLE ||
+                    throwable.errorType == AiErrorType.NETWORK_TIMEOUT
+        }
+        val msg = throwable.message.orEmpty().lowercase()
+        return msg.contains("429") ||
+                msg.contains("rate limit") ||
+                msg.contains("500") ||
+                msg.contains("502") ||
+                msg.contains("503") ||
+                msg.contains("504") ||
+                msg.contains("timeout") ||
+                throwable is SocketTimeoutException ||
+                throwable is InterruptedIOException
+    }
+
     private fun executeGenerateContent(
-        imageBytes: ByteArray,
-        dersAdi: String,
-        konu: String,
-        correctAnswer: String?,
+        imageBytes: ByteArray?,
+        prompt: String,
         modelName: String,
         apiKey: String
     ): Result<String> {
-        val answerInfo = if (!correctAnswer.isNullOrBlank()) {
-            "Öğrencinin belirttiği / Sorunun doğru cevap şıkkı: $correctAnswer"
-        } else {
-            "Doğru cevap şıkkı belirtilmemiş. Lütfen soruyu çözerek doğru şıkkı ve sonucu net olarak belirle."
-        }
-
-        val prompt = """
-            Sen Türkiye YKS (TYT / AYT) sınavlarına hazırlanan öğrenciler için alanında uzman, pedagojik formasyona sahip kıdemli bir öğretmensin.
-            Görseldeki soruyu öğrencinin eksiksiz anlayacağı şekilde, adım adım ve pedagojik yöntemlerle açıkla.
-            Matematiksel formülleri ve ifadeleri standart LaTeX biçiminde (örn: ${'$'}x^2 + 5x + 6 = 0${'$'}, ${'$'}\\int_a^b f(x)dx${'$'}, ${'$'}\\frac{a}{b}${'$'}, ${'$'}\\sum_{i=1}^n${'$'}) sun.
-
-            Ders: $dersAdi
-            Konu: $konu
-            $answerInfo
-
-            Lütfen çözümü aşağıdaki yapılandırılmış format ve başlıklarla sun:
-
-            🎯 **Doğru Cevap:** [Net doğru cevap şıkkı ve sonuç]
-
-            📚 **Temel Kavramlar & Formüller:**
-            - Soruyu çözmek için gereken temel kurallar, formüller veya kavramlar.
-
-            📝 **Adım Adım Ayrıntılı Çözüm:**
-            1. Soruda verilenler ve istenenlerin analizi.
-            2. Adım adım matematiksel/mantıksal işlem süreci (tüm adımları sade ve net göster).
-            3. Sonuca ulaşma ve doğru şıkla eşleştirme.
-
-            💡 **Püf Noktaları & Sınav Taktikleri (Önemli İpuçları):**
-            - YKS'de bu soru tipinde yapılan yaygın çeldirici hatalar.
-            - Hızlı çözüm için pratik ipucu veya pratik kontrol yöntemi.
-        """.trimIndent()
-
         return try {
-            val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+            val parts = mutableListOf<GeminiPart>()
+            parts.add(GeminiPart(text = prompt))
+
+            // Koşullu görsel aktarımı: Görsel varsa ekle, yoksa sadece metin ilet
+            if (imageBytes != null && imageBytes.isNotEmpty()) {
+                val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+                parts.add(
+                    GeminiPart(
+                        inline_data = GeminiInlineData(
+                            mime_type = "image/jpeg",
+                            data = base64Image
+                        )
+                    )
+                )
+            }
 
             val requestBody = GeminiRequest(
                 contents = listOf(
-                    GeminiContent(
-                        parts = listOf(
-                            GeminiPart(text = prompt),
-                            GeminiPart(
-                                inline_data = GeminiInlineData(
-                                    mime_type = "image/jpeg",
-                                    data = base64Image
-                                )
-                            )
-                        )
-                    )
+                    GeminiContent(parts = parts)
                 )
             )
 
             val requestJson = json.encodeToString(GeminiRequest.serializer(), requestBody)
             val cleanModel = modelName.removePrefix("models/").trim()
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent?key=$apiKey"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent"
 
             val httpRequest = Request.Builder()
                 .url(url)
+                .addHeader("x-goog-api-key", apiKey)
                 .post(requestJson.toRequestBody(jsonMediaType))
                 .build()
 
@@ -238,13 +407,20 @@ class GeminiProvider @Inject constructor(
                             json.decodeFromString<GeminiResponse>(responseBodyString)
                         } catch (e: Exception) {
                             return Result.failure(
-                                Exception("Gemini API yanıtı çözümlenemedi: ${e.localizedMessage}", e)
+                                AiException(
+                                    AiErrorType.PARSING_FAILED,
+                                    "Gemini API yanıtı çözümlenemedi: ${e.localizedMessage}",
+                                    e
+                                )
                             )
                         }
 
                         if (geminiResponse.error != null) {
                             return Result.failure(
-                                Exception(geminiResponse.error.message ?: "Google Gemini API hatası oluştu.")
+                                AiException(
+                                    AiErrorType.MODEL_UNAVAILABLE,
+                                    geminiResponse.error.message ?: "Google Gemini API hatası oluştu."
+                                )
                             )
                         }
 
@@ -257,7 +433,12 @@ class GeminiProvider @Inject constructor(
                             ?.trim()
 
                         if (solutionText.isNullOrBlank()) {
-                            Result.failure(Exception("AI modelinden geçerli bir yanıt alınamadı. Lütfen soruyu tekrar göndermeyi deneyin."))
+                            Result.failure(
+                                AiException(
+                                    AiErrorType.MODEL_UNAVAILABLE,
+                                    "AI modelinden geçerli bir yanıt alınamadı. Lütfen soruyu tekrar göndermeyi deneyin."
+                                )
+                            )
                         } else {
                             Result.success(solutionText)
                         }
@@ -269,26 +450,40 @@ class GeminiProvider @Inject constructor(
                             null
                         }
                         val errorDetail = parsedError ?: "Geçersiz istek veya hatalı API parametresi (HTTP 400)."
-                        Result.failure(Exception("Gemini API Hatası ($errorDetail)"))
-                    }
-                    404 -> {
                         Result.failure(
-                            Exception("Seçilen '$cleanModel' modeli Google tarafından bulunamadı veya kullanımdan kaldırılmış (HTTP 404).")
+                            AiException(AiErrorType.UNKNOWN, "Gemini API Hatası ($errorDetail)")
                         )
                     }
                     401, 403 -> {
                         Result.failure(
-                            Exception("Geçersiz Gemini API Anahtarı veya yetkisiz erişim. Lütfen Ayarlar sayfasından API anahtarınızı kontrol edin.")
+                            AiException(
+                                AiErrorType.INVALID_API_KEY,
+                                "Geçersiz Gemini API Anahtarı veya yetkisiz erişim. Lütfen Ayarlar sayfasından API anahtarınızı kontrol edin."
+                            )
+                        )
+                    }
+                    404 -> {
+                        Result.failure(
+                            AiException(
+                                AiErrorType.MODEL_UNAVAILABLE,
+                                "Seçilen '$cleanModel' modeli Google tarafından bulunamadı veya kullanımdan kaldırılmış (HTTP 404)."
+                            )
                         )
                     }
                     429 -> {
                         Result.failure(
-                            Exception("API kullanım kotanız doldu veya istek sınırı aşıldı (Rate limit). Lütfen bir süre bekleyip tekrar deneyin.")
+                            AiException(
+                                AiErrorType.QUOTA_EXCEEDED,
+                                "API kullanım kotanız doldu veya istek sınırı aşıldı (Rate limit). Lütfen bir süre bekleyip tekrar deneyin."
+                            )
                         )
                     }
                     500, 502, 503, 504 -> {
                         Result.failure(
-                            Exception("Google AI Studio sunucularında geçici bir kesinti yaşanıyor (HTTP ${response.code}). Lütfen daha sonra tekrar deneyin.")
+                            AiException(
+                                AiErrorType.MODEL_UNAVAILABLE,
+                                "Google AI Studio sunucularında geçici bir kesinti yaşanıyor (HTTP ${response.code}). Lütfen daha sonra tekrar deneyin."
+                            )
                         )
                     }
                     else -> {
@@ -299,112 +494,42 @@ class GeminiProvider @Inject constructor(
                         }
                         val errorDetail = parsedError ?: responseBodyString.take(200).ifBlank { "HTTP ${response.code}" }
                         Result.failure(
-                            Exception("Gemini API Hatası ($errorDetail). Lütfen ayarlarınızı ve internet bağlantınızı kontrol edin.")
+                            AiException(
+                                AiErrorType.UNKNOWN,
+                                "Gemini API Hatası ($errorDetail). Lütfen ayarlarınızı ve internet bağlantınızı kontrol edin."
+                            )
                         )
                     }
                 }
             }
-        } catch (e: SocketTimeoutException) {
-            Result.failure<String>(
-                Exception("İstek zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.", e)
-            )
-        } catch (e: UnknownHostException) {
-            Result.failure<String>(
-                Exception("İnternet bağlantısı kurulamadı. Lütfen ağ bağlantınızı kontrol edin.", e)
-            )
-        } catch (e: IOException) {
-            Result.failure<String>(
-                Exception("Ağ iletişim hatası oluştu: ${e.localizedMessage ?: "Sunucuya bağlanılamadı."}", e)
-            )
         } catch (e: Exception) {
-            Result.failure<String>(
-                Exception("Çözüm alınırken beklenmeyen bir hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}", e)
+            Result.failure(mapToAiException(e))
+        }
+    }
+
+    private fun mapToAiException(e: Exception): AiException {
+        return when (e) {
+            is AiException -> e
+            is SocketTimeoutException -> AiException(
+                AiErrorType.NETWORK_TIMEOUT,
+                "İstek zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.",
+                e
+            )
+            is UnknownHostException -> AiException(
+                AiErrorType.NETWORK_ERROR,
+                "İnternet bağlantısı kurulamadı. Lütfen ağ bağlantınızı kontrol edin.",
+                e
+            )
+            is IOException -> AiException(
+                AiErrorType.NETWORK_ERROR,
+                "Ağ iletişim hatası oluştu: ${e.localizedMessage ?: "Sunucuya bağlanılamadı."}",
+                e
+            )
+            else -> AiException(
+                AiErrorType.UNKNOWN,
+                "Beklenmeyen bir hata oluştu: ${e.localizedMessage ?: "Bilinmeyen hata"}",
+                e
             )
         }
-    }
-
-    suspend fun detectMetadata(
-        imageBytes: ByteArray,
-        modelName: String,
-        apiKey: String
-    ): Result<com.sorudefteri.domain.model.QuestionMetadata> = withContext(Dispatchers.IO) {
-        val prompt = """
-            Görseldeki YKS (TYT veya AYT) sorusunu incele ve JSON formatında şu bilgileri çıkar:
-            1. examType: "TYT" veya "AYT"
-            2. subjectId: ["turkce", "matematik", "fizik", "kimya", "biyoloji", "tarih", "cografya", "felsefe", "din_kulturu", "ayt_matematik", "ayt_fizik", "ayt_kimya", "ayt_biyoloji", "ayt_edebiyat", "ayt_tarih1", "ayt_cografya1", "ydt_ingilizce"] değerlerinden en uygun olanı.
-            3. topic: Sorunun ait olduğu net YKS konu başlığı (Örn: "Türev", "Paragrafta Anlam", "Kalıtım", "Optik", "Trigonometri", "Polinomlar").
-            4. correctAnswer: Görsel üzerinde işaretlenmiş doğru cevap şıkkı veya bariz doğru cevap varsa "A", "B", "C", "D", "E" veya null.
-
-            SADECE geçerli bir JSON objesi döndür, markdown code block veya başka metin ekleme:
-            {"examType": "TYT", "subjectId": "matematik", "topic": "Fonksiyonlar", "correctAnswer": "C"}
-        """.trimIndent()
-
-        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
-        val rawResult = executeGenerateContentWithRetry(imageBytes, "", "", null, effectiveModel, apiKey)
-        if (rawResult.isSuccess) {
-            val rawText = rawResult.getOrNull().orEmpty()
-            val jsonStart = rawText.indexOf('{')
-            val jsonEnd = rawText.lastIndexOf('}')
-            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-                val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
-                try {
-                    val parsed = json.decodeFromString<com.sorudefteri.domain.model.QuestionMetadata>(cleanJson)
-                    return@withContext Result.success(parsed)
-                } catch (e: Exception) {
-                    return@withContext Result.failure(e)
-                }
-            }
-        }
-
-        Result.success(com.sorudefteri.domain.model.QuestionMetadata())
-    }
-
-    suspend fun generateSimilarQuestion(
-        imageBytes: ByteArray,
-        dersAdi: String,
-        konu: String,
-        modelName: String,
-        apiKey: String
-    ): Result<com.sorudefteri.domain.model.SimilarQuestionResult> = withContext(Dispatchers.IO) {
-        val prompt = """
-            Sen uzman bir YKS (TYT / AYT) soru yazarısın.
-            Görseldeki soruyu analiz et. Bu soruyla TAM OLARAK AYNI KAZANIMI ve zorluk seviyesini ölçen, fakat sayıları/metni/değişkenleri FARKLI yepyeni ve özgün bir soru üret.
-            Ders: $dersAdi, Konu: $konu
-            Matematiksel formülleri standart LaTeX formatında ($...$) yaz.
-            A, B, C, D, E olmak üzere 5 şık ver.
-
-            SADECE geçerli bir JSON objesi döndür, format:
-            {
-              "questionText": "Soru metni ve öncüller...",
-              "options": {
-                "A": "Şık A",
-                "B": "Şık B",
-                "C": "Şık C",
-                "D": "Şık D",
-                "E": "Şık E"
-              },
-              "correctAnswer": "A",
-              "solution": "Adım adım ayrıntılı çözüm..."
-            }
-        """.trimIndent()
-
-        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
-        val rawResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, null, effectiveModel, apiKey)
-        if (rawResult.isSuccess) {
-            val rawText = rawResult.getOrNull().orEmpty()
-            val jsonStart = rawText.indexOf('{')
-            val jsonEnd = rawText.lastIndexOf('}')
-            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-                val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
-                try {
-                    val parsed = json.decodeFromString<com.sorudefteri.domain.model.SimilarQuestionResult>(cleanJson)
-                    return@withContext Result.success(parsed)
-                } catch (e: Exception) {
-                    return@withContext Result.failure(e)
-                }
-            }
-        }
-
-        Result.failure(rawResult.exceptionOrNull() ?: Exception("Benzer soru formatı çözümlenemedi."))
     }
 }

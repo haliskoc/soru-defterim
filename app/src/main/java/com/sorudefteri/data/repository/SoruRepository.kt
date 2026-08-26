@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import androidx.paging.map
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -254,6 +255,40 @@ class SoruRepositoryImpl @Inject constructor(
 
     override fun getDueReviewSorular(): Flow<List<Soru>> {
         return soruDao.getDueReviewSorular().map { list -> list.map { it.toDomain() } }
+    }
+
+    override suspend fun getDueReviewSorularList(currentTime: Long): List<Soru> = withContext(Dispatchers.IO) {
+        soruDao.getDueReviewSorularList(currentTime).map { it.toDomain() }
+    }
+
+    override fun getPagedSorular(
+        query: String?,
+        examType: String?,
+        subjectId: String?,
+        mistakeType: String?,
+        isSolved: Boolean?,
+        isFavorite: Boolean?,
+        kaynak: String?
+    ): Flow<androidx.paging.PagingData<Soru>> {
+        return androidx.paging.Pager(
+            config = androidx.paging.PagingConfig(
+                pageSize = 20,
+                enablePlaceholders = false,
+                initialLoadSize = 40
+            )
+        ) {
+            soruDao.getPagedFilteredSorular(
+                query = query,
+                examType = examType,
+                subjectId = subjectId,
+                mistakeType = mistakeType,
+                isSolved = isSolved,
+                isFavorite = isFavorite,
+                kaynak = kaynak
+            )
+        }.flow.map { pagingData ->
+            pagingData.map { it.toDomain() }
+        }
     }
 
     override suspend fun tumVerileriTemizle(): Unit = withContext(Dispatchers.IO) {

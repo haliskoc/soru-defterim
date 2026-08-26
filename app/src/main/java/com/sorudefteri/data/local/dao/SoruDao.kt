@@ -133,6 +133,30 @@ interface SoruDao {
     @Query("SELECT * FROM sorular WHERE nextReviewDate IS NOT NULL AND nextReviewDate <= :currentTime ORDER BY nextReviewDate ASC")
     fun getDueReviewSorular(currentTime: Long = System.currentTimeMillis()): Flow<List<SoruEntity>>
 
+    @Query("SELECT * FROM sorular WHERE nextReviewDate IS NOT NULL AND nextReviewDate <= :currentTime ORDER BY nextReviewDate ASC")
+    suspend fun getDueReviewSorularList(currentTime: Long = System.currentTimeMillis()): List<SoruEntity>
+
+    @Query("""
+        SELECT * FROM sorular
+        WHERE (:query IS NULL OR :query = '' OR topic LIKE '%' || :query || '%' OR note LIKE '%' || :query || '%' OR subjectId LIKE '%' || :query || '%' OR kaynakYayin LIKE '%' || :query || '%' OR kaynakDeneme LIKE '%' || :query || '%' OR ocrMetni LIKE '%' || :query || '%' OR questionText LIKE '%' || :query || '%')
+          AND (:examType IS NULL OR examType = :examType)
+          AND (:subjectId IS NULL OR subjectId = :subjectId)
+          AND (:mistakeType IS NULL OR mistakeType = :mistakeType)
+          AND (:isSolved IS NULL OR isSolved = :isSolved)
+          AND (:isFavorite IS NULL OR isFavorite = :isFavorite)
+          AND (:kaynak IS NULL OR :kaynak = '' OR kaynakYayin LIKE '%' || :kaynak || '%' OR kaynakDeneme LIKE '%' || :kaynak || '%')
+        ORDER BY createdAt DESC
+    """)
+    fun getPagedFilteredSorular(
+        query: String? = null,
+        examType: String? = null,
+        subjectId: String? = null,
+        mistakeType: String? = null,
+        isSolved: Boolean? = null,
+        isFavorite: Boolean? = null,
+        kaynak: String? = null
+    ): androidx.paging.PagingSource<Int, SoruEntity>
+
     @Query("SELECT COUNT(*) FROM sorular WHERE isFavorite = 1")
     fun getFavoriteCount(): Flow<Int>
 
