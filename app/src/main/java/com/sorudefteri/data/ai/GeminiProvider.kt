@@ -40,8 +40,7 @@ class GeminiProvider @Inject constructor(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     companion object {
-        const val FALLBACK_MODEL = "gemini-2.0-flash"
-        const val SECONDARY_FALLBACK_MODEL = "gemini-1.5-flash"
+        const val FALLBACK_MODEL = "gemini-2.5-flash"
     }
 
     /**
@@ -89,9 +88,9 @@ class GeminiProvider @Inject constructor(
                 if (supportedModels.isEmpty()) {
                     Result.success(
                         listOf(
-                            FALLBACK_MODEL to "Gemini 2.0 Flash ($FALLBACK_MODEL)",
                             "gemini-2.5-flash" to "Gemini 2.5 Flash (gemini-2.5-flash)",
-                            SECONDARY_FALLBACK_MODEL to "Gemini 1.5 Flash ($SECONDARY_FALLBACK_MODEL)"
+                            "gemini-2.5-pro" to "Gemini 2.5 Pro (gemini-2.5-pro)",
+                            "gemini-2.0-flash" to "Gemini 2.0 Flash (gemini-2.0-flash)"
                         )
                     )
                 } else {
@@ -120,17 +119,7 @@ class GeminiProvider @Inject constructor(
         }
 
         val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
-        val modelsToTry = linkedSetOf(effectiveModel, FALLBACK_MODEL, "gemini-2.5-flash", SECONDARY_FALLBACK_MODEL)
-
-        var lastResult: Result<String> = Result.failure(Exception("Bilinmeyen hata"))
-        for (model in modelsToTry) {
-            lastResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, correctAnswer, model, apiKey)
-            if (lastResult.isSuccess) {
-                return@withContext lastResult
-            }
-        }
-
-        return@withContext lastResult
+        executeGenerateContentWithRetry(imageBytes, dersAdi, konu, correctAnswer, effectiveModel, apiKey)
     }
 
     private suspend fun executeGenerateContentWithRetry(
@@ -350,26 +339,19 @@ class GeminiProvider @Inject constructor(
         """.trimIndent()
 
         val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
-        val modelsToTry = linkedSetOf(effectiveModel, FALLBACK_MODEL, "gemini-2.5-flash", SECONDARY_FALLBACK_MODEL)
-
-        var lastException: Throwable? = null
-        for (model in modelsToTry) {
-            val rawResult = executeGenerateContentWithRetry(imageBytes, "", "", null, model, apiKey)
-            if (rawResult.isSuccess) {
-                val rawText = rawResult.getOrNull().orEmpty()
-                val jsonStart = rawText.indexOf('{')
-                val jsonEnd = rawText.lastIndexOf('}')
-                if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-                    val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
-                    try {
-                        val parsed = json.decodeFromString<com.sorudefteri.domain.model.QuestionMetadata>(cleanJson)
-                        return@withContext Result.success(parsed)
-                    } catch (e: Exception) {
-                        lastException = e
-                    }
+        val rawResult = executeGenerateContentWithRetry(imageBytes, "", "", null, effectiveModel, apiKey)
+        if (rawResult.isSuccess) {
+            val rawText = rawResult.getOrNull().orEmpty()
+            val jsonStart = rawText.indexOf('{')
+            val jsonEnd = rawText.lastIndexOf('}')
+            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+                val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
+                try {
+                    val parsed = json.decodeFromString<com.sorudefteri.domain.model.QuestionMetadata>(cleanJson)
+                    return@withContext Result.success(parsed)
+                } catch (e: Exception) {
+                    return@withContext Result.failure(e)
                 }
-            } else {
-                lastException = rawResult.exceptionOrNull()
             }
         }
 
@@ -406,29 +388,22 @@ class GeminiProvider @Inject constructor(
         """.trimIndent()
 
         val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
-        val modelsToTry = linkedSetOf(effectiveModel, FALLBACK_MODEL, "gemini-2.5-flash", SECONDARY_FALLBACK_MODEL)
-
-        var lastException: Throwable? = null
-        for (model in modelsToTry) {
-            val rawResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, null, model, apiKey)
-            if (rawResult.isSuccess) {
-                val rawText = rawResult.getOrNull().orEmpty()
-                val jsonStart = rawText.indexOf('{')
-                val jsonEnd = rawText.lastIndexOf('}')
-                if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-                    val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
-                    try {
-                        val parsed = json.decodeFromString<com.sorudefteri.domain.model.SimilarQuestionResult>(cleanJson)
-                        return@withContext Result.success(parsed)
-                    } catch (e: Exception) {
-                        lastException = e
-                    }
+        val rawResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, null, effectiveModel, apiKey)
+        if (rawResult.isSuccess) {
+            val rawText = rawResult.getOrNull().orEmpty()
+            val jsonStart = rawText.indexOf('{')
+            val jsonEnd = rawText.lastIndexOf('}')
+            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+                val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
+                try {
+                    val parsed = json.decodeFromString<com.sorudefteri.domain.model.SimilarQuestionResult>(cleanJson)
+                    return@withContext Result.success(parsed)
+                } catch (e: Exception) {
+                    return@withContext Result.failure(e)
                 }
-            } else {
-                lastException = rawResult.exceptionOrNull()
             }
         }
 
-        Result.failure(lastException ?: Exception("Benzer soru formatı çözümlenemedi."))
+        Result.failure(rawResult.exceptionOrNull() ?: Exception("Benzer soru formatı çözümlenemedi."))
     }
 }

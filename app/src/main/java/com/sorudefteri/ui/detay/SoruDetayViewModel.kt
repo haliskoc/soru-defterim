@@ -6,6 +6,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.ai.AiRepository
 import com.sorudefteri.data.images.GorselDepo
+import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.repository.SoruRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -23,8 +24,6 @@ enum class DetayTab {
     SORU,
     COZUM
 }
-
-import com.sorudefteri.domain.model.SimilarQuestionResult
 
 data class SoruDetayUiState(
     val soru: Soru? = null,

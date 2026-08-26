@@ -65,6 +65,7 @@ fun AppNavHost(
                 )
             }
         }
+    ) { innerPadding ->
         NavHost(
             navController = navController,
             startDestination = KutuphaneNav,
