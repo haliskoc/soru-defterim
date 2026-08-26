@@ -65,13 +65,12 @@ fun AppNavHost(
                 )
             }
         }
-    ) { innerPadding ->
         NavHost(
             navController = navController,
             startDestination = KutuphaneNav,
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .padding(bottom = innerPadding.calculateBottomPadding())
         ) {
             composable<KutuphaneNav> { backStackEntry ->
                 val capturedPath by backStackEntry.savedStateHandle

@@ -40,8 +40,8 @@ class GeminiProvider @Inject constructor(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     companion object {
-        const val FALLBACK_MODEL = "gemini-2.5-flash"
-        const val SECONDARY_FALLBACK_MODEL = "gemini-2.0-flash"
+        const val FALLBACK_MODEL = "gemini-2.0-flash"
+        const val SECONDARY_FALLBACK_MODEL = "gemini-1.5-flash"
     }
 
     /**
@@ -82,17 +82,16 @@ class GeminiProvider @Inject constructor(
                                 !item.name.contains("aqa", ignoreCase = true)
                     }
                     .map { item ->
-                        val cleanId = item.name.removePrefix("models/")
-                        val displayName = item.displayName?.ifBlank { cleanId } ?: cleanId
-                        cleanId to "$displayName ($cleanId)"
+                        val cleanName = item.name.removePrefix("models/")
+                        cleanName to "${item.displayName.ifBlank { cleanName }} ($cleanName)"
                     }
-                    .sortedByDescending { it.first }
 
                 if (supportedModels.isEmpty()) {
                     Result.success(
                         listOf(
-                            FALLBACK_MODEL to "Gemini 2.5 Flash ($FALLBACK_MODEL)",
-                            SECONDARY_FALLBACK_MODEL to "Gemini 2.0 Flash ($SECONDARY_FALLBACK_MODEL)"
+                            FALLBACK_MODEL to "Gemini 2.0 Flash ($FALLBACK_MODEL)",
+                            "gemini-2.5-flash" to "Gemini 2.5 Flash (gemini-2.5-flash)",
+                            SECONDARY_FALLBACK_MODEL to "Gemini 1.5 Flash ($SECONDARY_FALLBACK_MODEL)"
                         )
                     )
                 } else {
@@ -121,37 +120,17 @@ class GeminiProvider @Inject constructor(
         }
 
         val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val modelsToTry = linkedSetOf(effectiveModel, FALLBACK_MODEL, "gemini-2.5-flash", SECONDARY_FALLBACK_MODEL)
 
-        // İlk deneme: Seçili model ile retry ve exponential backoff destekli çağrı
-        val primaryResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, correctAnswer, effectiveModel, apiKey)
-        if (primaryResult.isSuccess) {
-            return@withContext primaryResult
-        }
-
-        val throwable = primaryResult.exceptionOrNull()
-        val errorMsg = throwable?.message.orEmpty().lowercase()
-
-        // Eğer model bulunamadı (404 / deprecated) ve seçilen model zaten varsayılan değilse, fallback yap
-        val isModelNotFoundOrDeprecated = errorMsg.contains("not found") ||
-                errorMsg.contains("deprecated") ||
-                errorMsg.contains("is not supported") ||
-                errorMsg.contains("404")
-
-        if (isModelNotFoundOrDeprecated && effectiveModel != FALLBACK_MODEL) {
-            val fallbackResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, correctAnswer, FALLBACK_MODEL, apiKey)
-            if (fallbackResult.isSuccess) {
-                return@withContext fallbackResult
-            }
-            // İkincil fallback dene (örn. 2.0-flash)
-            if (FALLBACK_MODEL != SECONDARY_FALLBACK_MODEL) {
-                val secFallback = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, correctAnswer, SECONDARY_FALLBACK_MODEL, apiKey)
-                if (secFallback.isSuccess) {
-                    return@withContext secFallback
-                }
+        var lastResult: Result<String> = Result.failure(Exception("Bilinmeyen hata"))
+        for (model in modelsToTry) {
+            lastResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, correctAnswer, model, apiKey)
+            if (lastResult.isSuccess) {
+                return@withContext lastResult
             }
         }
 
-        return@withContext primaryResult
+        return@withContext lastResult
     }
 
     private suspend fun executeGenerateContentWithRetry(
@@ -370,17 +349,31 @@ class GeminiProvider @Inject constructor(
             {"examType": "TYT", "subjectId": "matematik", "topic": "Fonksiyonlar", "correctAnswer": "C"}
         """.trimIndent()
 
-        val rawResult = executeGenerateContentWithRetry(imageBytes, "", "", null, modelName, apiKey)
-        rawResult.mapCatching { rawText ->
-            val jsonStart = rawText.indexOf('{')
-            val jsonEnd = rawText.lastIndexOf('}')
-            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-                val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
-                json.decodeFromString<com.sorudefteri.domain.model.QuestionMetadata>(cleanJson)
+        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val modelsToTry = linkedSetOf(effectiveModel, FALLBACK_MODEL, "gemini-2.5-flash", SECONDARY_FALLBACK_MODEL)
+
+        var lastException: Throwable? = null
+        for (model in modelsToTry) {
+            val rawResult = executeGenerateContentWithRetry(imageBytes, "", "", null, model, apiKey)
+            if (rawResult.isSuccess) {
+                val rawText = rawResult.getOrNull().orEmpty()
+                val jsonStart = rawText.indexOf('{')
+                val jsonEnd = rawText.lastIndexOf('}')
+                if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+                    val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
+                    try {
+                        val parsed = json.decodeFromString<com.sorudefteri.domain.model.QuestionMetadata>(cleanJson)
+                        return@withContext Result.success(parsed)
+                    } catch (e: Exception) {
+                        lastException = e
+                    }
+                }
             } else {
-                com.sorudefteri.domain.model.QuestionMetadata()
+                lastException = rawResult.exceptionOrNull()
             }
         }
+
+        Result.success(com.sorudefteri.domain.model.QuestionMetadata())
     }
 
     suspend fun generateSimilarQuestion(
@@ -412,16 +405,30 @@ class GeminiProvider @Inject constructor(
             }
         """.trimIndent()
 
-        val rawResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, null, modelName, apiKey)
-        rawResult.mapCatching { rawText ->
-            val jsonStart = rawText.indexOf('{')
-            val jsonEnd = rawText.lastIndexOf('}')
-            if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
-                val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
-                json.decodeFromString<com.sorudefteri.domain.model.SimilarQuestionResult>(cleanJson)
+        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val modelsToTry = linkedSetOf(effectiveModel, FALLBACK_MODEL, "gemini-2.5-flash", SECONDARY_FALLBACK_MODEL)
+
+        var lastException: Throwable? = null
+        for (model in modelsToTry) {
+            val rawResult = executeGenerateContentWithRetry(imageBytes, dersAdi, konu, null, model, apiKey)
+            if (rawResult.isSuccess) {
+                val rawText = rawResult.getOrNull().orEmpty()
+                val jsonStart = rawText.indexOf('{')
+                val jsonEnd = rawText.lastIndexOf('}')
+                if (jsonStart != -1 && jsonEnd != -1 && jsonEnd > jsonStart) {
+                    val cleanJson = rawText.substring(jsonStart, jsonEnd + 1)
+                    try {
+                        val parsed = json.decodeFromString<com.sorudefteri.domain.model.SimilarQuestionResult>(cleanJson)
+                        return@withContext Result.success(parsed)
+                    } catch (e: Exception) {
+                        lastException = e
+                    }
+                }
             } else {
-                throw Exception("Benzer soru formatı çözümlenemedi.")
+                lastException = rawResult.exceptionOrNull()
             }
         }
+
+        Result.failure(lastException ?: Exception("Benzer soru formatı çözümlenemedi."))
     }
 }

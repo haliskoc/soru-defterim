@@ -182,18 +182,28 @@ fun KutuphaneScreen(
             } else {
                 TopAppBar(
                     title = {
-                        Column {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
                             Text(
                                 text = "Soru Defterim",
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.Bold
                             )
                             if (!uiState.isLoading && uiState.totalCount > 0) {
-                                Text(
-                                    text = "${uiState.totalCount} Soru • ${uiState.solvedCount} Çözüldü",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                ) {
+                                    Text(
+                                        text = "${uiState.totalCount} Soru • ${uiState.solvedCount} Çözüldü",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
                             }
                         }
                     },
@@ -403,7 +413,7 @@ fun KutuphaneScreen(
                 }
             } else {
                 LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 160.dp),
+                    columns = GridCells.Adaptive(minSize = 180.dp),
                     contentPadding = PaddingValues(
                         start = 16.dp,
                         end = 16.dp,

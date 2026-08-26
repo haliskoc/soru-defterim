@@ -349,8 +349,14 @@ fun SoruKarti(
                     Text(
                         text = dateStr,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
+
+                    Spacer(modifier = Modifier.width(6.dp))
 
                     // Çözüldü / Çözülmedi Durum Butonu/Rozeti
                     val solvedBgColor by animateColorAsState(
@@ -365,30 +371,34 @@ fun SoruKarti(
                     )
 
                     Surface(
-                        shape = RoundedCornerShape(12.dp),
+                        shape = RoundedCornerShape(8.dp),
                         color = solvedBgColor,
-                        modifier = Modifier.clip(RoundedCornerShape(12.dp)).then(
-                            if (onToggleSolved != null) {
-                                Modifier.clickable { onToggleSolved() }
-                            } else Modifier
-                        )
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .then(
+                                if (onToggleSolved != null) {
+                                    Modifier.clickable { onToggleSolved() }
+                                } else Modifier
+                            )
                     ) {
                         Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            horizontalArrangement = Arrangement.spacedBy(3.dp)
                         ) {
                             Icon(
                                 imageVector = if (soru.isSolved) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                                 contentDescription = if (soru.isSolved) "Çözüldü" else "Çözülmedi",
                                 tint = solvedTextColor,
-                                modifier = Modifier.size(14.dp)
+                                modifier = Modifier.size(12.dp)
                             )
                             Text(
                                 text = if (soru.isSolved) "Çözüldü" else "Çözülmedi",
-                                style = MaterialTheme.typography.labelSmall,
+                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
                                 fontWeight = FontWeight.Bold,
-                                color = solvedTextColor
+                                color = solvedTextColor,
+                                maxLines = 1,
+                                softWrap = false
                             )
                         }
                     }
