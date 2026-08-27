@@ -310,12 +310,18 @@ open class GroqProvider @Inject constructor(
         modelName: String,
         apiKey: String
     ): Result<String> {
+        val httpRequest = try {
+            buildHttpRequest(imageBytes, prompt, modelName, apiKey)
+        } catch (e: Exception) {
+            return Result.failure(e)
+        }
+
         var lastResult: Result<String> = Result.failure(
             AiException(AiErrorType.UNKNOWN, "Bilinmeyen bir hata oluştu.")
         )
 
         for (attempt in 0 until MAX_RETRIES) {
-            lastResult = executeGroqRequest(imageBytes, prompt, modelName, apiKey)
+            lastResult = executeHttpCall(httpRequest, modelName)
             if (lastResult.isSuccess) {
                 return lastResult
             }
@@ -356,55 +362,58 @@ open class GroqProvider @Inject constructor(
                 throwable is InterruptedIOException
     }
 
-    private fun executeGroqRequest(
+    private fun buildHttpRequest(
         imageBytes: ByteArray?,
         prompt: String,
         modelName: String,
         apiKey: String
-    ): Result<String> {
-        return try {
-            val contentParts = mutableListOf<GroqContentPart>()
-            contentParts.add(GroqContentPart(type = "text", text = prompt))
+    ): Request {
+        val contentParts = mutableListOf<GroqContentPart>()
+        contentParts.add(GroqContentPart(type = "text", text = prompt))
 
-            if (imageBytes != null && imageBytes.isNotEmpty()) {
-                if (imageBytes.size > 5 * 1024 * 1024) {
-                    return Result.failure(
-                        AiException(
-                            AiErrorType.UNKNOWN,
-                            "Görsel boyutu çok büyük (${imageBytes.size / 1024}KB). Lütfen daha küçük bir görsel deneyin."
-                        )
-                    )
-                }
-                val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
-                val dataUrl = "data:image/jpeg;base64,$base64Image"
-                contentParts.add(
-                    GroqContentPart(
-                        type = "image_url",
-                        image_url = GroqImageUrl(url = dataUrl)
-                    )
+        if (imageBytes != null && imageBytes.isNotEmpty()) {
+            if (imageBytes.size > 5 * 1024 * 1024) {
+                throw AiException(
+                    AiErrorType.UNKNOWN,
+                    "Görsel boyutu çok büyük (${imageBytes.size / 1024}KB). Lütfen daha küçük bir görsel deneyin."
                 )
             }
-
-            val requestBody = GroqChatRequest(
-                model = modelName,
-                messages = listOf(
-                    GroqMessage(
-                        role = "user",
-                        content = contentParts
-                    )
-                ),
-                temperature = 0.2
+            val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+            val dataUrl = "data:image/jpeg;base64,$base64Image"
+            contentParts.add(
+                GroqContentPart(
+                    type = "image_url",
+                    image_url = GroqImageUrl(url = dataUrl)
+                )
             )
+        }
 
-            val requestJson = json.encodeToString(GroqChatRequest.serializer(), requestBody)
-            val url = "https://api.groq.com/openai/v1/chat/completions"
+        val requestBody = GroqChatRequest(
+            model = modelName,
+            messages = listOf(
+                GroqMessage(
+                    role = "user",
+                    content = contentParts
+                )
+            ),
+            temperature = 0.2
+        )
 
-            val httpRequest = Request.Builder()
-                .url(url)
-                .addHeader("Authorization", "Bearer $apiKey")
-                .post(requestJson.toRequestBody(jsonMediaType))
-                .build()
+        val requestJson = json.encodeToString(GroqChatRequest.serializer(), requestBody)
+        val url = "https://api.groq.com/openai/v1/chat/completions"
 
+        return Request.Builder()
+            .url(url)
+            .addHeader("Authorization", "Bearer $apiKey")
+            .post(requestJson.toRequestBody(jsonMediaType))
+            .build()
+    }
+
+    private fun executeHttpCall(
+        httpRequest: Request,
+        modelName: String
+    ): Result<String> {
+        return try {
             okHttpClient.newCall(httpRequest).execute().use { response ->
                 val responseBodyString = response.body?.string().orEmpty()
 

@@ -352,8 +352,8 @@ class AyarlarViewModel @Inject constructor(
         }
     }
 
-    @Deprecated("Drive senkron kaldırıldı, yerel yedek kullanın", ReplaceWith("exportBackup(uri, password)"))
-    fun shareBackupToDriveOrCloud(context: android.content.Context, password: String? = null) {
+    fun shareBackupToDriveOrCloud(context: android.content.Context? = null, password: String? = null) {
+        val targetContext = context?.applicationContext ?: appContext
         viewModelScope.launch {
             _backupState.value = BackupState(isLoading = true, message = "Yerel yedek paketi hazırlanıyor (Bulut kaldırıldı)...")
             val result = backupManager.exportBackupToTempFile(password)
@@ -363,7 +363,7 @@ class AyarlarViewModel @Inject constructor(
                     message = "$count soru hazırlandı. Paylaşım menüsü açılıyor...",
                     isError = false
                 )
-                com.sorudefteri.ui.ortak.ShareHelper.shareBackupFile(context, file)
+                com.sorudefteri.ui.ortak.ShareHelper.shareBackupFile(targetContext, file)
             }.onFailure { e ->
                 _backupState.value = BackupState(
                     isLoading = false,
@@ -374,7 +374,7 @@ class AyarlarViewModel @Inject constructor(
         }
     }
 
-    fun shareBackupFile(context: android.content.Context, password: String? = null) = shareBackupToDriveOrCloud(context, password)
+    fun shareBackupFile(context: android.content.Context? = null, password: String? = null) = shareBackupToDriveOrCloud(context, password)
 
     fun importBackup(sourceUri: Uri, password: String? = null) {
         viewModelScope.launch {

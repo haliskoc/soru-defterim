@@ -88,7 +88,7 @@ open class BackupManager @Inject constructor(
 ) {
 
     companion object {
-        private const val BUFFER_SIZE = 8192
+        private const val BUFFER_SIZE = 64 * 1024 // 64 KB optimum I/O buffer
         private val MAGIC_HEADER = "SDEFTERI_ENC_V1".toByteArray(Charsets.US_ASCII)
         private const val SALT_LENGTH = 16
         private const val IV_LENGTH = 12
@@ -96,6 +96,9 @@ open class BackupManager @Inject constructor(
         private const val PBKDF2_ITERATIONS = 120000
         private const val PBKDF2_ITERATIONS_LEGACY = 10000
         private const val KEY_LENGTH_BITS = 256
+        private const val MAX_ZIP_ENTRIES = 5000
+        private const val MAX_SINGLE_FILE_SIZE = 50 * 1024 * 1024L // 50 MB
+        private const val MAX_TOTAL_UNCOMPRESSED_SIZE = 500 * 1024 * 1024L // 500 MB
     }
 
     /**
@@ -141,7 +144,8 @@ open class BackupManager @Inject constructor(
     suspend fun exportBackupToTempFile(password: String? = null): Result<Pair<File, Int>> = withContext(Dispatchers.IO) {
         try {
             val fileName = "soru_defterim_yedek_${System.currentTimeMillis()}.sdefteri"
-            val tempFile = File(context.cacheDir, fileName)
+            val sharedDir = File(context.cacheDir, "shared").apply { if (!exists()) mkdirs() }
+            val tempFile = File(sharedDir, fileName)
             val result = FileOutputStream(tempFile).use { out ->
                 exportBackupToStream(out, password)
             }
@@ -239,7 +243,9 @@ open class BackupManager @Inject constructor(
                     )
                     val manifestJson = json.encodeToString(manifest)
                     zipOut.putNextEntry(ZipEntry("backup_manifest.json"))
-                    zipOut.write(manifestJson.toByteArray(Charsets.UTF_8))
+                    val writer = java.io.OutputStreamWriter(zipOut, Charsets.UTF_8)
+                    writer.write(manifestJson)
+                    writer.flush()
                     zipOut.closeEntry()
                     zipOut.flush()
                 }
@@ -323,6 +329,8 @@ open class BackupManager @Inject constructor(
 
             val zipInputStream: ZipInputStream = if (isEncrypted) {
                 if (password.isNullOrBlank()) {
+                    try { bufferedIn.close() } catch (_: Exception) {}
+                    try { rawInputStream.close() } catch (_: Exception) {}
                     return@withContext Result.failure(
                         SecurityException("Bu yedek dosyası şifreli (.sdefteri). Lütfen şifre çözme parolasını girin.")
                     )
@@ -334,6 +342,8 @@ open class BackupManager @Inject constructor(
                 val readIv = bufferedIn.read(iv)
 
                 if (readSalt != SALT_LENGTH || readIv != IV_LENGTH) {
+                    try { bufferedIn.close() } catch (_: Exception) {}
+                    try { rawInputStream.close() } catch (_: Exception) {}
                     return@withContext Result.failure(Exception("Bozuk şifreli yedek başlığı."))
                 }
                 encryptedSalt = salt
@@ -421,9 +431,14 @@ open class BackupManager @Inject constructor(
 
             // 3. Görselleri kalıcı depoya (filesDir/images) kopyala ve Entity'leri hazırla
             val newSorular = mutableListOf<Soru>()
+            val canonicalExtractDir = tempExtractDir.canonicalFile
 
             for (item in manifest.sorular) {
-                val imageFile = File(tempExtractDir, item.imageName)
+                val imageFile = File(tempExtractDir, item.imageName).canonicalFile
+                // Path traversal koruması: görsel tempExtractDir içinde olmalı
+                if (!imageFile.path.startsWith(canonicalExtractDir.path + File.separator)) {
+                    continue
+                }
                 if (!imageFile.exists() || !imageFile.isFile) {
                     continue // Eksik soru görseli varsa atla
                 }
@@ -432,8 +447,8 @@ open class BackupManager @Inject constructor(
 
                 var permanentSolutionPath: String? = null
                 if (!item.solutionImageName.isNullOrBlank()) {
-                    val solFile = File(tempExtractDir, item.solutionImageName)
-                    if (solFile.exists() && solFile.isFile) {
+                    val solFile = File(tempExtractDir, item.solutionImageName).canonicalFile
+                    if (solFile.path.startsWith(canonicalExtractDir.path + File.separator) && solFile.exists() && solFile.isFile) {
                         permanentSolutionPath = gorselDepo.kaydetDosyadan(solFile, isSolution = true)
                     }
                 }
@@ -507,7 +522,15 @@ open class BackupManager @Inject constructor(
             throw SecurityException("Yedek şifresi hatalı veya dosya bozulmuş: ${e.localizedMessage}", e)
         }
         val canonicalDestDir = destDir.canonicalFile
+        var entryCount = 0
+        var totalBytes = 0L
+
         while (entry != null) {
+            entryCount++
+            if (entryCount > MAX_ZIP_ENTRIES) {
+                throw SecurityException("ZIP arşivinde çok fazla dosya var (Zip Bomb koruması: max $MAX_ZIP_ENTRIES)")
+            }
+
             val destinationFile = File(destDir, entry.name).canonicalFile
             if (!destinationFile.path.startsWith(canonicalDestDir.path + File.separator) && destinationFile != canonicalDestDir) {
                 throw SecurityException("Güvensiz zip içeriği tespit edildi (Path Traversal Saldırısı): ${entry.name}")
@@ -516,9 +539,15 @@ open class BackupManager @Inject constructor(
                 destinationFile.mkdirs()
             } else {
                 destinationFile.parentFile?.mkdirs()
+                var entryBytes = 0L
                 FileOutputStream(destinationFile).use { out ->
                     var len: Int
                     while (zipIn.read(buffer).also { len = it } > 0) {
+                        entryBytes += len
+                        totalBytes += len
+                        if (entryBytes > MAX_SINGLE_FILE_SIZE || totalBytes > MAX_TOTAL_UNCOMPRESSED_SIZE) {
+                            throw SecurityException("Yedek paketi dosya boyutu sınırını aştı (Zip Bomb koruması)")
+                        }
                         out.write(buffer, 0, len)
                     }
                 }

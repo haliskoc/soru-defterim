@@ -1,8 +1,11 @@
 package com.sorudefteri.domain.model
 
+import androidx.compose.runtime.Immutable
+
 /**
  * Domain Soru Modeli
  */
+@Immutable
 data class Soru(
     val id: Long = 0L,
     val imagePath: String,

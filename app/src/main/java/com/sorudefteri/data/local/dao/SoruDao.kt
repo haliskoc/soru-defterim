@@ -188,6 +188,9 @@ interface SoruDao {
     @Query("SELECT COUNT(*) FROM sorular WHERE nextReviewDate IS NOT NULL AND nextReviewDate <= :currentTime")
     fun getDueReviewCount(currentTime: Long = System.currentTimeMillis()): Flow<Int>
 
+    @Query("SELECT COUNT(*) FROM sorular WHERE nextReviewDate IS NOT NULL AND nextReviewDate <= :currentTime")
+    suspend fun getDueReviewCountDirect(currentTime: Long = System.currentTimeMillis()): Int
+
     @Query("DELETE FROM sorular")
     suspend fun clearAll()
 }

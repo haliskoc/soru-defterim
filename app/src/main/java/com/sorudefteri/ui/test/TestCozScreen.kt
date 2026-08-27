@@ -413,7 +413,7 @@ private fun QuestionNumberRibbon(
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
     ) {
-        items(totalQuestions) { index ->
+        items(totalQuestions, key = { it }) { index ->
             val isCurrent = index == currentIndex
             val isAnswered = !userAnswers[index].isNullOrBlank()
 
@@ -580,13 +580,12 @@ private fun QuestionContent(
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
 
-        val options = listOf("A", "B", "C", "D", "E")
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            options.forEach { option ->
+            CEVAP_SIKLARI.forEach { option ->
                 val isSelected = selectedAnswer.equals(option, ignoreCase = true)
 
                 val backgroundColor by animateColorAsState(
@@ -715,3 +714,6 @@ private fun TestCozBottomBar(
         }
     }
 }
+
+private val CEVAP_SIKLARI = listOf("A", "B", "C", "D", "E")
+

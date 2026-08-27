@@ -41,8 +41,7 @@ class ReminderWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         return try {
             val currentTime = System.currentTimeMillis()
-            // Use COUNT query for efficiency if possible, but keep list for future details
-            val dueCount = soruDao.getDueReviewSorularList(currentTime).size
+            val dueCount = soruDao.getDueReviewCountDirect(currentTime)
 
             if (dueCount > 0) {
                 sendNotification(dueCount)

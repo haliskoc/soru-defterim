@@ -240,9 +240,13 @@ fun KameraScreen(
     }
 
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    var cameraProviderInstance by remember { mutableStateOf<ProcessCameraProvider?>(null) }
 
     DisposableEffect(Unit) {
         onDispose {
+            try {
+                cameraProviderInstance?.unbindAll()
+            } catch (_: Exception) {}
             cameraExecutor.shutdown()
         }
     }
@@ -255,6 +259,7 @@ fun KameraScreen(
         cameraProviderFuture.addListener({
             try {
                 val cameraProvider = cameraProviderFuture.get()
+                cameraProviderInstance = cameraProvider
                 val preview = Preview.Builder().build().also {
                     it.surfaceProvider = currentPreview.surfaceProvider
                 }

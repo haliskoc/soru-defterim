@@ -154,15 +154,11 @@ class OcrHelper @Inject constructor(
             // Rotation: 0 yerine EXIF rotasyonu kullan (GorselDepo rotasyonu)
             val rotation = getRotationDegreesForFile(file)
             try {
-                val result = recognizeText(sampledBitmap, rotation)
-                // bitmap'i hemen recycle etme, caller veya GC yönetecek; ama sampling bitmap'i temizle
-                // Küçük bitmap ise recycle etmeyelim, sistem GC bırakır; manuel recycle OOM azaltır
-                // if (!sampledBitmap.isRecycled) sampledBitmap.recycle()
-                result
+                recognizeText(sampledBitmap, rotation)
             } finally {
-                // Sampling bitmap'i temizle (eğer farklı thread'de kullanılmıyorsa)
-                // Not: InputImage.fromBitmap bitmap'i kopyalamaz, ama process async; recycle'ı geciktir
-                // Bu yüzden burada recycle etmiyoruz, GC'ye bırakıyoruz; OOM için sampling yeterli
+                if (!sampledBitmap.isRecycled) {
+                    try { sampledBitmap.recycle() } catch (_: Exception) {}
+                }
             }
         } catch (oom: OutOfMemoryError) {
             Result.failure(Exception("OCR OOM: Görsel çok büyük", oom))
@@ -184,8 +180,13 @@ class OcrHelper @Inject constructor(
                 ?: return@withContext Result.failure(
                     IllegalArgumentException("Görsel byte dizisi çözümlenemedi.")
                 )
-            // ByteArray kaynaklı rotation bilinmiyor -> 0 kullan, ama GorselDepo rotasyonu caller sağlamalı
-            recognizeText(bitmap, 0)
+            try {
+                recognizeText(bitmap, 0)
+            } finally {
+                if (!bitmap.isRecycled) {
+                    try { bitmap.recycle() } catch (_: Exception) {}
+                }
+            }
         } catch (oom: OutOfMemoryError) {
             Result.failure(Exception("OCR OOM", oom))
         } catch (e: Exception) {
@@ -297,11 +298,14 @@ class OcrHelper @Inject constructor(
      * Kaynakları serbest bırakır. ViewModel onCleared veya Application onTerminate'de çağrılmalı.
      */
     fun close() {
-        if (isClosed) return
-        try {
-            _recognizer?.close()
+        synchronized(this) {
+            if (isClosed) return
+            try {
+                _recognizer?.close()
+            } catch (_: Exception) {
+            } catch (_: OutOfMemoryError) {}
+            _recognizer = null
             isClosed = true
-        } catch (_: Exception) {
-        } catch (_: OutOfMemoryError) {}
+        }
     }
 }

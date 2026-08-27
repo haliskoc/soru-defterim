@@ -555,4 +555,11 @@ class SoruDetayViewModel @Inject constructor(
             )
         }
     }
+
+    override fun onCleared() {
+        super.onCleared()
+        try {
+            ocrHelper.close()
+        } catch (_: Exception) {}
+    }
 }

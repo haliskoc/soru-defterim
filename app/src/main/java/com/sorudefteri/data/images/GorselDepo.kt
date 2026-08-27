@@ -234,11 +234,11 @@ class GorselDepo @Inject constructor(
                                 return@withContext null
                             }
                         } finally {
-                            if (scaled != null && scaled != bmp && !scaled.isRecycled) scaled.recycle()
+                            if (scaled != null && scaled !== bmp && !scaled.isRecycled) {
+                                scaled.recycle()
+                            }
                             if (bmp != null && !bmp.isRecycled) {
-                                // scaled == bmp ise yukarıda recycle edilmedi, şimdi recycle etme? scaled bmp ise bmp'yi recycle etme çünkü scaled aynı referans
-                                if (scaled !== bmp) bmp.recycle()
-                                else if (scaled == null) bmp.recycle()
+                                bmp.recycle()
                             }
                         }
                     }

@@ -172,15 +172,18 @@ object DersTaksonomisi {
         }
     }
 
+    private val tumDerslerMap: Map<String, String> by lazy {
+        val list = tytDersleri + aytSayisalDersleri + aytEsitAgirlikDersleri + aytSozelDersleri + aytDilDersleri + lgsDersleri + kpssDersleri
+        list.associate { it.id.lowercase() to it.ad } + tumDersAdlari
+    }
+
     /**
      * Ders kimliğinden ve sınav türünden kullanıcı dostu ders adını döner
      */
     fun getDersAdi(examType: String = "TYT", subjectId: String): String {
         val normalizedSubjectId = subjectId.lowercase().trim()
-        val allDersler = tytDersleri + aytSayisalDersleri + aytEsitAgirlikDersleri + aytSozelDersleri + aytDilDersleri + lgsDersleri + kpssDersleri
-        return allDersler.find { it.id.equals(normalizedSubjectId, ignoreCase = true) }?.ad
-            ?: tumDersAdlari[normalizedSubjectId]
-            ?: tumDersAdlari[normalizedSubjectId.removePrefix("ayt_").removePrefix("tyt_").removePrefix("lgs_").removePrefix("kpss_")]
+        return tumDerslerMap[normalizedSubjectId]
+            ?: tumDerslerMap[normalizedSubjectId.removePrefix("ayt_").removePrefix("tyt_").removePrefix("lgs_").removePrefix("kpss_")]
             ?: subjectId.replace("ayt_", "AYT ")
                 .replace("tyt_", "TYT ")
                 .replace("lgs_", "LGS ")

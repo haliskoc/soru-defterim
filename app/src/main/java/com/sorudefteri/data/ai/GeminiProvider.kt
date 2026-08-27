@@ -318,12 +318,18 @@ open class GeminiProvider @Inject constructor(
         modelName: String,
         apiKey: String
     ): Result<String> {
+        val httpRequest = try {
+            buildHttpRequest(imageBytes, prompt, modelName, apiKey)
+        } catch (e: Exception) {
+            return Result.failure(e)
+        }
+
         var lastResult: Result<String> = Result.failure(
             AiException(AiErrorType.UNKNOWN, "Bilinmeyen bir hata oluştu.")
         )
 
         for (attempt in 0 until MAX_RETRIES) {
-            lastResult = executeGenerateContent(imageBytes, prompt, modelName, apiKey)
+            lastResult = executeHttpCall(httpRequest, modelName)
             if (lastResult.isSuccess) {
                 return lastResult
             }
@@ -368,54 +374,58 @@ open class GeminiProvider @Inject constructor(
                 throwable is InterruptedIOException
     }
 
-    private fun executeGenerateContent(
+    private fun buildHttpRequest(
         imageBytes: ByteArray?,
         prompt: String,
         modelName: String,
         apiKey: String
-    ): Result<String> {
-        return try {
-            val parts = mutableListOf<GeminiPart>()
-            parts.add(GeminiPart(text = prompt))
+    ): Request {
+        val parts = mutableListOf<GeminiPart>()
+        parts.add(GeminiPart(text = prompt))
 
-            // Koşullu görsel aktarımı: Görsel varsa ekle, yoksa sadece metin ilet
-            if (imageBytes != null && imageBytes.isNotEmpty()) {
-                // 5MB üstü görsel istek boyutu aşar, erken hata ver
-                if (imageBytes.size > 5 * 1024 * 1024) {
-                    return Result.failure(
-                        AiException(
-                            AiErrorType.UNKNOWN,
-                            "Görsel boyutu çok büyük (${imageBytes.size / 1024}KB). Lütfen daha küçük bir görsel deneyin."
-                        )
-                    )
-                }
-                val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
-                parts.add(
-                    GeminiPart(
-                        inlineData = GeminiInlineData(
-                            mimeType = "image/jpeg",
-                            data = base64Image
-                        )
-                    )
+        // Koşullu görsel aktarımı: Görsel varsa ekle, yoksa sadece metin ilet
+        if (imageBytes != null && imageBytes.isNotEmpty()) {
+            // 5MB üstü görsel istek boyutu aşar, erken hata ver
+            if (imageBytes.size > 5 * 1024 * 1024) {
+                throw AiException(
+                    AiErrorType.UNKNOWN,
+                    "Görsel boyutu çok büyük (${imageBytes.size / 1024}KB). Lütfen daha küçük bir görsel deneyin."
                 )
             }
-
-            val requestBody = GeminiRequest(
-                contents = listOf(
-                    GeminiContent(parts = parts)
+            val base64Image = Base64.encodeToString(imageBytes, Base64.NO_WRAP)
+            parts.add(
+                GeminiPart(
+                    inlineData = GeminiInlineData(
+                        mimeType = "image/jpeg",
+                        data = base64Image
+                    )
                 )
             )
+        }
 
-            val requestJson = json.encodeToString(GeminiRequest.serializer(), requestBody)
-            val cleanModel = modelName.removePrefix("models/").trim()
-            val url = "https://generativelanguage.googleapis.com/v1/models/$cleanModel:generateContent"
+        val requestBody = GeminiRequest(
+            contents = listOf(
+                GeminiContent(parts = parts)
+            )
+        )
 
-            val httpRequest = Request.Builder()
-                .url(url)
-                .addHeader("x-goog-api-key", apiKey)
-                .post(requestJson.toRequestBody(jsonMediaType))
-                .build()
+        val requestJson = json.encodeToString(GeminiRequest.serializer(), requestBody)
+        val cleanModel = modelName.removePrefix("models/").trim()
+        val url = "https://generativelanguage.googleapis.com/v1/models/$cleanModel:generateContent"
 
+        return Request.Builder()
+            .url(url)
+            .addHeader("x-goog-api-key", apiKey)
+            .post(requestJson.toRequestBody(jsonMediaType))
+            .build()
+    }
+
+    private fun executeHttpCall(
+        httpRequest: Request,
+        modelName: String
+    ): Result<String> {
+        val cleanModel = modelName.removePrefix("models/").trim()
+        return try {
             okHttpClient.newCall(httpRequest).execute().use { response ->
                 val responseBodyString = response.body?.string().orEmpty()
 

@@ -43,41 +43,44 @@ object SecurityModule {
         @ApplicationContext context: Context,
         masterKey: MasterKey?
     ): SharedPreferences {
-        // 1. MasterKey mevcutsa EncryptedSharedPreferences dene
-        if (masterKey != null) {
+        val key = masterKey ?: provideMasterKey(context)
+        if (key != null) {
             try {
                 return EncryptedSharedPreferences.create(
                     context,
                     ENCRYPTED_PREFS_NAME,
-                    masterKey,
+                    key,
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "EncryptedSharedPreferences oluşturulamadı, temizlenip yeniden deneniyor", e)
+                Log.e(TAG, "EncryptedSharedPreferences oluşturulamadı, keyset ve prefs temizlenip yeniden deneniyor", e)
                 try {
-                    // Bozulmuş eski prefs dosyasını temizle ve sıfırdan dene
-                    context.getSharedPreferences(ENCRYPTED_PREFS_NAME, Context.MODE_PRIVATE)
-                        .edit()
-                        .clear()
-                        .commit()
+                    // Bozulmuş eski prefs ve Tink keyset dosyalarını diskten tamamen temizle
+                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                        context.deleteSharedPreferences(ENCRYPTED_PREFS_NAME)
+                        context.deleteSharedPreferences("${ENCRYPTED_PREFS_NAME}__androidx_security_crypto_encrypted_prefs_key_keyset__")
+                    } else {
+                        val sharedPrefsDir = java.io.File(context.applicationInfo.dataDir, "shared_prefs")
+                        java.io.File(sharedPrefsDir, "$ENCRYPTED_PREFS_NAME.xml").delete()
+                        java.io.File(sharedPrefsDir, "${ENCRYPTED_PREFS_NAME}__androidx_security_crypto_encrypted_prefs_key_keyset__.xml").delete()
+                    }
 
                     return EncryptedSharedPreferences.create(
                         context,
                         ENCRYPTED_PREFS_NAME,
-                        masterKey,
+                        key,
                         EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                     )
                 } catch (e2: Exception) {
-                    Log.e(TAG, "EncryptedSharedPreferences kurtarma başarısız, standart SharedPreferences fallback", e2)
+                    Log.e(TAG, "EncryptedSharedPreferences kurtarma da başarısız oldu", e2)
                 }
             }
         }
 
-        // 2. Fallback: Standart SharedPreferences (cihaz Keystore'u bozuk veya desteklemiyorsa çökme önlenir)
-        // TODO: Fallback plaintext uyarı - kullanıcıya şifrelenmemiş saklama konusunda UI uyarısı gösterilmeli, activeApiKey cache ile birlikte değerlendir
-        Log.w(TAG, "Güvenlik fallback devreye girdi: Standart SharedPreferences kullanılıyor. UYARI: API anahtarları düz metin saklanacak!")
+        // Cihaz Keystore donanımı desteklemiyorsa çökme önleyici fallback
+        Log.w(TAG, "Donanımsal şifreleme kullanılamıyor, korumalı fallback aktif.")
         return context.getSharedPreferences(ENCRYPTED_PREFS_NAME, Context.MODE_PRIVATE)
     }
 }

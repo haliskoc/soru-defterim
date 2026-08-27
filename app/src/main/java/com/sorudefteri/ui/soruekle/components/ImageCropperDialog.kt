@@ -31,6 +31,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -72,6 +73,15 @@ fun ImageCropperDialog(
     var baseBitmap by remember(imagePath) { mutableStateOf<Bitmap?>(null) }
     var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isLoading by remember { mutableStateOf(true) }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            currentBitmap?.let { if (it !== baseBitmap && !it.isRecycled) try { it.recycle() } catch (_: Exception) {} }
+            baseBitmap?.let { if (!it.isRecycled) try { it.recycle() } catch (_: Exception) {} }
+            currentBitmap = null
+            baseBitmap = null
+        }
+    }
 
     // GorselSeciciSection'dan gelen path ile sampled decode (OOM korumalı)
     LaunchedEffect(imagePath) {
@@ -297,6 +307,10 @@ fun ImageCropperDialogLegacy(
             } catch (oom: OutOfMemoryError) {
                 oom.printStackTrace()
                 onDismiss()
+            } finally {
+                if (!bitmap.isRecycled) {
+                    try { bitmap.recycle() } catch (_: Exception) {}
+                }
             }
         }
     )
@@ -308,7 +322,9 @@ private fun decodeSampledBitmap(filePath: String, maxDim: Int): Bitmap? {
     return try {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(filePath, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return BitmapFactory.decodeFile(filePath)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            return try { BitmapFactory.decodeFile(filePath) } catch (_: OutOfMemoryError) { null }
+        }
         var inSampleSize = 1
         while ((bounds.outWidth / inSampleSize) > maxDim || (bounds.outHeight / inSampleSize) > maxDim) {
             inSampleSize *= 2

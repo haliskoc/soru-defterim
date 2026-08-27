@@ -11,6 +11,8 @@
         <exclude domain="database" path="soru_defteri.db-wal" />
         <exclude domain="file" path="datastore/" />
         <exclude domain="file" path="datastore/soru_defteri_ayarlar.preferences_pb" />
+        <exclude domain="file" path="backups/" />
+        <exclude domain="file" path="images/" />
         <!-- Diğer dosyalar yedeklenebilir, root include yok - daraltılmış -->
     </cloud-backup>
     <device-transfer>
@@ -24,5 +26,7 @@
         <exclude domain="database" path="soru_defteri.db-wal" />
         <exclude domain="file" path="datastore/" />
         <exclude domain="file" path="datastore/soru_defteri_ayarlar.preferences_pb" />
+        <exclude domain="file" path="backups/" />
+        <exclude domain="file" path="images/" />
     </device-transfer>
 </data-extraction-rules>

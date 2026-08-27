@@ -408,136 +408,169 @@ private fun RenderFormattedLines(content: String) {
  * LaTeX sembollerini, üslü sayıları, alt indisleri, integralleri, kesirleri
  * ve toplam sembollerini temiz Unicode Matematik formatına dönüştürür.
  */
+private val THINK_REGEX = Regex("""<(think|thought)>[\s\S]*?</\1>""")
+private val LEFT_REGEX = Regex("""\\left\s*""")
+private val RIGHT_REGEX = Regex("""\\right\s*""")
+private val TEXT_CMD_REGEX = Regex("""\\(text|mathbf|mathit|mathrm|textbf|textit|mathbb|bold|operatorname)\{([^}]+)\}""")
+private val FRAC_REGEX = Regex("""\\frac\{([^}]+)\}\{([^}]+)\}""")
+private val SQRT_REGEX = Regex("""\\sqrt\{([^}]+)\}""")
+private val N_SQRT_REGEX = Regex("""\\sqrt\[([^\]]+)\]\{([^}]+)\}""")
+
+private val ARROW_REPLACEMENTS = listOf(
+    Regex("""\\implies(?![a-zA-Z])""") to " ⇒ ",
+    Regex("""\\impliedby(?![a-zA-Z])""") to " ⇐ ",
+    Regex("""\\iff(?![a-zA-Z])""") to " ⇔ ",
+    Regex("""\\(to|rightarrow)(?![a-zA-Z])""") to " → ",
+    Regex("""\\leftarrow(?![a-zA-Z])""") to " ← ",
+    Regex("""\\Rightarrow(?![a-zA-Z])""") to " ⇒ ",
+    Regex("""\\Leftarrow(?![a-zA-Z])""") to " ⇐ ",
+    Regex("""\\Leftrightarrow(?![a-zA-Z])""") to " ⇔ ",
+    Regex("""\\leftrightarrow(?![a-zA-Z])""") to " ↔ "
+)
+
+private val REGEX_REPLACEMENTS = listOf(
+    Regex("""\\(leq|le)(?![a-zA-Z])""") to "≤",
+    Regex("""\\(geq|ge)(?![a-zA-Z])""") to "≥",
+    Regex("""\\(neq|ne)(?![a-zA-Z])""") to "≠",
+    Regex("""\\(approx)(?![a-zA-Z])""") to "≈",
+    Regex("""\\(sim)(?![a-zA-Z])""") to "∼",
+    Regex("""\\(equiv)(?![a-zA-Z])""") to "≡",
+    Regex("""\\(times)(?![a-zA-Z])""") to "×",
+    Regex("""\\(cdot)(?![a-zA-Z])""") to "·",
+    Regex("""\\(div)(?![a-zA-Z])""") to "÷",
+    Regex("""\\(pm)(?![a-zA-Z])""") to "±",
+    Regex("""\\(mp)(?![a-zA-Z])""") to "∓",
+    Regex("""\\(infty)(?![a-zA-Z])""") to "∞",
+    Regex("""\\(degree|circ)(?![a-zA-Z])""") to "°",
+    Regex("""\\(int)(?![a-zA-Z])""") to "∫",
+    Regex("""\\(iint)(?![a-zA-Z])""") to "∬",
+    Regex("""\\(iiint)(?![a-zA-Z])""") to "∭",
+    Regex("""\\(oint)(?![a-zA-Z])""") to "∮",
+    Regex("""\\(sum)(?![a-zA-Z])""") to "∑",
+    Regex("""\\(prod)(?![a-zA-Z])""") to "∏",
+    Regex("""\\(lim)(?![a-zA-Z])""") to "lim",
+    Regex("""\\(alpha)(?![a-zA-Z])""") to "α",
+    Regex("""\\(beta)(?![a-zA-Z])""") to "β",
+    Regex("""\\(gamma)(?![a-zA-Z])""") to "γ",
+    Regex("""\\(Gamma)(?![a-zA-Z])""") to "Γ",
+    Regex("""\\(delta)(?![a-zA-Z])""") to "δ",
+    Regex("""\\(Delta)(?![a-zA-Z])""") to "Δ",
+    Regex("""\\(epsilon)(?![a-zA-Z])""") to "ε",
+    Regex("""\\(zeta)(?![a-zA-Z])""") to "ζ",
+    Regex("""\\(eta)(?![a-zA-Z])""") to "η",
+    Regex("""\\(theta)(?![a-zA-Z])""") to "θ",
+    Regex("""\\(Theta)(?![a-zA-Z])""") to "Θ",
+    Regex("""\\(lambda)(?![a-zA-Z])""") to "λ",
+    Regex("""\\(Lambda)(?![a-zA-Z])""") to "Λ",
+    Regex("""\\(mu)(?![a-zA-Z])""") to "μ",
+    Regex("""\\(nu)(?![a-zA-Z])""") to "ν",
+    Regex("""\\(xi)(?![a-zA-Z])""") to "ξ",
+    Regex("""\\(pi)(?![a-zA-Z])""") to "π",
+    Regex("""\\(Pi)(?![a-zA-Z])""") to "Π",
+    Regex("""\\(rho)(?![a-zA-Z])""") to "ρ",
+    Regex("""\\(sigma)(?![a-zA-Z])""") to "σ",
+    Regex("""\\(Sigma)(?![a-zA-Z])""") to "Σ",
+    Regex("""\\(tau)(?![a-zA-Z])""") to "τ",
+    Regex("""\\(phi)(?![a-zA-Z])""") to "ϕ",
+    Regex("""\\(Phi)(?![a-zA-Z])""") to "Φ",
+    Regex("""\\(chi)(?![a-zA-Z])""") to "χ",
+    Regex("""\\(psi)(?![a-zA-Z])""") to "ψ",
+    Regex("""\\(omega)(?![a-zA-Z])""") to "ω",
+    Regex("""\\(Omega)(?![a-zA-Z])""") to "Ω",
+    Regex("""\\(partial)(?![a-zA-Z])""") to "∂",
+    Regex("""\\(nabla)(?![a-zA-Z])""") to "∇",
+    Regex("""\\(notin)(?![a-zA-Z])""") to "∉",
+    Regex("""\\(in)(?![a-zA-Z])""") to "∈",
+    Regex("""\\(subset)(?![a-zA-Z])""") to "⊂",
+    Regex("""\\(subseteq)(?![a-zA-Z])""") to "⊆",
+    Regex("""\\(cup)(?![a-zA-Z])""") to "∪",
+    Regex("""\\(cap)(?![a-zA-Z])""") to "∩",
+    Regex("""\\(emptyset)(?![a-zA-Z])""") to "∅",
+    Regex("""\\(forall)(?![a-zA-Z])""") to "∀",
+    Regex("""\\(exists)(?![a-zA-Z])""") to "∃"
+)
+
+private val EXPONENT_BRACE_REGEX = Regex("""\^\{([^}]+)\}""")
+private val SINGLE_EXPONENT_REGEX = Regex("""\^([0-9a-zA-Z\+\-\*]+)""")
+private val SUBSCRIPT_BRACE_REGEX = Regex("""_\{([^}]+)\}""")
+private val SINGLE_SUBSCRIPT_REGEX = Regex("""_([0-9a-zA-Z\+\-]+)""")
+
+private val SUPERSCRIPT_MAP = mapOf(
+    '0' to '⁰', '1' to '¹', '2' to '²', '3' to '³', '4' to '⁴',
+    '5' to '⁵', '6' to '⁶', '7' to '⁷', '8' to '⁸', '9' to '⁹',
+    '+' to '⁺', '-' to '⁻', '=' to '⁼', '(' to '⁽', ')' to '⁾',
+    'a' to 'ᵃ', 'b' to 'ᵇ', 'c' to 'ᶜ', 'd' to 'ᵈ', 'e' to 'ᵉ',
+    'f' to 'ᶠ', 'g' to 'ᵍ', 'h' to 'ʰ', 'i' to 'ⁱ', 'j' to 'ʲ',
+    'k' to 'ᵏ', 'l' to 'ˡ', 'm' to 'ᵐ', 'n' to 'ⁿ', 'o' to 'ᵒ',
+    'p' to 'ᵖ', 'r' to 'ʳ', 's' to 'ˢ', 't' to 'ᵗ', 'u' to 'ᵘ',
+    'v' to 'ᵛ', 'w' to 'ʷ', 'x' to 'ˣ', 'y' to 'ʸ', 'z' to 'ᶻ'
+)
+
+private val SUBSCRIPT_MAP = mapOf(
+    '0' to '₀', '1' to '₁', '2' to '₂', '3' to '₃', '4' to '₄',
+    '5' to '₅', '6' to '₆', '7' to '₇', '8' to '₈', '9' to '₉',
+    '+' to '₊', '-' to '₋', '=' to '₌', '(' to '₍', ')' to '₎',
+    'a' to 'ₐ', 'e' to 'ₑ', 'h' to 'ₕ', 'i' to 'ᵢ', 'j' to 'ⱼ',
+    'k' to 'ₖ', 'l' to 'ˡ', 'm' to 'ₘ', 'n' to 'ₙ', 'o' to 'ₒ',
+    'p' to 'ₚ', 'r' to 'ᵣ', 's' to 'ₛ', 't' to 'ₜ', 'u' to 'ᵤ',
+    'v' to 'ᵥ', 'x' to 'ₓ'
+)
+
+/**
+ * Giriş metnindeki LaTeX ve matematiksel sembolleri UTF-8 Unicode matematik sembollerine dönüştürür.
+ */
 fun formatMathSymbols(raw: String): String {
     var text = raw
 
     // 0. AI Düşünce (<think>...</think>) etiketlerini temizle
-    text = text.replace(Regex("""<(think|thought)>[\s\S]*?</\1>"""), "")
+    text = text.replace(THINK_REGEX, "")
 
     // 1. LaTeX bloklarını, parantez kaçışlarını ve \left / \right belirteçlerini temizle
     text = text.replace("$$", "").replace("$", "")
     text = text.replace("\\[", "").replace("\\]", "")
     text = text.replace("\\(", "").replace("\\)", "")
-    text = text.replace(Regex("""\\left\s*"""), "")
-    text = text.replace(Regex("""\\right\s*"""), "")
+    text = text.replace(LEFT_REGEX, "")
+    text = text.replace(RIGHT_REGEX, "")
 
     // 2. LaTeX Metin ve Yazı Tipi Sarmalayıcılarını Çöz: \text{...}, \mathbf{...}, vb.
-    val textCmdRegex = Regex("""\\(text|mathbf|mathit|mathrm|textbf|textit|mathbb|bold|operatorname)\{([^}]+)\}""")
-    while (textCmdRegex.containsMatchIn(text)) {
-        text = textCmdRegex.replace(text) { it.groupValues[2] }
+    while (TEXT_CMD_REGEX.containsMatchIn(text)) {
+        text = TEXT_CMD_REGEX.replace(text) { it.groupValues[2] }
     }
 
     // 3. LaTeX Kesirleri: \frac{a}{b} -> (a / b)
-    val fracRegex = Regex("""\\frac\{([^}]+)\}\{([^}]+)\}""")
-    text = fracRegex.replace(text) { match ->
+    text = FRAC_REGEX.replace(text) { match ->
         val num = match.groupValues[1]
         val den = match.groupValues[2]
         "($num / $den)"
     }
 
     // 4. LaTeX Kökleri: \sqrt{x} -> √(x), \sqrt[n]{x} -> ⁿ√(x)
-    val sqrtRegex = Regex("""\\sqrt\{([^}]+)\}""")
-    text = sqrtRegex.replace(text) { "√(${it.groupValues[1]})" }
-    val nSqrtRegex = Regex("""\\sqrt\[([^\]]+)\]\{([^}]+)\}""")
-    text = nSqrtRegex.replace(text) { "${toSuperscript(it.groupValues[1])}√(${it.groupValues[2]})" }
+    text = SQRT_REGEX.replace(text) { "√(${it.groupValues[1]})" }
+    text = N_SQRT_REGEX.replace(text) { "${toSuperscript(it.groupValues[1])}√(${it.groupValues[2]})" }
 
-    // 5. Mantıksal ve Yön Okları: \implies, \iff, \to, \rightarrow, vb.
-    text = text.replace(Regex("""\\implies(?![a-zA-Z])"""), " ⇒ ")
-    text = text.replace(Regex("""\\impliedby(?![a-zA-Z])"""), " ⇐ ")
-    text = text.replace(Regex("""\\iff(?![a-zA-Z])"""), " ⇔ ")
-    text = text.replace(Regex("""\\(to|rightarrow)(?![a-zA-Z])"""), " → ")
-    text = text.replace(Regex("""\\leftarrow(?![a-zA-Z])"""), " ← ")
-    text = text.replace(Regex("""\\Rightarrow(?![a-zA-Z])"""), " ⇒ ")
-    text = text.replace(Regex("""\\Leftarrow(?![a-zA-Z])"""), " ⇐ ")
-    text = text.replace(Regex("""\\Leftrightarrow(?![a-zA-Z])"""), " ⇔ ")
-    text = text.replace(Regex("""\\leftrightarrow(?![a-zA-Z])"""), " ↔ ")
-
-    // 6. Kelime Sınırı Güvenliğine Sahip LaTeX Sembolleri (Böylece \left bozulmaz ve \int_0^1 çalışır)
-    val regexReplacements = mapOf(
-        Regex("""\\(leq|le)(?![a-zA-Z])""") to "≤",
-        Regex("""\\(geq|ge)(?![a-zA-Z])""") to "≥",
-        Regex("""\\(neq|ne)(?![a-zA-Z])""") to "≠",
-        Regex("""\\(approx)(?![a-zA-Z])""") to "≈",
-        Regex("""\\(sim)(?![a-zA-Z])""") to "∼",
-        Regex("""\\(equiv)(?![a-zA-Z])""") to "≡",
-        Regex("""\\(times)(?![a-zA-Z])""") to "×",
-        Regex("""\\(cdot)(?![a-zA-Z])""") to "·",
-        Regex("""\\(div)(?![a-zA-Z])""") to "÷",
-        Regex("""\\(pm)(?![a-zA-Z])""") to "±",
-        Regex("""\\(mp)(?![a-zA-Z])""") to "∓",
-        Regex("""\\(infty)(?![a-zA-Z])""") to "∞",
-        Regex("""\\(degree|circ)(?![a-zA-Z])""") to "°",
-        Regex("""\\(int)(?![a-zA-Z])""") to "∫",
-        Regex("""\\(iint)(?![a-zA-Z])""") to "∬",
-        Regex("""\\(iiint)(?![a-zA-Z])""") to "∭",
-        Regex("""\\(oint)(?![a-zA-Z])""") to "∮",
-        Regex("""\\(sum)(?![a-zA-Z])""") to "∑",
-        Regex("""\\(prod)(?![a-zA-Z])""") to "∏",
-        Regex("""\\(lim)(?![a-zA-Z])""") to "lim",
-        Regex("""\\(alpha)(?![a-zA-Z])""") to "α",
-        Regex("""\\(beta)(?![a-zA-Z])""") to "β",
-        Regex("""\\(gamma)(?![a-zA-Z])""") to "γ",
-        Regex("""\\(Gamma)(?![a-zA-Z])""") to "Γ",
-        Regex("""\\(delta)(?![a-zA-Z])""") to "δ",
-        Regex("""\\(Delta)(?![a-zA-Z])""") to "Δ",
-        Regex("""\\(epsilon)(?![a-zA-Z])""") to "ε",
-        Regex("""\\(zeta)(?![a-zA-Z])""") to "ζ",
-        Regex("""\\(eta)(?![a-zA-Z])""") to "η",
-        Regex("""\\(theta)(?![a-zA-Z])""") to "θ",
-        Regex("""\\(Theta)(?![a-zA-Z])""") to "Θ",
-        Regex("""\\(lambda)(?![a-zA-Z])""") to "λ",
-        Regex("""\\(Lambda)(?![a-zA-Z])""") to "Λ",
-        Regex("""\\(mu)(?![a-zA-Z])""") to "μ",
-        Regex("""\\(nu)(?![a-zA-Z])""") to "ν",
-        Regex("""\\(xi)(?![a-zA-Z])""") to "ξ",
-        Regex("""\\(pi)(?![a-zA-Z])""") to "π",
-        Regex("""\\(Pi)(?![a-zA-Z])""") to "Π",
-        Regex("""\\(rho)(?![a-zA-Z])""") to "ρ",
-        Regex("""\\(sigma)(?![a-zA-Z])""") to "σ",
-        Regex("""\\(Sigma)(?![a-zA-Z])""") to "Σ",
-        Regex("""\\(tau)(?![a-zA-Z])""") to "τ",
-        Regex("""\\(phi)(?![a-zA-Z])""") to "ϕ",
-        Regex("""\\(Phi)(?![a-zA-Z])""") to "Φ",
-        Regex("""\\(chi)(?![a-zA-Z])""") to "χ",
-        Regex("""\\(psi)(?![a-zA-Z])""") to "ψ",
-        Regex("""\\(omega)(?![a-zA-Z])""") to "ω",
-        Regex("""\\(Omega)(?![a-zA-Z])""") to "Ω",
-        Regex("""\\(partial)(?![a-zA-Z])""") to "∂",
-        Regex("""\\(nabla)(?![a-zA-Z])""") to "∇",
-        Regex("""\\(notin)(?![a-zA-Z])""") to "∉",
-        Regex("""\\(in)(?![a-zA-Z])""") to "∈",
-        Regex("""\\(subset)(?![a-zA-Z])""") to "⊂",
-        Regex("""\\(subseteq)(?![a-zA-Z])""") to "⊆",
-        Regex("""\\(cup)(?![a-zA-Z])""") to "∪",
-        Regex("""\\(cap)(?![a-zA-Z])""") to "∩",
-        Regex("""\\(emptyset)(?![a-zA-Z])""") to "∅",
-        Regex("""\\(forall)(?![a-zA-Z])""") to "∀",
-        Regex("""\\(exists)(?![a-zA-Z])""") to "∃"
-    )
-
-    for ((pattern, replacement) in regexReplacements) {
+    // 5. Mantıksal ve Yön Okları
+    for ((pattern, replacement) in ARROW_REPLACEMENTS) {
         text = text.replace(pattern, replacement)
     }
 
-    // 7. Üslü İfadeler: x^{2} veya x^2 veya x^+ veya x^-
-    val exponentBraceRegex = Regex("""\^\{([^}]+)\}""")
-    text = exponentBraceRegex.replace(text) { match ->
+    // 6. Kelime Sınırı Güvenliğine Sahip LaTeX Sembolleri
+    for ((pattern, replacement) in REGEX_REPLACEMENTS) {
+        text = text.replace(pattern, replacement)
+    }
+
+    // 7. Üslü İfadeler
+    text = EXPONENT_BRACE_REGEX.replace(text) { match ->
+        toSuperscript(match.groupValues[1])
+    }
+    text = SINGLE_EXPONENT_REGEX.replace(text) { match ->
         toSuperscript(match.groupValues[1])
     }
 
-    val singleExponentRegex = Regex("""\^([0-9a-zA-Z\+\-\*]+)""")
-    text = singleExponentRegex.replace(text) { match ->
-        toSuperscript(match.groupValues[1])
-    }
-
-    // 8. Alt İndisler: x_{1} veya x_1 veya x_n
-    val subscriptBraceRegex = Regex("""_\{([^}]+)\}""")
-    text = subscriptBraceRegex.replace(text) { match ->
+    // 8. Alt İndisler
+    text = SUBSCRIPT_BRACE_REGEX.replace(text) { match ->
         toSubscript(match.groupValues[1])
     }
-
-    val singleSubscriptRegex = Regex("""_([0-9a-zA-Z\+\-]+)""")
-    text = singleSubscriptRegex.replace(text) { match ->
+    text = SINGLE_SUBSCRIPT_REGEX.replace(text) { match ->
         toSubscript(match.groupValues[1])
     }
 
@@ -556,33 +589,14 @@ fun formatMathText(raw: String): AnnotatedString {
  * Karakterleri Unicode Üslü (Superscript) karakterlere çevirir.
  */
 private fun toSuperscript(input: String): String {
-    val map = mapOf(
-        '0' to '⁰', '1' to '¹', '2' to '²', '3' to '³', '4' to '⁴',
-        '5' to '⁵', '6' to '⁶', '7' to '⁷', '8' to '⁸', '9' to '⁹',
-        '+' to '⁺', '-' to '⁻', '=' to '⁼', '(' to '⁽', ')' to '⁾',
-        'a' to 'ᵃ', 'b' to 'ᵇ', 'c' to 'ᶜ', 'd' to 'ᵈ', 'e' to 'ᵉ',
-        'f' to 'ᶠ', 'g' to 'ᵍ', 'h' to 'ʰ', 'i' to 'ⁱ', 'j' to 'ʲ',
-        'k' to 'ᵏ', 'l' to 'ˡ', 'm' to 'ᵐ', 'n' to 'ⁿ', 'o' to 'ᵒ',
-        'p' to 'ᵖ', 'r' to 'ʳ', 's' to 'ˢ', 't' to 'ᵗ', 'u' to 'ᵘ',
-        'v' to 'ᵛ', 'w' to 'ʷ', 'x' to 'ˣ', 'y' to 'ʸ', 'z' to 'ᶻ'
-    )
-    return input.map { map[it] ?: it }.joinToString("")
+    return input.map { SUPERSCRIPT_MAP[it] ?: it }.joinToString("")
 }
 
 /**
  * Karakterleri Unicode Alt İndis (Subscript) karakterlere çevirir.
  */
 private fun toSubscript(input: String): String {
-    val map = mapOf(
-        '0' to '₀', '1' to '₁', '2' to '₂', '3' to '₃', '4' to '₄',
-        '5' to '₅', '6' to '₆', '7' to '₇', '8' to '₈', '9' to '₉',
-        '+' to '₊', '-' to '₋', '=' to '₌', '(' to '₍', ')' to '₎',
-        'a' to 'ₐ', 'e' to 'ₑ', 'h' to 'ₕ', 'i' to 'ᵢ', 'j' to 'ⱼ',
-        'k' to 'ₖ', 'l' to 'ˡ', 'm' to 'ₘ', 'n' to 'ₙ', 'o' to 'ₒ',
-        'p' to 'ₚ', 'r' to 'ᵣ', 's' to 'ₛ', 't' to 'ₜ', 'u' to 'ᵤ',
-        'v' to 'ᵥ', 'x' to 'ₓ'
-    )
-    return input.map { map[it] ?: it }.joinToString("")
+    return input.map { SUBSCRIPT_MAP[it] ?: it }.joinToString("")
 }
 
 /**

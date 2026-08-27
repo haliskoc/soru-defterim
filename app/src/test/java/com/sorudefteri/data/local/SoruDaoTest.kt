@@ -517,6 +517,10 @@ class FakeSoruDao : SoruDao {
         }
     }
 
+    override suspend fun getDueReviewCountDirect(currentTime: Long): Int {
+        return data.values.count { it.nextReviewDate != null && it.nextReviewDate!! <= currentTime }
+    }
+
     override suspend fun clearAll() {
         data.clear()
         emit()
