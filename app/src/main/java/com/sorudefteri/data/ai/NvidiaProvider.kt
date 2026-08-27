@@ -215,7 +215,7 @@ open class NvidiaProvider @Inject constructor(
             if (ex is AiException && ex.errorType == AiErrorType.MODEL_UNAVAILABLE && ex.message?.contains("404") == true) break
             if (isRetryableException(ex) && attempt < MAX_RETRIES - 1) {
                 val base = 1000L * (1L shl attempt)
-                val jitter = (0..500).random().toLong()
+                val jitter = (500..1000).random().toLong()
                 delay(base + jitter)
             } else break
         }
@@ -228,11 +228,10 @@ open class NvidiaProvider @Inject constructor(
         if (throwable is AiException) {
             return throwable.errorType == AiErrorType.NETWORK_TIMEOUT ||
                     throwable.errorType == AiErrorType.NETWORK_ERROR ||
-                    (throwable.errorType == AiErrorType.MODEL_UNAVAILABLE && !throwable.message.orEmpty().contains("404")) ||
-                    throwable.errorType == AiErrorType.QUOTA_EXCEEDED
+                    (throwable.errorType == AiErrorType.MODEL_UNAVAILABLE && !throwable.message.orEmpty().contains("404"))
         }
         val msg = throwable.message.orEmpty().lowercase()
-        return msg.contains("429") || msg.contains("rate limit") || msg.contains("500") || msg.contains("502") || msg.contains("503") || msg.contains("504") || msg.contains("timeout") || throwable is SocketTimeoutException || throwable is InterruptedIOException
+        return msg.contains("500") || msg.contains("502") || msg.contains("503") || msg.contains("504") || msg.contains("timeout") || throwable is SocketTimeoutException || throwable is InterruptedIOException
     }
 
     private fun executeNvidiaRequest(

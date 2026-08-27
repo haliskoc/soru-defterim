@@ -52,8 +52,16 @@ class AiRepository @Inject constructor(
             )
         }
 
-        // Görseli diskten oku
+        // Görseli diskten oku — 5MB kontrolü readBytes ÖNCESİ File.length() ile
         val file = File(soru.imagePath)
+        if (sendImage && file.exists() && file.canRead() && file.length() > 5 * 1024 * 1024) {
+            return Result.failure(
+                AiException(
+                    AiErrorType.UNKNOWN,
+                    "Görsel boyutu çok büyük (${file.length() / 1024}KB). Lütfen daha küçük bir görsel deneyin."
+                )
+            )
+        }
         val imageBytes = if (file.exists() && file.canRead()) {
             withContext(Dispatchers.IO) {
                 try {
@@ -395,6 +403,15 @@ class AiRepository @Inject constructor(
                 FileNotFoundException("Soru görseli bulunamadı veya okunamıyor: $imagePath")
             )
         }
+        // 5MB kontrolü File.length() ile readBytes öncesi
+        if (file.length() > 5 * 1024 * 1024) {
+            return Result.failure(
+                AiException(
+                    AiErrorType.UNKNOWN,
+                    "Görsel boyutu çok büyük (${file.length() / 1024}KB). Lütfen daha küçük bir görsel deneyin."
+                )
+            )
+        }
 
         val imageBytes = withContext(Dispatchers.IO) {
             try {
@@ -421,6 +438,14 @@ class AiRepository @Inject constructor(
         konu: String,
         correctAnswer: String? = null
     ): Result<String> {
+        if (imageBytes.size > 5 * 1024 * 1024) {
+            return Result.failure(
+                AiException(
+                    AiErrorType.UNKNOWN,
+                    "Görsel boyutu çok büyük (${imageBytes.size / 1024}KB). Lütfen daha küçük bir görsel deneyin."
+                )
+            )
+        }
         return cozumIsteGelismi(
             imageBytes = imageBytes,
             dersAdi = dersAdi,

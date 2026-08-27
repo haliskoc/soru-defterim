@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -47,8 +48,8 @@ fun AyarlarScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    var selectedTabIndex by remember { mutableStateOf(0) }
-    var showResetConfirmDialog by remember { mutableStateOf(false) }
+    var selectedTabIndex by rememberSaveable { mutableStateOf(0) }
+    var showResetConfirmDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(uiState.resetSuccess) {
         if (uiState.resetSuccess) {
@@ -96,19 +97,19 @@ fun AyarlarScreen(
                     selected = selectedTabIndex == 0,
                     onClick = { selectedTabIndex = 0 },
                     text = { Text("Genel", fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal) },
-                    icon = { Icon(Icons.Default.Settings, contentDescription = null) }
+                    icon = { Icon(Icons.Default.Settings, contentDescription = "Genel Ayarlar") }
                 )
                 Tab(
                     selected = selectedTabIndex == 1,
                     onClick = { selectedTabIndex = 1 },
                     text = { Text("AI & Prompt", fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal) },
-                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) }
+                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = "AI & Prompt") }
                 )
                 Tab(
                     selected = selectedTabIndex == 2,
                     onClick = { selectedTabIndex = 2 },
                     text = { Text("Yedek & Güvenlik", fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal) },
-                    icon = { Icon(Icons.Default.CloudUpload, contentDescription = null) }
+                    icon = { Icon(Icons.Default.CloudUpload, contentDescription = "Yedek & Güvenlik") }
                 )
             }
 
@@ -156,8 +157,12 @@ fun AyarlarScreen(
                         isBackupLoading = uiState.isBackupLoading,
                         backupMessage = uiState.backupMessage,
                         isBackupError = uiState.isBackupError,
-                        onExportBackup = { uri, pwd -> viewModel.exportBackup(uri) },
-                        onImportBackup = { uri, pwd -> viewModel.importBackup(uri) }
+                        isAutoBackupEnabled = uiState.isAutoBackupEnabled,
+                        isWifiOnly = uiState.isWifiOnly,
+                        onExportBackup = { uri, pwd -> viewModel.exportBackup(uri, pwd) },
+                        onImportBackup = { uri, pwd -> viewModel.importBackup(uri, pwd) },
+                        onAutoBackupToggle = { viewModel.setAutoBackupEnabled(it) },
+                        onWifiOnlyToggle = { viewModel.setWifiOnly(it) }
                     )
                 }
             }

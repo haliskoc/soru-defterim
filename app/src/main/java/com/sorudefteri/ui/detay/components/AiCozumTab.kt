@@ -3,7 +3,6 @@ package com.sorudefteri.ui.detay.components
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,14 +29,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sorudefteri.ui.ortak.math.MathMarkdownText
+import kotlinx.coroutines.launch
 
 @Composable
 fun AiCozumTab(
@@ -52,6 +56,8 @@ fun AiCozumTab(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -217,7 +223,7 @@ fun AiCozumTab(
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 val clip = ClipData.newPlainText("AI Çözüm", aiExplanation)
                                 clipboard.setPrimaryClip(clip)
-                                Toast.makeText(context, "Çözüm panoya kopyalandı", Toast.LENGTH_SHORT).show()
+                                scope.launch { snackbarHostState.showSnackbar("Çözüm panoya kopyalandı") }
                             }) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = "Kopyala")
                             }
@@ -226,6 +232,7 @@ fun AiCozumTab(
                                 Icon(Icons.Default.Refresh, contentDescription = "Yeniden Çöz")
                             }
                         }
+                        SnackbarHost(hostState = snackbarHostState)
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))

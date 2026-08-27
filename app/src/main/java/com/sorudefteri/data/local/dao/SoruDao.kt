@@ -5,9 +5,12 @@ import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.sorudefteri.data.local.entity.SoruEntity
 import kotlinx.coroutines.flow.Flow
+
+// TODO: FTS - Full-text search için FTS4/FTS5 sanal tablosu eklenebilir (topic, note, ocrMetni, questionText alanlarında trigram index)
 
 /**
  * Ders bazlı soru sayısı özeti için Room Tuple
@@ -49,6 +52,12 @@ interface SoruDao {
     @Query("SELECT * FROM sorular ORDER BY createdAt DESC")
     fun getAllSorular(): Flow<List<SoruEntity>>
 
+    @Query("SELECT * FROM sorular ORDER BY createdAt DESC")
+    suspend fun getAllSorularList(): List<SoruEntity>
+
+    @Query("SELECT * FROM sorular WHERE id IN (:ids)")
+    suspend fun getSorularByIds(ids: List<Long>): List<SoruEntity>
+
     @Query("""
         SELECT * FROM sorular
         WHERE (:examType IS NULL OR examType = :examType)
@@ -75,9 +84,6 @@ interface SoruDao {
 
     @Query("SELECT DISTINCT topic FROM sorular WHERE subjectId = :subjectId AND topic != '' ORDER BY topic ASC")
     fun getDistinctTopicsForSubject(subjectId: String): Flow<List<String>>
-
-    @Query("SELECT DISTINCT topic FROM sorular WHERE subjectId = :subjectId AND topic != '' ORDER BY topic ASC")
-    fun getDistinctTopicsBySubject(subjectId: String): Flow<List<String>>
 
     @Query("SELECT COUNT(*) FROM sorular")
     fun getTotalCount(): Flow<Int>
@@ -109,9 +115,11 @@ interface SoruDao {
         updatedAt: Long = System.currentTimeMillis()
     )
 
+    @Transaction
     @Query("DELETE FROM sorular WHERE id IN (:ids)")
     suspend fun deleteSorularByIds(ids: List<Long>)
 
+    @Transaction
     @Query("UPDATE sorular SET isSolved = :isSolved, solvedAt = :solvedAt, updatedAt = :updatedAt WHERE id IN (:ids)")
     suspend fun updateSolvedStatusBatch(
         ids: List<Long>,
@@ -120,12 +128,29 @@ interface SoruDao {
         updatedAt: Long = System.currentTimeMillis()
     )
 
+    @Transaction
     @Query("UPDATE sorular SET isFavorite = :isFavorite, updatedAt = :updatedAt WHERE id IN (:ids)")
     suspend fun updateFavoriteStatusBatch(
         ids: List<Long>,
         isFavorite: Boolean,
         updatedAt: Long = System.currentTimeMillis()
     )
+
+    // Atomik tekil güncellemeler (race-safe)
+    @Query("UPDATE sorular SET isSolved = :isSolved, solvedAt = CASE WHEN :isSolved = 1 THEN :now ELSE NULL END, updatedAt = :now WHERE id = :id")
+    suspend fun updateCozumDurumuAtomik(id: Long, isSolved: Boolean, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE sorular SET isFavorite = :isFavorite, updatedAt = :now WHERE id = :id")
+    suspend fun updateFavoriteAtomik(id: Long, isFavorite: Boolean, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE sorular SET reviewStage = CASE WHEN reviewStage < 5 THEN reviewStage + 1 ELSE 5 END, nextReviewDate = :nextReviewDate, lastReviewedAt = :now, updatedAt = :now WHERE id = :id")
+    suspend fun advanceReviewStageAtomik(id: Long, nextReviewDate: Long, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE sorular SET note = :note, updatedAt = :now WHERE id = :id")
+    suspend fun updateNoteAtomik(id: Long, note: String?, now: Long = System.currentTimeMillis())
+
+    @Query("UPDATE sorular SET aiExplanation = :explanation, updatedAt = :now WHERE id = :id")
+    suspend fun updateAiExplanationAtomik(id: Long, explanation: String, now: Long = System.currentTimeMillis())
 
     @Query("SELECT * FROM sorular WHERE isFavorite = 1 ORDER BY createdAt DESC")
     fun getFavoriteSorular(): Flow<List<SoruEntity>>
@@ -165,7 +190,4 @@ interface SoruDao {
 
     @Query("DELETE FROM sorular")
     suspend fun clearAll()
-
-    @Query("DELETE FROM sorular")
-    suspend fun deleteAllSorular()
 }

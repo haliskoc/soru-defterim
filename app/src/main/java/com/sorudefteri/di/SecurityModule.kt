@@ -76,7 +76,8 @@ object SecurityModule {
         }
 
         // 2. Fallback: Standart SharedPreferences (cihaz Keystore'u bozuk veya desteklemiyorsa çökme önlenir)
-        Log.w(TAG, "Güvenlik fallback devreye girdi: Standart SharedPreferences kullanılıyor.")
+        // TODO: Fallback plaintext uyarı - kullanıcıya şifrelenmemiş saklama konusunda UI uyarısı gösterilmeli, activeApiKey cache ile birlikte değerlendir
+        Log.w(TAG, "Güvenlik fallback devreye girdi: Standart SharedPreferences kullanılıyor. UYARI: API anahtarları düz metin saklanacak!")
         return context.getSharedPreferences(ENCRYPTED_PREFS_NAME, Context.MODE_PRIVATE)
     }
 }

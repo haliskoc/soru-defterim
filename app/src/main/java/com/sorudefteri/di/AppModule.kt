@@ -44,6 +44,11 @@ object AppModule {
     @Singleton
     fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient {
         // 10 MB HTTP cache — özellikle GET /models için offline fallback
+        // NOT: offlineCache + forceCacheOnOffline çakışması: ikisi de Cache-Control manipüle ediyor.
+        // Sıra önemli: forceCacheOnOffline önce, offlineCache sonra uygulanırsa offline durumda
+        // maxAge(1 gün) ile FORCE_CACHE çakışabilir. İdeal: tek bir interceptor içinde online/offline mantığı birleştirilmeli
+        // veya CacheControl.FORCE_CACHE sadece offline ve GET /models dışındaki istekler için sınırlandırılmalı.
+        // Cache boyutu 10 MB; büyük model listeleri için yeterli, ancak CoIL ve diğer HTTP call'larla paylaşılıyor - ileride ayrı cache notu eklenebilir.
         val cacheSize = 10L * 1024 * 1024 // 10 MB
         val cache = Cache(File(context.cacheDir, "http_cache"), cacheSize)
 
@@ -132,7 +137,7 @@ object AppModule {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(60, TimeUnit.SECONDS)
+            .callTimeout(30, TimeUnit.SECONDS)
             .retryOnConnectionFailure(false)
             .build()
     }

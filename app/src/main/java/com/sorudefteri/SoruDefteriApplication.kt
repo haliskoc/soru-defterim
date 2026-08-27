@@ -11,6 +11,7 @@ import coil3.disk.directory
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
+import com.sorudefteri.data.backup.AutoBackupWorker
 import com.sorudefteri.data.worker.ReminderScheduler
 import dagger.hilt.android.HiltAndroidApp
 import okhttp3.OkHttpClient
@@ -39,6 +40,8 @@ class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Conf
         super.onCreate()
         // Her gün saat 19:00'da tetiklenecek Aralıklı Tekrar bildirimini zamanla
         ReminderScheduler.scheduleDailyReminder(this)
+        // Otomatik yerel yedek (WorkManager 24h periyodik) - ayarlar içinde toggle ile yönetilir, şimdilik varsayılan Wi-Fi only
+        AutoBackupWorker.schedulePeriodic(this)
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {

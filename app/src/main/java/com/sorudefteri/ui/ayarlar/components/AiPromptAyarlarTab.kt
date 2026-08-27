@@ -48,6 +48,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,9 +86,9 @@ fun AiPromptAyarlarTab(
     onFetchLiveModelsClick: (AiProviderType) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var isKeyVisible by remember { mutableStateOf(false) }
-    var isModelDropdownExpanded by remember { mutableStateOf(false) }
-    var expandedPromptType by remember { mutableStateOf<AiPromptType?>(null) }
+    var isKeyVisible by rememberSaveable { mutableStateOf(false) }
+    var isModelDropdownExpanded by rememberSaveable { mutableStateOf(false) }
+    var expandedPromptType by rememberSaveable { mutableStateOf<AiPromptType?>(null) }
 
     val currentKey = when (aiProvider) {
         AiProviderType.GEMINI -> geminiApiKey
@@ -329,10 +330,10 @@ private fun PromptAccordionItem(
                     fontWeight = FontWeight.Bold
                 )
 
-                IconButton(onClick = onToggleExpand, modifier = Modifier.size(32.dp)) {
+                IconButton(onClick = onToggleExpand, modifier = Modifier.size(48.dp)) {
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = null
+                        contentDescription = if (isExpanded) "Daralt" else "Genişlet"
                     )
                 }
             }

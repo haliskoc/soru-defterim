@@ -398,8 +398,12 @@ class FakeSoruDao : SoruDao {
         }
     }
 
-    override fun getDistinctTopicsBySubject(subjectId: String): Flow<List<String>> {
-        return getDistinctTopicsForSubject(subjectId)
+    override suspend fun getAllSorularList(): List<SoruEntity> {
+        return data.values.toList()
+    }
+
+    override suspend fun getSorularByIds(ids: List<Long>): List<SoruEntity> {
+        return data.values.filter { it.id in ids }
     }
 
     override fun getTotalCount(): Flow<Int> = flowEmitter.map { it.size }
@@ -518,7 +522,34 @@ class FakeSoruDao : SoruDao {
         emit()
     }
 
-    override suspend fun deleteAllSorular() {
-        clearAll()
+    override suspend fun updateCozumDurumuAtomik(id: Long, isSolved: Boolean, now: Long) {
+        val existing = data[id] ?: return
+        data[id] = existing.copy(isSolved = isSolved, solvedAt = if (isSolved) now else null, updatedAt = now)
+        emit()
+    }
+
+    override suspend fun updateFavoriteAtomik(id: Long, isFavorite: Boolean, now: Long) {
+        val existing = data[id] ?: return
+        data[id] = existing.copy(isFavorite = isFavorite, updatedAt = now)
+        emit()
+    }
+
+    override suspend fun advanceReviewStageAtomik(id: Long, nextReviewDate: Long, now: Long) {
+        val existing = data[id] ?: return
+        val newStage = if (existing.reviewStage < 5) existing.reviewStage + 1 else 5
+        data[id] = existing.copy(reviewStage = newStage, nextReviewDate = nextReviewDate, lastReviewedAt = now, updatedAt = now)
+        emit()
+    }
+
+    override suspend fun updateNoteAtomik(id: Long, note: String?, now: Long) {
+        val existing = data[id] ?: return
+        data[id] = existing.copy(note = note, updatedAt = now)
+        emit()
+    }
+
+    override suspend fun updateAiExplanationAtomik(id: Long, explanation: String, now: Long) {
+        val existing = data[id] ?: return
+        data[id] = existing.copy(aiExplanation = explanation, updatedAt = now)
+        emit()
     }
 }

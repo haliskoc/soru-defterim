@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
 import androidx.compose.material.icons.outlined.CheckCircleOutline
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -214,13 +215,14 @@ fun SoruKarti(
                                 shape = CircleShape,
                                 color = Color.Black.copy(alpha = 0.5f),
                                 modifier = Modifier
-                                    .size(28.dp)
+                                    .size(48.dp)
+                                    .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
                                     .clickable(enabled = onToggleFavorite != null) { onToggleFavorite?.invoke() }
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
                                         imageVector = if (soru.isFavorite) Icons.Default.Star else Icons.Default.StarBorder,
-                                        contentDescription = "Favori",
+                                        contentDescription = if (soru.isFavorite) "Favoriden Çıkar" else "Yıldızla",
                                         tint = if (soru.isFavorite) Color(0xFFFFB300) else Color.White,
                                         modifier = Modifier.size(16.dp)
                                     )

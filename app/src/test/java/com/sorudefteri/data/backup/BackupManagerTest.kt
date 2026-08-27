@@ -286,4 +286,81 @@ class BackupManagerTest {
         every { mockContentResolver.openInputStream(plainUri) } answers { FileInputStream(plainFile) }
         assertFalse("Şifresiz dosya şifreli algılanmamalı", backupManager.isBackupEncrypted(plainUri))
     }
+
+    @Test
+    fun legacyFallback_10000IterasyonluYedek_120000IleAcilamazsaOtomatikDenenir() = runTest {
+        // Eski iterasyon (10000) ile şifrelenmiş bir yedeği hazırla; yeni kodun fallback (120000 -> 10000) ile açabilmesi lazım
+        val password = "LegacyTestParola123!"
+        val soru = Soru(
+            id = 1L,
+            imagePath = tempFolder.newFile("test_img.jpg").apply { writeText("fake image") }.absolutePath,
+            examType = "TYT",
+            subjectId = "matematik",
+            topic = "Fonksiyonlar"
+        )
+        // Repo mock'u boş liste döndürse de, manuel zip oluşturup legacy ile şifreleyeceğiz
+        // Adım 1: Geçici ZIP oluştur (manifest + dummy image)
+        val plainZipFile = tempFolder.newFile("plain_legacy.zip")
+        ZipOutputStream(FileOutputStream(plainZipFile)).use { zos ->
+            val manifest = BackupManifest(
+                appSignature = "com.sorudefteri",
+                version = 2,
+                exportDate = System.currentTimeMillis(),
+                questionCount = 0,
+                sorular = emptyList()
+            )
+            val manifestJson = json.encodeToString(manifest)
+            zos.putNextEntry(ZipEntry("backup_manifest.json"))
+            zos.write(manifestJson.toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+        }
+
+        // Adım 2: Legacy PBKDF2 10000 ile şifrele
+        val legacySalt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+        val legacyIv = ByteArray(12).also { SecureRandom().nextBytes(it) }
+        val legacyKeySpec = PBEKeySpec(password.toCharArray(), legacySalt, 10000, 256)
+        val legacyKeyFactory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val legacyKeyBytes = legacyKeyFactory.generateSecret(legacyKeySpec).encoded
+        val legacySecret = SecretKeySpec(legacyKeyBytes, "AES")
+        val legacyCipher = Cipher.getInstance("AES/GCM/NoPadding").apply {
+            init(Cipher.ENCRYPT_MODE, legacySecret, GCMParameterSpec(128, legacyIv))
+        }
+        val encryptedFile = tempFolder.newFile("legacy_encrypted.sdefteri")
+        FileOutputStream(encryptedFile).use { out ->
+            out.write(MAGIC_HEADER)
+            out.write(legacySalt)
+            out.write(legacyIv)
+            CipherOutputStream(out, legacyCipher).use { cipherOut ->
+                FileInputStream(plainZipFile).use { fis ->
+                    fis.copyTo(cipherOut)
+                }
+            }
+        }
+
+        // Adım 3: BackupManager ile şifre çöz ve import et — yeni kod önce 120000 dener, başarısız olunca 10000 fallback'a düşer
+        val mockUri = mockk<Uri>()
+        every { mockContentResolver.openInputStream(mockUri) } answers { FileInputStream(encryptedFile) }
+        // Repo insert çağrısını mockla
+        coEvery { mockSoruRepository.getAllSorular() } returns flowOf(emptyList())
+        coEvery { mockSoruRepository.insertAllSorular(any()) } returns emptyList()
+        coEvery { mockGorselDepo.kaydetDosyadan(any(), any()) } returns "/fake/path.jpg"
+
+        val result = backupManager.importBackup(mockUri, password = password)
+        assertTrue("Legacy 10000 iterasyonlu yedek fallback ile açılabilmeli: ${result.exceptionOrNull()?.message}", result.isSuccess)
+    }
+
+    @Test
+    fun zipSlip_ikinciVaryant_absolutePath_engellenir() = runTest {
+        val maliciousZipFile = tempFolder.newFile("malicious2.zip")
+        ZipOutputStream(FileOutputStream(maliciousZipFile)).use { zos ->
+            val entry = ZipEntry("/etc/passwd")
+            zos.putNextEntry(entry)
+            zos.write("root:x:0:0".toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+        }
+        val mockUri = mockk<Uri>()
+        every { mockContentResolver.openInputStream(mockUri) } answers { FileInputStream(maliciousZipFile) }
+        val result = backupManager.importBackup(mockUri, password = null)
+        assertTrue("Absolute path traversal engellenmeli", result.isFailure)
+    }
 }

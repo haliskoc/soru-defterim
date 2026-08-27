@@ -40,7 +40,9 @@ data class AyarlarUiState(
     val isModelFetchError: Boolean = false,
     val isBackupLoading: Boolean = false,
     val backupMessage: String? = null,
-    val isBackupError: Boolean = false
+    val isBackupError: Boolean = false,
+    val isAutoBackupEnabled: Boolean = false,
+    val isWifiOnly: Boolean = true
 )
 
 private data class DynamicModelsInfo(
@@ -84,14 +86,36 @@ class AyarlarViewModel @Inject constructor(
         ayarlarDataStore.nvidiaModel
     ) { groqMod, nvidiaKey, nvidiaMod -> Triple(groqMod, nvidiaKey, nvidiaMod) }
 
-    private val secondaryFlow = combine(
+    private val backupPrefsFlow = combine(
+        ayarlarDataStore.isAutoBackupEnabled,
+        ayarlarDataStore.isWifiOnlyBackup
+    ) { auto, wifi -> auto to wifi }
+
+    private val baseSecondaryFlow = combine(
         nvidiaCombinedFlow,
         ayarlarDataStore.themeMode,
         _dynamicModelsState,
         _modelStatusState,
         _backupState
     ) { triple, theme, dynModels, modelStatus, backup ->
-        AyarlarPrefGroup2(triple.first, triple.second, triple.third, theme, dynModels, modelStatus, backup)
+        AyarlarPrefGroup2Base(triple.first, triple.second, triple.third, theme, dynModels, modelStatus, backup)
+    }
+
+    private val secondaryFlow = combine(
+        baseSecondaryFlow,
+        backupPrefsFlow
+    ) { base, prefs ->
+        AyarlarPrefGroup2(
+            groqMod = base.groqMod,
+            nvidiaKey = base.nvidiaKey,
+            nvidiaMod = base.nvidiaMod,
+            theme = base.theme,
+            dynModels = base.dynModels,
+            modelStatus = base.modelStatus,
+            backup = base.backup,
+            isAutoBackupEnabled = prefs.first,
+            isWifiOnly = prefs.second
+        )
     }
 
     val uiState: StateFlow<AyarlarUiState> = combine(
@@ -116,7 +140,9 @@ class AyarlarViewModel @Inject constructor(
             isModelFetchError = p2.modelStatus.second,
             isBackupLoading = p2.backup.isLoading,
             backupMessage = p2.backup.message,
-            isBackupError = p2.backup.isError
+            isBackupError = p2.backup.isError,
+            isAutoBackupEnabled = p2.isAutoBackupEnabled,
+            isWifiOnly = p2.isWifiOnly
         )
     }.stateIn(
         scope = viewModelScope,
@@ -178,6 +204,21 @@ class AyarlarViewModel @Inject constructor(
         }
     }
 
+    fun setAutoBackupEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            ayarlarDataStore.setAutoBackupEnabled(enabled)
+            if (enabled) {
+                // schedule will be handled by Application observer; immediate trigger via datastore
+            }
+        }
+    }
+
+    fun setWifiOnly(enabled: Boolean) {
+        viewModelScope.launch {
+            ayarlarDataStore.setWifiOnlyBackup(enabled)
+        }
+    }
+
     fun fetchLiveModels(provider: AiProviderType) {
         viewModelScope.launch {
             _dynamicModelsState.update { it.copy(isFetching = true) }
@@ -230,26 +271,29 @@ class AyarlarViewModel @Inject constructor(
         }
     }
 
+    @Deprecated("Drive senkron kaldırıldı, yerel yedek kullanın", ReplaceWith("exportBackup(uri, password)"))
     fun shareBackupToDriveOrCloud(context: android.content.Context, password: String? = null) {
         viewModelScope.launch {
-            _backupState.value = BackupState(isLoading = true, message = "Google Drive / Bulut yedek paketi hazırlanıyor...")
+            _backupState.value = BackupState(isLoading = true, message = "Yerel yedek paketi hazırlanıyor (Bulut kaldırıldı)...")
             val result = backupManager.exportBackupToTempFile(password)
             result.onSuccess { (file, count) ->
                 _backupState.value = BackupState(
                     isLoading = false,
-                    message = "$count soru hazırlandı. Bulut / Drive paylaşım menüsü açılıyor...",
+                    message = "$count soru hazırlandı. Paylaşım menüsü açılıyor...",
                     isError = false
                 )
                 com.sorudefteri.ui.ortak.ShareHelper.shareBackupFile(context, file)
             }.onFailure { e ->
                 _backupState.value = BackupState(
                     isLoading = false,
-                    message = "Bulut yedekleme hatası: ${e.localizedMessage}",
+                    message = "Yedekleme hatası: ${e.localizedMessage}",
                     isError = true
                 )
             }
         }
     }
+
+    fun shareBackupFile(context: android.content.Context, password: String? = null) = shareBackupToDriveOrCloud(context, password)
 
     fun importBackup(sourceUri: Uri, password: String? = null) {
         viewModelScope.launch {
@@ -300,7 +344,7 @@ private data class AyarlarPrefGroup1(
     val geminiMod: String
 )
 
-private data class AyarlarPrefGroup2(
+private data class AyarlarPrefGroup2Base(
     val groqMod: String,
     val nvidiaKey: String,
     val nvidiaMod: String,
@@ -308,5 +352,17 @@ private data class AyarlarPrefGroup2(
     val dynModels: DynamicModelsInfo,
     val modelStatus: Pair<String?, Boolean>,
     val backup: BackupState
+)
+
+private data class AyarlarPrefGroup2(
+    val groqMod: String,
+    val nvidiaKey: String,
+    val nvidiaMod: String,
+    val theme: Int,
+    val dynModels: DynamicModelsInfo,
+    val modelStatus: Pair<String?, Boolean>,
+    val backup: BackupState,
+    val isAutoBackupEnabled: Boolean,
+    val isWifiOnly: Boolean
 )
 

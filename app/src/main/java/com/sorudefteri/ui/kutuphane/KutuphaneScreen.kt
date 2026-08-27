@@ -80,14 +80,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -142,10 +147,10 @@ fun KutuphaneScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
 
-    var showBottomSheet by remember { mutableStateOf(false) }
-    var sortMenuExpanded by remember { mutableStateOf(false) }
-    var showBatchDeleteDialog by remember { mutableStateOf(false) }
-    var selectedTabletSoruId by remember { mutableStateOf<Long?>(null) }
+    var showBottomSheet by rememberSaveable { mutableStateOf(false) }
+    var sortMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    var showBatchDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    var selectedTabletSoruId by rememberSaveable { mutableStateOf<Long?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     val deleteSoruWithUndo: (Soru) -> Unit = { soru ->
@@ -328,7 +333,7 @@ fun KutuphaneScreen(
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                         ) {
-                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Check, contentDescription = "Çözüldü İşaretle", modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Çözüldü")
                         }
@@ -337,7 +342,7 @@ fun KutuphaneScreen(
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300))
                         ) {
-                            Icon(Icons.Default.Star, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.Black)
+                            Icon(Icons.Default.Star, contentDescription = "Yıldızla", modifier = Modifier.size(16.dp), tint = Color.Black)
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Yıldızla", color = Color.Black)
                         }
@@ -346,7 +351,7 @@ fun KutuphaneScreen(
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                         ) {
-                            Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Delete, contentDescription = "Sil", modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
                             Text("Sil")
                         }
@@ -358,7 +363,7 @@ fun KutuphaneScreen(
             if (!uiState.isSelectionMode) {
                 ExtendedFloatingActionButton(
                     onClick = { showBottomSheet = true },
-                    icon = { Icon(Icons.Default.Add, contentDescription = null) },
+                    icon = { Icon(Icons.Default.Add, contentDescription = "Soru Ekle") },
                     text = { Text("Soru Ekle", fontWeight = FontWeight.Bold) },
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -618,6 +623,7 @@ private fun QuestionListHeaderAndGrid(
     onOpenBottomSheet: () -> Unit,
     minGridSize: androidx.compose.ui.unit.Dp
 ) {
+    val focusManager = LocalFocusManager.current
     Column(modifier = Modifier.fillMaxSize()) {
         // Arama Çubuğu
         OutlinedTextField(
@@ -651,6 +657,8 @@ private fun QuestionListHeaderAndGrid(
             },
             shape = RoundedCornerShape(14.dp),
             singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MaterialTheme.colorScheme.primary,
                 unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
@@ -726,7 +734,7 @@ private fun QuestionListHeaderAndGrid(
                     start = 16.dp,
                     end = 16.dp,
                     top = 8.dp,
-                    bottom = if (uiState.isSelectionMode) 88.dp else 88.dp
+                    bottom = if (uiState.isSelectionMode) 96.dp else 88.dp
                 ),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),

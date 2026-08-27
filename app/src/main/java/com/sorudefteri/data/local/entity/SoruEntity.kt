@@ -1,6 +1,7 @@
 package com.sorudefteri.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.sorudefteri.domain.model.HataTipi
 import com.sorudefteri.domain.model.Soru
@@ -8,7 +9,18 @@ import com.sorudefteri.domain.model.Soru
 /**
  * Soruların Room veritabanı tablosundaki karşılığı
  */
-@Entity(tableName = "sorular")
+@Entity(
+    tableName = "sorular",
+    indices = [
+        Index(value = ["examType"]),
+        Index(value = ["subjectId"]),
+        Index(value = ["topic"]),
+        Index(value = ["mistakeType"]),
+        Index(value = ["isSolved"]),
+        Index(value = ["isFavorite"]),
+        Index(value = ["createdAt"])
+    ]
+)
 data class SoruEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,

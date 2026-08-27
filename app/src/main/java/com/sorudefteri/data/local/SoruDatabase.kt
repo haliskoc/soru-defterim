@@ -15,7 +15,7 @@ import com.sorudefteri.data.local.entity.TestSonucEntity
 @Database(
     entities = [SoruEntity::class, TestSonucEntity::class],
     version = 5,
-    exportSchema = false
+    exportSchema = true
 )
 abstract class SoruDatabase : RoomDatabase() {
 

@@ -43,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -63,7 +62,7 @@ enum class DrawingTool {
 }
 
 data class DrawPath(
-    val points: List<Offset>,
+    val path: Path,
     val color: Color,
     val strokeWidth: Float,
     val isHighlighter: Boolean = false,
@@ -72,6 +71,7 @@ data class DrawPath(
 
 /**
  * Soru görseli üzerinde öğrencinin karalama, işlem yapma ve altını çizme yapmasını sağlayan çizim tahtası.
+ * Path lineTo ile O(1) ekleme; liste copy kaldırıldı.
  */
 @Composable
 fun DrawingCanvasDialog(
@@ -81,21 +81,22 @@ fun DrawingCanvasDialog(
 ) {
     val paths = remember { mutableStateListOf<DrawPath>() }
     var currentTool by remember { mutableStateOf(DrawingTool.PEN) }
-    var selectedColor by remember { mutableStateOf(Color(0xFFE53935)) } // Varsayılan Kırmızı
+    var selectedColor by remember { mutableStateOf(Color(0xFFE53935)) }
     var strokeWidth by remember { mutableFloatStateOf(6f) }
 
     val colors = listOf(
-        Color(0xFFE53935), // Kırmızı
-        Color(0xFF1E88E5), // Mavi
-        Color(0xFF43A047), // Yeşil
-        Color(0xFFFB8C00), // Turuncu
-        Color(0xFF8E24AA), // Mor
-        Color(0xFFFDD835), // Sarı
-        Color(0xFFFFFFFF), // Beyaz
-        Color(0xFF212121)  // Siyah
+        Color(0xFFE53935),
+        Color(0xFF1E88E5),
+        Color(0xFF43A047),
+        Color(0xFFFB8C00),
+        Color(0xFF8E24AA),
+        Color(0xFFFDD835),
+        Color(0xFFFFFFFF),
+        Color(0xFF212121)
     )
 
-    var currentPathPoints by remember { mutableStateOf<List<Offset>>(emptyList()) }
+    // Path tabanlı çizim: O(n) liste copy yerine Path.lineTo ile O(1)
+    var currentPath by remember { mutableStateOf<Path?>(null) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -104,9 +105,10 @@ fun DrawingCanvasDialog(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF121212))
+                // Hard-coded 0xFF121212 yerine theme surface kullan (dark theme uyumu)
+                // Eski: Color(0xFF121212) ; Yeni: MaterialTheme.colorScheme.surface veya background
+                .background(MaterialTheme.colorScheme.surface)
         ) {
-            // 1. Arka Plan Soru Görseli
             val imageModel = remember(imagePath) {
                 if (imagePath.startsWith("http") || imagePath.startsWith("content://")) imagePath else File(imagePath)
             }
@@ -124,111 +126,105 @@ fun DrawingCanvasDialog(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // 2. Çizim Katmanı (Canvas)
                 Canvas(
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(currentTool, selectedColor, strokeWidth) {
                             detectDragGestures(
                                 onDragStart = { offset ->
-                                    currentPathPoints = listOf(offset)
+                                    // Yeni Path başlat - lineTo ile devam edecek, liste copy yok
+                                    currentPath = Path().apply { moveTo(offset.x, offset.y) }
                                 },
                                 onDrag = { change, _ ->
                                     change.consume()
-                                    currentPathPoints = currentPathPoints + change.position
+                                    // O(1) ekleme
+                                    currentPath?.lineTo(change.position.x, change.position.y)
                                 },
                                 onDragEnd = {
-                                    if (currentPathPoints.isNotEmpty()) {
-                                        val effectiveColor = when (currentTool) {
-                                            DrawingTool.HIGHLIGHTER -> selectedColor.copy(alpha = 0.35f)
-                                            DrawingTool.ERASER -> Color.Transparent
-                                            DrawingTool.PEN -> selectedColor
-                                        }
-                                        val effectiveWidth = when (currentTool) {
-                                            DrawingTool.HIGHLIGHTER -> strokeWidth * 3f
-                                            DrawingTool.ERASER -> strokeWidth * 4f
-                                            DrawingTool.PEN -> strokeWidth
-                                        }
-                                        paths.add(
-                                            DrawPath(
-                                                points = currentPathPoints,
-                                                color = effectiveColor,
-                                                strokeWidth = effectiveWidth,
-                                                isHighlighter = currentTool == DrawingTool.HIGHLIGHTER,
-                                                isEraser = currentTool == DrawingTool.ERASER
+                                    currentPath?.let { path ->
+                                        // Path boş değilse kaydet
+                                        if (!path.isEmpty) {
+                                            val effectiveColor = when (currentTool) {
+                                                DrawingTool.HIGHLIGHTER -> selectedColor.copy(alpha = 0.35f)
+                                                DrawingTool.ERASER -> Color.Transparent
+                                                DrawingTool.PEN -> selectedColor
+                                            }
+                                            val effectiveWidth = when (currentTool) {
+                                                DrawingTool.HIGHLIGHTER -> strokeWidth * 3f
+                                                DrawingTool.ERASER -> strokeWidth * 4f
+                                                DrawingTool.PEN -> strokeWidth
+                                            }
+                                            paths.add(
+                                                DrawPath(
+                                                    path = path,
+                                                    color = effectiveColor,
+                                                    strokeWidth = effectiveWidth,
+                                                    isHighlighter = currentTool == DrawingTool.HIGHLIGHTER,
+                                                    isEraser = currentTool == DrawingTool.ERASER
+                                                )
                                             )
-                                        )
-                                        currentPathPoints = emptyList()
+                                        }
                                     }
+                                    currentPath = null
+                                },
+                                onDragCancel = {
+                                    currentPath = null
                                 }
                             )
                         }
                 ) {
-                    // Kaydedilen çizgileri çiz
+                    // Kaydedilen çizgileri çiz (Path doğrudan)
                     paths.forEach { drawPath ->
-                        if (drawPath.points.size > 1) {
-                            val path = Path().apply {
-                                moveTo(drawPath.points.first().x, drawPath.points.first().y)
-                                for (i in 1 until drawPath.points.size) {
-                                    lineTo(drawPath.points[i].x, drawPath.points[i].y)
-                                }
-                            }
-                            if (drawPath.isEraser) {
-                                drawPath(
-                                    path = path,
-                                    color = Color(0xFF121212),
-                                    style = Stroke(
-                                        width = drawPath.strokeWidth,
-                                        cap = StrokeCap.Round,
-                                        join = StrokeJoin.Round
-                                    )
+                        if (drawPath.isEraser) {
+                            drawPath(
+                                path = drawPath.path,
+                                color = Color(0xFF121212),
+                                style = Stroke(
+                                    width = drawPath.strokeWidth,
+                                    cap = StrokeCap.Round,
+                                    join = StrokeJoin.Round
                                 )
-                            } else {
-                                drawPath(
-                                    path = path,
-                                    color = drawPath.color,
-                                    style = Stroke(
-                                        width = drawPath.strokeWidth,
-                                        cap = StrokeCap.Round,
-                                        join = StrokeJoin.Round
-                                    )
+                            )
+                        } else {
+                            drawPath(
+                                path = drawPath.path,
+                                color = drawPath.color,
+                                style = Stroke(
+                                    width = drawPath.strokeWidth,
+                                    cap = StrokeCap.Round,
+                                    join = StrokeJoin.Round
                                 )
-                            }
+                            )
                         }
                     }
 
                     // Anlık çizilen çizgiyi göster
-                    if (currentPathPoints.size > 1) {
-                        val activePath = Path().apply {
-                            moveTo(currentPathPoints.first().x, currentPathPoints.first().y)
-                            for (i in 1 until currentPathPoints.size) {
-                                lineTo(currentPathPoints[i].x, currentPathPoints[i].y)
+                    currentPath?.let { activePath ->
+                        if (!activePath.isEmpty) {
+                            val previewColor = when (currentTool) {
+                                DrawingTool.HIGHLIGHTER -> selectedColor.copy(alpha = 0.35f)
+                                DrawingTool.ERASER -> Color.White.copy(alpha = 0.5f)
+                                DrawingTool.PEN -> selectedColor
                             }
-                        }
-                        val previewColor = when (currentTool) {
-                            DrawingTool.HIGHLIGHTER -> selectedColor.copy(alpha = 0.35f)
-                            DrawingTool.ERASER -> Color.White.copy(alpha = 0.5f)
-                            DrawingTool.PEN -> selectedColor
-                        }
-                        val previewWidth = when (currentTool) {
-                            DrawingTool.HIGHLIGHTER -> strokeWidth * 3f
-                            DrawingTool.ERASER -> strokeWidth * 4f
-                            DrawingTool.PEN -> strokeWidth
-                        }
-                        drawPath(
-                            path = activePath,
-                            color = previewColor,
-                            style = Stroke(
-                                width = previewWidth,
-                                cap = StrokeCap.Round,
-                                join = StrokeJoin.Round
+                            val previewWidth = when (currentTool) {
+                                DrawingTool.HIGHLIGHTER -> strokeWidth * 3f
+                                DrawingTool.ERASER -> strokeWidth * 4f
+                                DrawingTool.PEN -> strokeWidth
+                            }
+                            drawPath(
+                                path = activePath,
+                                color = previewColor,
+                                style = Stroke(
+                                    width = previewWidth,
+                                    cap = StrokeCap.Round,
+                                    join = StrokeJoin.Round
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }
 
-            // 3. Üst Başlık ve Kapatma Çubuğu
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -287,7 +283,6 @@ fun DrawingCanvasDialog(
                 }
             }
 
-            // 4. Alt Araç ve Renk Paleti
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -297,7 +292,6 @@ fun DrawingCanvasDialog(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E1E).copy(alpha = 0.95f))
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    // Araç Seçimi (Kalem, Vurgulayıcı, Silgi)
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly,
@@ -327,7 +321,6 @@ fun DrawingCanvasDialog(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Renk Seçimi
                     if (currentTool != DrawingTool.ERASER) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),

@@ -114,10 +114,10 @@ fun OnboardingScreen(
         ),
         FeaturePage(
             title = "Şifreli Güvenlik & Offline Çalışma",
-            description = "Soru arşiviniz tamamen cihazınızda saklanır ve çevrimdışı kullanılabilir. API anahtarlarınız donanım destekli AES-256 GCM ile şifrelenir. Tek dokunuşla tam yedekleme paketi oluşturup Google Drive'da saklayın.",
+            description = "Soru arşiviniz tamamen cihazınızda saklanır ve çevrimdışı kullanılabilir. API anahtarlarınız donanım destekli AES-256 GCM ile şifrelenir. Tek dokunuşla şifreli yedek paketi oluşturup yerel depolamada güvenle saklayın.",
             icon = Icons.Default.Security,
             iconGradient = listOf(Color(0xFF3B82F6), Color(0xFF1D4ED8)),
-            tags = listOf("AES-256 Şifreleme", "100% Çevrimdışı", "ZIP Yedekleme", "Google Drive Desteği")
+            tags = listOf("AES-256 Şifreleme", "100% Çevrimdışı", "ZIP Yedekleme", "Yerel Depolama")
         )
     )
 

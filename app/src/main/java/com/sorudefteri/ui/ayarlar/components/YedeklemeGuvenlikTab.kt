@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDone
-import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FolderZip
 import androidx.compose.material.icons.filled.Key
@@ -40,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -52,14 +52,16 @@ fun YedeklemeGuvenlikTab(
     isBackupLoading: Boolean,
     backupMessage: String?,
     isBackupError: Boolean,
+    isAutoBackupEnabled: Boolean = false,
+    isWifiOnly: Boolean = true,
     onExportBackup: (Uri, String?) -> Unit,
     onImportBackup: (Uri, String?) -> Unit,
+    onAutoBackupToggle: (Boolean) -> Unit = {},
+    onWifiOnlyToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var exportPassword by remember { mutableStateOf("") }
-    var importPassword by remember { mutableStateOf("") }
-    var isAutoBackupEnabled by remember { mutableStateOf(true) }
-    var isWifiOnly by remember { mutableStateOf(true) }
+    var exportPassword by rememberSaveable { mutableStateOf("") }
+    var importPassword by rememberSaveable { mutableStateOf("") }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -170,7 +172,7 @@ fun YedeklemeGuvenlikTab(
             }
         }
 
-        // 2. Google Drive & Wi-Fi Otomasyonu
+        // 2. Otomatik Yedekleme (Yerel) & Wi-Fi Otomasyonu
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -179,10 +181,10 @@ fun YedeklemeGuvenlikTab(
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.CloudUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(Icons.Default.FolderZip, contentDescription = "Otomatik Yedekleme", tint = MaterialTheme.colorScheme.primary)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Otomatik Yedekleme & Drive Senkronu",
+                        text = "Otomatik Yedekleme (Yerel)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -197,14 +199,14 @@ fun YedeklemeGuvenlikTab(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("Günlük Arka Plan Yedeklemesi", fontWeight = FontWeight.SemiBold)
                         Text(
-                            "WorkManager ile her 24 saatte bir otomatik yedek alınır.",
+                            "WorkManager ile her 24 saatte bir otomatik yedek alınır (Yerel klasöre).",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
                         checked = isAutoBackupEnabled,
-                        onCheckedChange = { isAutoBackupEnabled = it }
+                        onCheckedChange = onAutoBackupToggle
                     )
                 }
 
@@ -216,7 +218,7 @@ fun YedeklemeGuvenlikTab(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Wifi, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Wifi, contentDescription = "Wi-Fi", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Yalnızca Wi-Fi Bağlıyken", fontWeight = FontWeight.SemiBold)
                         }
@@ -228,7 +230,7 @@ fun YedeklemeGuvenlikTab(
                     }
                     Switch(
                         checked = isWifiOnly,
-                        onCheckedChange = { isWifiOnly = it }
+                        onCheckedChange = onWifiOnlyToggle
                     )
                 }
             }

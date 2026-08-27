@@ -7,8 +7,8 @@ import androidx.core.content.FileProvider
 import java.io.File
 
 /**
- * Soruların, çözümlerin ve yedek paketlerinin WhatsApp, Telegram, Google Drive,
- * e-posta ve diğer uygulamalarla paylaşılmasını sağlayan yardımcı sınıf.
+ * Soruların, çözümlerin ve yedek paketlerinin WhatsApp, Telegram,
+ * e-posta ve diğer uygulamalarla (yerel paylaşım) paylaşılmasını sağlayan yardımcı sınıf.
  */
 object ShareHelper {
 
@@ -65,7 +65,7 @@ object ShareHelper {
     }
 
     /**
-     * .sdefteri yedek dosyasını doğrudan Google Drive, WhatsApp veya Dosyalar ile paylaşır.
+     * .sdefteri yedek dosyasını doğrudan yerel paylaşım (Dosyalar, WhatsApp vb.) ile paylaşır - Drive senkron kaldırıldı.
      */
     fun shareBackupFile(context: Context, backupFile: File) {
         try {
@@ -81,11 +81,11 @@ object ShareHelper {
                 type = "application/zip"
                 putExtra(Intent.EXTRA_STREAM, contentUri)
                 putExtra(Intent.EXTRA_SUBJECT, "Soru Defterim Yedek Paketi")
-                putExtra(Intent.EXTRA_TEXT, "Soru Defterim arşiv yedek paketi (.sdefteri). Uygulama içinden Ayarlar > İçe Aktar ile yükleyebilirsiniz.")
+                putExtra(Intent.EXTRA_TEXT, "Soru Defterim arşiv yedek paketi (.sdefteri) - Yalnızca yerel. Uygulama içinden Ayarlar > İçe Aktar ile yükleyebilirsiniz.")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 
-            val chooser = Intent.createChooser(shareIntent, "Yedeği Google Drive veya Uygulamalarla Paylaş")
+            val chooser = Intent.createChooser(shareIntent, "Yedeği Paylaş (Yerel)")
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(chooser)
         } catch (e: Exception) {

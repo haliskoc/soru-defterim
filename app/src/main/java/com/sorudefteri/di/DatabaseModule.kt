@@ -2,6 +2,7 @@ package com.sorudefteri.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.room.RoomDatabase
 import com.sorudefteri.data.local.SoruDatabase
 import com.sorudefteri.data.local.dao.SoruDao
 import com.sorudefteri.data.local.dao.TestSonucDao
@@ -30,7 +31,7 @@ object DatabaseModule {
                 SoruDatabase.MIGRATION_3_4,
                 SoruDatabase.MIGRATION_4_5
             )
-            .fallbackToDestructiveMigrationOnDowngrade()
+            .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
             .build()
     }
 

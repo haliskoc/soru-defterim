@@ -338,7 +338,7 @@ open class GeminiProvider @Inject constructor(
 
             if (isRetryable && attempt < MAX_RETRIES - 1) {
                 val base = 1000L * (1L shl attempt) // 1s, 2s, 4s
-                val jitter = (0..500).random().toLong()
+                val jitter = (500..1000).random().toLong()
                 delay(base + jitter)
             } else {
                 break
@@ -353,17 +353,14 @@ open class GeminiProvider @Inject constructor(
         if (throwable is kotlinx.coroutines.CancellationException) return false
         if (throwable is AiException) {
             // 404 MODEL_UNAVAILABLE retry edilmez (model bulunamadı kalıcı hata)
-            // QUOTA_EXCEEDED de retry edilmez - kullanıcı beklemeli; ama transient 429 için 1 kez retry istenir.
-            // NETWORK_* ve 5xx transient
+            // QUOTA_EXCEEDED retry edilmez - kota doluyken retry kota yakar
+            // Sadece NETWORK_* ve 5xx (MODEL_UNAVAILABLE non-404) transient retry
             return throwable.errorType == AiErrorType.NETWORK_TIMEOUT ||
                     throwable.errorType == AiErrorType.NETWORK_ERROR ||
-                    (throwable.errorType == AiErrorType.MODEL_UNAVAILABLE && !throwable.message.orEmpty().contains("404")) ||
-                    throwable.errorType == AiErrorType.QUOTA_EXCEEDED
+                    (throwable.errorType == AiErrorType.MODEL_UNAVAILABLE && !throwable.message.orEmpty().contains("404"))
         }
         val msg = throwable.message.orEmpty().lowercase()
-        return msg.contains("429") ||
-                msg.contains("rate limit") ||
-                msg.contains("500") ||
+        return msg.contains("500") ||
                 msg.contains("502") ||
                 msg.contains("503") ||
                 msg.contains("504") ||

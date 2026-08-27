@@ -134,7 +134,8 @@ open class BackupManager @Inject constructor(
     }
 
     /**
-     * Bulut / Google Drive senkronizasyonu veya yerel otomatik yedekleme için geçici dosyaya yazar.
+     * Yerel otomatik yedekleme (filesDir/backups) veya SAF ile dışa aktarım için geçici dosyaya yazar.
+     * Local-only: Bulut / Google Drive senkronizasyonu kaldırıldı.
      * @param password Opsiyonel şifreleme parolası
      */
     suspend fun exportBackupToTempFile(password: String? = null): Result<Pair<File, Int>> = withContext(Dispatchers.IO) {
@@ -152,10 +153,12 @@ open class BackupManager @Inject constructor(
 
     /**
      * İç akışa yedekleme verilerini yazar. Parola varsa şifreleme katmanı uygulanır.
+     * Local-only: Bulut/Drive senkronizasyonu yok, sadece cihaz içi / SAF Uri ile dışa aktarım.
      */
     private suspend fun exportBackupToStream(outputStream: OutputStream, password: String?): Result<Int> = withContext(Dispatchers.IO) {
         val tempZipFile = File(context.cacheDir, "temp_export_${UUID.randomUUID()}.zip")
         try {
+            // TODO(P0): getAllSorular().first() tüm soruları tek seferde belleğe yükler; büyük arşivde streaming/paging (Flow chunk veya paging) ile değiştirilmeli.
             val sorular = soruRepository.getAllSorular().first()
             val backupItems = mutableListOf<BackupSoruItem>()
 
@@ -166,6 +169,7 @@ open class BackupManager @Inject constructor(
 
                     for ((index, soru) in sorular.withIndex()) {
                         val soruFile = File(soru.imagePath)
+                        // TODO(P0): ZIP entry isimleri deterministic olmalı (örn. soru ID / hash tabanlı); UUID rastgeleliği tekrarlanabilirliği ve diff'i zorlaştırır. Mevcut davranış korunuyor.
                         val uniqueImageName = "images/soru_${index}_${UUID.randomUUID()}.jpg"
 
                         if (soruFile.exists() && soruFile.isFile) {
@@ -183,6 +187,7 @@ open class BackupManager @Inject constructor(
                         if (!soru.solutionImagePath.isNullOrBlank()) {
                             val solutionFile = File(soru.solutionImagePath)
                             if (solutionFile.exists() && solutionFile.isFile) {
+                                // TODO(P0): Deterministic isim için aynı not — çözüm görseli de ID tabanlı isimlendirmeye geçebilir.
                                 uniqueSolutionName = "images/cozum_${index}_${UUID.randomUUID()}.jpg"
                                 zipOut.putNextEntry(ZipEntry(uniqueSolutionName))
                                 FileInputStream(solutionFile).use { fileIn ->
@@ -305,7 +310,8 @@ open class BackupManager @Inject constructor(
 
             // Dosya akışını tamponlayarak başlığı kontrol et
             val bufferedIn = BufferedInputStream(rawInputStream)
-            bufferedIn.mark(MAGIC_HEADER.size + 1)
+            // P0-01: mark limiti MAGIC+SALT+IV+1 olmalı; aksi halde reset() başa saramaz ve şifreli dosya şifresiz sanılır
+            bufferedIn.mark(MAGIC_HEADER.size + SALT_LENGTH + IV_LENGTH + 1)
             val headerBuffer = ByteArray(MAGIC_HEADER.size)
             val readHeaderSize = bufferedIn.read(headerBuffer)
             val isEncrypted = readHeaderSize == MAGIC_HEADER.size && headerBuffer.contentEquals(MAGIC_HEADER)
@@ -356,18 +362,18 @@ open class BackupManager @Inject constructor(
                 val isAuthFailure = msg.contains("tag mismatch") || msg.contains("mac check") || msg.contains("bad tag") || msg.contains("pad block") || e is javax.crypto.AEADBadTagException || e.cause is javax.crypto.AEADBadTagException
                 if (isAuthFailure && isEncrypted && encryptedSalt != null && encryptedIv != null) {
                     // Eski iterasyonla tekrar dene
+                    // P0-01 FIX: legacy fallback offset bug düzeltildi — önceki kod skip(MAGIC_HEADER) + read(header/salt/iv) ile çifte ilerletme yapıyordu.
+                    // Doğrusu: sadece read(header/salt/iv) bırak, skip kaldır.
                     try {
                         try { zipInputStream.close() } catch (_: Exception) {}
                         try { bufferedIn.close() } catch (_: Exception) {}
                         try { rawInputStream.close() } catch (_: Exception) {}
+                        // P0: kısmi/bozuk çıkarım kalıntılarını temizle, aksi halde ikinci denemede eski dosyalar kalabilir
+                        try { tempExtractDir.deleteRecursively(); tempExtractDir.mkdirs() } catch (_: Exception) {}
                         val newRaw = context.contentResolver.openInputStream(sourceUri)
                             ?: throw Exception("Yedek dosyası yeniden açılamadı")
                         val newBuffered = BufferedInputStream(newRaw)
-                        newBuffered.skip(MAGIC_HEADER.size.toLong())
-                        // salt ve iv zaten okundu, onları atla — ama stream başında olduklarından tekrar atla
-                        // Yeni stream'de header+ salt+iv tekrar okunmalı — salt/iv elimizde var, sadece stream'i ilerlet
-                        // Header'ı atla ve salt/iv boyutunu atla (gerçek stream'de header+SUPER)
-                        // Basit: yeni stream'de header'ı oku ve atla, sonra salt/iv atla
+                        // Sadece header/salt/iv'i oku ve geç (skip kaldırıldı)
                         val skipHeader = ByteArray(MAGIC_HEADER.size)
                         newBuffered.read(skipHeader)
                         val skipSalt = ByteArray(SALT_LENGTH)

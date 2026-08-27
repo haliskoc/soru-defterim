@@ -1,34 +1,36 @@
 package com.sorudefteri.ui.soruekle
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.background
+import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -47,8 +49,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -61,7 +65,7 @@ import com.sorudefteri.ui.soruekle.components.OcrResultPreviewSection
 import com.sorudefteri.ui.soruekle.components.SoruEklemeTopBar
 import com.sorudefteri.ui.soruekle.components.SoruMetadataSection
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SoruEklemeScreen(
     onNavigateBack: () -> Unit,
@@ -72,22 +76,59 @@ fun SoruEklemeScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val focusManager = LocalFocusManager.current
+    val bringIntoViewRequester = remember { BringIntoViewRequester() }
+    val context = LocalContext.current
 
-    // Kamera veya Galeri'den dönen görseli ayarla
+    // --- Recompose fix: launchers SoruEklemeScreen seviyesinde (GorselSeciciSection içinden taşındı) ---
+    val soruGalleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            uri?.let {
+                // Uri persist: takePersistableUriPermission veya hemen GorselDepo'ya kopyala
+                try {
+                    context.contentResolver.takePersistableUriPermission(
+                        it,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: SecurityException) {
+                } catch (_: Exception) {
+                }
+                // Hemen GorselDepo'ya kopyala (ViewModel saveUriToFile çağır)
+                viewModel.setSoruImageUri(it)
+            }
+        }
+    )
+
+    val solutionGalleryLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia(),
+        onResult = { uri ->
+            uri?.let {
+                try {
+                    context.contentResolver.takePersistableUriPermission(
+                        it,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: SecurityException) {
+                } catch (_: Exception) {
+                }
+                viewModel.setSolutionImageUri(it)
+            }
+        }
+    )
+
     LaunchedEffect(capturedImageUri) {
         if (!capturedImageUri.isNullOrBlank() && uiState.soruImagePath != capturedImageUri) {
             viewModel.setInitialImage(capturedImageUri)
         }
     }
 
-    // Düzenleme modunda soru verilerini yükle
     LaunchedEffect(editingSoruId) {
         if (editingSoruId != null && editingSoruId > 0 && uiState.editingSoruId != editingSoruId) {
             viewModel.loadSoruForEdit(editingSoruId)
         }
     }
 
-    // Hata veya başarı mesajları
     LaunchedEffect(uiState.errorMessage) {
         uiState.errorMessage?.let { message ->
             snackbarHostState.showSnackbar(message)
@@ -119,19 +160,31 @@ fun SoruEklemeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .imePadding()
+                .navigationBarsPadding()
+                .bringIntoViewRequester(bringIntoViewRequester)
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // 1. Görsel Seçici (Soru & Çözüm Görselleri, Kırpma, OCR tetikleme)
+            // GorselSeciciSection artık launcher içermez; parent'ten gelen onSoruGalleryClick vs kullanır
+            // Crop flow: ImageCropperDialog doğru Uri/path ile çağrılır, kırpma sonrası ViewModel'e bitmap iletilir
             GorselSeciciSection(
                 soruImagePath = uiState.soruImagePath,
                 solutionImagePath = uiState.solutionImagePath,
                 isAutoTagging = uiState.isAutoTagging,
                 isOcrExtracting = uiState.isOcrExtracting,
                 onCameraClick = onNavigateToCamera,
-                onGallerySoruPicked = { uri -> viewModel.setSoruImageUri(uri) },
-                onGallerySolutionPicked = { uri -> viewModel.setSolutionImageUri(uri) },
+                onSoruGalleryClick = {
+                    soruGalleryLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                onSolutionGalleryClick = {
+                    solutionGalleryLauncher.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
                 onSolutionDrawingSaved = { path -> viewModel.setSolutionImagePath(path) },
                 onDeleteSoruImage = { viewModel.removeSoruImage() },
                 onDeleteSolutionImage = { viewModel.removeSolutionImage() },
@@ -140,7 +193,6 @@ fun SoruEklemeScreen(
                 onAutoTagWithAi = { viewModel.autoTagWithAi() }
             )
 
-            // 2. OCR Metin Önizleme ve Düzenleme (Koşullu Görsel/Metin Gönderimi)
             OcrResultPreviewSection(
                 extractedText = uiState.extractedText,
                 sendImageToAi = uiState.sendImageToAi,
@@ -153,7 +205,6 @@ fun SoruEklemeScreen(
                 onClearOcrClick = { viewModel.updateExtractedText("") }
             )
 
-            // 3. Soru Metadata (Sınav Tipi, Ders, Konu, Zorluk, Hata Tipi)
             SoruMetadataSection(
                 examType = uiState.examType,
                 subjectId = uiState.subjectId,
@@ -172,7 +223,6 @@ fun SoruEklemeScreen(
                 onOpenCatalogClick = { viewModel.openTopicCatalog(true) }
             )
 
-            // 4. Kaynak Bilgisi (Yayın, Deneme, Yıl, Soru No)
             KaynakBilgisiSection(
                 kaynakYayin = uiState.kaynakYayin,
                 kaynakDeneme = uiState.kaynakDeneme,
@@ -184,7 +234,6 @@ fun SoruEklemeScreen(
                 onSoruNoChanged = { viewModel.setKaynakSoruNo(it) }
             )
 
-            // 5. Doğru Cevap & Öğrenci Cevap Şıkları
             CevapSeciciSection(
                 correctAnswer = uiState.correctAnswer,
                 studentAnswer = uiState.studentAnswer,
@@ -192,7 +241,6 @@ fun SoruEklemeScreen(
                 onStudentAnswerSelected = { viewModel.setStudentAnswer(it) }
             )
 
-            // 6. Özel Notlar & Hatırlatıcılar
             CozumNotSection(
                 note = uiState.note,
                 onNoteChanged = { viewModel.setNote(it) }
@@ -202,19 +250,21 @@ fun SoruEklemeScreen(
         }
     }
 
-    // Kırpma / Döndürme Dialogu
+    // Kırpma / Döndürme Dialogu - doğru Uri/path ile çağrılır, kırpma sonrası bitmap GorselDepo.kaydetBitmap ile kaydedilir
     if (uiState.isCropperOpen) {
-        val targetPath = if (uiState.cropTargetIsSolution) uiState.solutionImagePath else uiState.soruImagePath
-        targetPath?.let { path ->
+        val targetPath: String? = if (uiState.cropTargetIsSolution) uiState.solutionImagePath else uiState.soruImagePath
+        targetPath?.let { path: String ->
             ImageCropperDialog(
                 imagePath = path,
                 onDismiss = { viewModel.closeCropper() },
-                onCropped = { newPath -> viewModel.applyCroppedImage(newPath) }
+                onCropped = { bitmap: android.graphics.Bitmap ->
+                    // Kırpma sonrası uiState güncellensin: ViewModel flow düzeltildi
+                    viewModel.onCropComplete(bitmap)
+                }
             )
         }
     }
 
-    // Konu Kataloğu BottomSheet
     if (uiState.isCatalogSheetOpen) {
         ModalBottomSheet(
             onDismissRequest = { viewModel.openTopicCatalog(false) },
@@ -246,13 +296,15 @@ fun SoruEklemeScreen(
                     value = uiState.catalogSearchQuery,
                     onValueChange = { viewModel.setCatalogSearchQuery(it) },
                     placeholder = { Text("Konu veya ünite ara...") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = "Ara") },
                     shape = RoundedCornerShape(12.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MaterialTheme.colorScheme.primary,
                         unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant
                     ),
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                    keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
                     modifier = Modifier.fillMaxWidth()
                 )
 
@@ -286,7 +338,7 @@ fun SoruEklemeScreen(
                             )
                         }
 
-                        items(unite.konular) { konuAdi ->
+                        items(unite.konular) { konuAdi: String ->
                             val isSelected = uiState.topic == konuAdi
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
@@ -313,7 +365,7 @@ fun SoruEklemeScreen(
                                     if (isSelected) {
                                         Icon(
                                             Icons.Default.CheckCircle,
-                                            contentDescription = null,
+                                            contentDescription = "Seçili",
                                             tint = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier.size(18.dp)
                                         )

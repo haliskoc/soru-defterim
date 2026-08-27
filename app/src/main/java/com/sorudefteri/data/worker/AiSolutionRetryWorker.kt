@@ -27,6 +27,7 @@ import com.sorudefteri.data.ai.AiRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.flow.first
+import java.io.InterruptedIOException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -109,22 +110,23 @@ class AiSolutionRetryWorker @AssistedInject constructor(
                     Result.success()
                 },
                 onFailure = { throwable ->
+                    // 404 MODEL_UNAVAILABLE asla retry edilmez — önce kontrol
+                    if (throwable is AiException && throwable.errorType == AiErrorType.MODEL_UNAVAILABLE && throwable.message?.contains("404") == true) {
+                        sendFailureNotification(throwable.localizedMessage ?: "Model bulunamadı")
+                        return Result.failure()
+                    }
                     val isRetryable = when {
                         throwable is AiException -> when (throwable.errorType) {
                             AiErrorType.NETWORK_ERROR,
                             AiErrorType.NETWORK_TIMEOUT,
-                            AiErrorType.QUOTA_EXCEEDED,
                             AiErrorType.MODEL_UNAVAILABLE -> true
                             AiErrorType.INVALID_API_KEY,
                             AiErrorType.PARSING_FAILED,
+                            AiErrorType.QUOTA_EXCEEDED,
                             AiErrorType.UNKNOWN -> false
                         }
+                        throwable is InterruptedIOException -> true
                         else -> false
-                    }
-                    // 404 MODEL_UNAVAILABLE retry edilmez
-                    if (throwable is AiException && throwable.errorType == AiErrorType.MODEL_UNAVAILABLE && throwable.message?.contains("404") == true) {
-                        sendFailureNotification(throwable.localizedMessage ?: "Model bulunamadı")
-                        return Result.failure()
                     }
 
                     if (isRetryable && runAttemptCount < 3) {
@@ -139,7 +141,10 @@ class AiSolutionRetryWorker @AssistedInject constructor(
                 }
             )
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             e.printStackTrace()
+            // InterruptedIOException transient retry
+            if (e is InterruptedIOException && runAttemptCount < 3) return Result.retry()
             if (runAttemptCount < 3) Result.retry() else Result.failure()
         }
     }

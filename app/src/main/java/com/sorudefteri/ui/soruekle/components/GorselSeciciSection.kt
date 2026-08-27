@@ -1,10 +1,6 @@
 package com.sorudefteri.ui.soruekle.components
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,8 +60,8 @@ fun GorselSeciciSection(
     isAutoTagging: Boolean,
     isOcrExtracting: Boolean,
     onCameraClick: () -> Unit,
-    onGallerySoruPicked: (android.net.Uri) -> Unit,
-    onGallerySolutionPicked: (android.net.Uri) -> Unit,
+    onSoruGalleryClick: () -> Unit,
+    onSolutionGalleryClick: () -> Unit,
     onSolutionDrawingSaved: (String) -> Unit,
     onDeleteSoruImage: () -> Unit,
     onDeleteSolutionImage: () -> Unit,
@@ -77,16 +73,6 @@ fun GorselSeciciSection(
     var zoomImageUrl by remember { mutableStateOf<String?>(null) }
     var isDrawingDialogOpen by remember { mutableStateOf(false) }
 
-    val singlePhotoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(),
-        onResult = { uri -> uri?.let { onGallerySoruPicked(it) } }
-    )
-
-    val solutionPhotoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia(),
-        onResult = { uri -> uri?.let { onGallerySolutionPicked(it) } }
-    )
-
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         // --- 1. SORU FOTOĞRAFI ---
         Text(
@@ -97,7 +83,6 @@ fun GorselSeciciSection(
         )
 
         if (soruImagePath.isNullOrBlank()) {
-            // Fotoğraf Seçilmemiş Alan (Dashed Border)
             OutlinedCard(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.outlinedCardColors(
@@ -142,11 +127,7 @@ fun GorselSeciciSection(
                         }
 
                         OutlinedButton(
-                            onClick = {
-                                singlePhotoPicker.launch(
-                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                )
-                            },
+                            onClick = onSoruGalleryClick,
                             shape = RoundedCornerShape(12.dp)
                         ) {
                             Icon(Icons.Default.PhotoLibrary, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -157,7 +138,6 @@ fun GorselSeciciSection(
                 }
             }
         } else {
-            // Fotoğraf Seçilmiş Önizleme Kartı
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -181,7 +161,6 @@ fun GorselSeciciSection(
                                 .clickable { zoomImageUrl = soruImagePath }
                         )
 
-                        // Sağ üst kontrol butonları (Zoom & Sil)
                         Row(
                             modifier = Modifier
                                 .align(Alignment.TopEnd)
@@ -210,7 +189,6 @@ fun GorselSeciciSection(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // Kırpma, OCR ve AI Etiket Butonları
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -259,7 +237,6 @@ fun GorselSeciciSection(
             }
         }
 
-        // --- 2. ÇÖZÜM FOTOĞRAFI (OPSİYONEL) ---
         Text(
             text = "Çözüm Fotoğrafı / Çizim (Opsiyonel)",
             style = MaterialTheme.typography.titleMedium,
@@ -273,11 +250,7 @@ fun GorselSeciciSection(
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedButton(
-                    onClick = {
-                        solutionPhotoPicker.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
-                    },
+                    onClick = onSolutionGalleryClick,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f)
                 ) {
@@ -343,7 +316,6 @@ fun GorselSeciciSection(
         }
     }
 
-    // Zoom Dialog
     zoomImageUrl?.let { url ->
         ZoomableImageDialog(
             imagePath = url,
@@ -351,7 +323,6 @@ fun GorselSeciciSection(
         )
     }
 
-    // Drawing Canvas Dialog
     if (isDrawingDialogOpen) {
         DrawingCanvasDialog(
             imagePath = solutionImagePath ?: soruImagePath ?: "",

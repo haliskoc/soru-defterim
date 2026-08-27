@@ -3,7 +3,6 @@ package com.sorudefteri.ui.kamera
 import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -57,6 +56,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -68,7 +69,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -100,6 +103,8 @@ fun KameraScreen(
     val handleCapture = onPhotoCaptured ?: onImageCaptured
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
     // Kamera İzni Durumu
     var hasCameraPermission by remember {
@@ -116,7 +121,7 @@ fun KameraScreen(
     ) { isGranted ->
         hasCameraPermission = isGranted
         if (!isGranted) {
-            Toast.makeText(context, "Kamera izni verilmedi", Toast.LENGTH_SHORT).show()
+            scope.launch { snackbarHostState.showSnackbar("Kamera izni verilmedi") }
         }
     }
 
@@ -213,6 +218,10 @@ fun KameraScreen(
                     Text("Vazgeç")
                 }
             }
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
         return
     }
@@ -488,11 +497,7 @@ fun KameraScreen(
                                     ContextCompat.getMainExecutor(context).execute {
                                         flashShutterEffect = false
                                         isCapturing = false
-                                        Toast.makeText(
-                                            context,
-                                            "Fotoğraf çekilemedi: ${exception.localizedMessage}",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
+                                        scope.launch { snackbarHostState.showSnackbar("Fotoğraf çekilemedi: ${exception.localizedMessage}") }
                                     }
                                 }
                             }
@@ -521,5 +526,9 @@ fun KameraScreen(
             // Dengeli yerleşim için boş alan
             Spacer(modifier = Modifier.size(52.dp))
         }
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding()
+        )
     }
 }

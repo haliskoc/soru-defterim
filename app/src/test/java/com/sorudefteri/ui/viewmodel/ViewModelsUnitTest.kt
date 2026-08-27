@@ -100,6 +100,10 @@ class ViewModelsUnitTest {
         every { mockAyarlarDataStore.groqModel } returns flowOf("meta-llama/llama-4-scout-17b-16e-instruct")
         every { mockAyarlarDataStore.nvidiaModel } returns flowOf("meta/llama-3.1-405b-instruct")
         every { mockAyarlarDataStore.themeMode } returns flowOf(0)
+        every { mockAyarlarDataStore.isAutoBackupEnabled } returns flowOf(false)
+        every { mockAyarlarDataStore.isWifiOnlyBackup } returns flowOf(true)
+        every { mockAyarlarDataStore.autoBackupEnabledFlow } returns flowOf(false)
+        every { mockAyarlarDataStore.wifiOnlyBackupFlow } returns flowOf(true)
         every { mockSoruRepository.getDistinctTopics(any()) } returns flowOf(listOf("Trigonometri", "Türev"))
         every { mockKonuKatalog.getUniteList(any(), any()) } returns listOf(
             KonuUnite(uniteAdi = "Fonksiyonlar", konular = listOf("Fonksiyon Grafikleri", "Bileşke"))

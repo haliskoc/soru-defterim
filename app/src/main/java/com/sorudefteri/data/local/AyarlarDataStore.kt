@@ -79,6 +79,7 @@ class AyarlarDataStore @Inject constructor(
         const val DEFAULT_ONBOARDING_SEEN = false
     }
 
+    // TODO: Scope leak - CoroutineScope(SupervisorJob + IO) Application scope'a bağlanmalı, unregisterOnSharedPreferenceChangeListener close'da çağrılmalı, aksi halde memory leak riski
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Encrypted flows - MutableStateFlow ile anlık + güncellenebilir
@@ -108,6 +109,7 @@ class AyarlarDataStore @Inject constructor(
 
     init {
         encryptedPrefs.registerOnSharedPreferenceChangeListener(encryptedListener)
+        // TODO: unregister listener when DataStore is cleared - add onCleared or use lifecycle-aware scope
         // Migration: plain DataStore'daki eski API key'leri şifreli store'a taşı (one-shot)
         scope.launch {
             try {
@@ -348,18 +350,21 @@ class AyarlarDataStore @Inject constructor(
 
     suspend fun setGeminiApiKey(apiKey: String) {
         val trimmed = apiKey.trim()
+        // TODO: apply() async - kritik anahtar yazımında commit() tercih edilebilir (senkron garanti)
         encryptedPrefs.edit().putString(ENC_GEMINI_API_KEY, trimmed).apply()
         _geminiApiKeyFlow.value = trimmed
     }
 
     suspend fun setGroqApiKey(apiKey: String) {
         val trimmed = apiKey.trim()
+        // TODO: apply() → commit() için değerlendirme: API key kritik veri, senkron yazım gerekebilir
         encryptedPrefs.edit().putString(ENC_GROQ_API_KEY, trimmed).apply()
         _groqApiKeyFlow.value = trimmed
     }
 
     suspend fun setNvidiaApiKey(apiKey: String) {
         val trimmed = apiKey.trim()
+        // TODO: apply() async riski - commit() ile senkron yazım düşünülmeli
         encryptedPrefs.edit().putString(ENC_NVIDIA_API_KEY, trimmed).apply()
         _nvidiaApiKeyFlow.value = trimmed
     }
@@ -440,6 +445,7 @@ class AyarlarDataStore @Inject constructor(
     suspend fun getWifiOnlyBackup(): Boolean = wifiOnlyBackupFlow.first()
     suspend fun getIsOnboardingSeen(): Boolean = isOnboardingSeenFlow.first()
 
+    // TODO: activeApiKey cache - her çağrıda 2 Flow first() yapılıyor, in-memory cache + combine ile optimize edilebilir
     suspend fun getActiveApiKey(): String {
         return when (getAiProvider()) {
             AiProviderType.GEMINI -> getGeminiApiKey()

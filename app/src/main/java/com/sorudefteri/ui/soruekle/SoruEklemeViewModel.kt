@@ -1,5 +1,6 @@
 package com.sorudefteri.ui.soruekle
 
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -31,7 +32,7 @@ data class SoruEklemeUiState(
     val editingSoruId: Long? = null,
     val soruImagePath: String? = null,
     val solutionImagePath: String? = null,
-    val examType: String = "TYT", // "TYT" or "AYT"
+    val examType: String = "TYT",
     val subjectId: String = "matematik",
     val topic: String = "",
     val mistakeType: HataTipi? = null,
@@ -56,13 +57,11 @@ data class SoruEklemeUiState(
     val isAutoTagging: Boolean = false,
     val autoTagSuccessMessage: String? = null,
     val errorMessage: String? = null,
-    // Koşullu OCR & Metin Çıkarımı
     val isOcrExtracting: Boolean = false,
     val extractedText: String? = null,
     val sendImageToAi: Boolean = true,
     val isCleaningOcr: Boolean = false,
     val ocrStatusMessage: String? = null,
-    // Kırpma / Döndürme Dialogu
     val isCropperOpen: Boolean = false,
     val cropTargetIsSolution: Boolean = false
 ) {
@@ -93,7 +92,6 @@ class SoruEklemeViewModel @Inject constructor(
     val uiState: StateFlow<SoruEklemeUiState> = _uiState.asStateFlow()
 
     init {
-        // Kullanıcının alanını dinleyip ders listesini ve konu önerilerini hazırla
         viewModelScope.launch {
             ayarlarDataStore.currentAlan.collectLatest { alan ->
                 _uiState.update { current ->
@@ -111,8 +109,15 @@ class SoruEklemeViewModel @Inject constructor(
         }
     }
 
+    override fun onCleared() {
+        super.onCleared()
+        // OcrHelper lifecycle: TextRecognizer close
+        try { ocrHelper.close() } catch (_: Exception) {}
+    }
+
     /**
      * Dışarıdan veya kameradan/galeriden gelen başlangıç görsel yolunu veya URI'sini yükler.
+     * Fix: isSolution ayrımı ve persist Uri -> GorselDepo kopyalama doğru akış.
      */
     fun setInitialImage(pathOrUri: String?, isSolution: Boolean = false) {
         if (pathOrUri.isNullOrBlank()) return
@@ -143,6 +148,8 @@ class SoruEklemeViewModel @Inject constructor(
                 } else {
                     _uiState.update { it.copy(errorMessage = "Görsel yüklenemedi: ${e.localizedMessage}") }
                 }
+            } catch (oom: OutOfMemoryError) {
+                _uiState.update { it.copy(errorMessage = "Görsel çok büyük, bellek yetersiz.") }
             }
         }
     }
@@ -167,8 +174,15 @@ class SoruEklemeViewModel @Inject constructor(
                 } else {
                     _uiState.update { it.copy(errorMessage = "Çözüm görseli yüklenemedi: ${e.localizedMessage}") }
                 }
+            } catch (oom: OutOfMemoryError) {
+                _uiState.update { it.copy(errorMessage = "Görsel çok büyük, bellek yetersiz.") }
             }
         }
+    }
+
+    // Yeni akış: galeriden seçilen Uri doğrudan GorselDepo'ya kopyala (persist + crop flow öncesi)
+    fun onImageSelected(uri: Uri, isSolution: Boolean) {
+        if (isSolution) setSolutionImageUri(uri) else setSoruImageUri(uri)
     }
 
     fun setSoruImageUri(uri: Uri) {
@@ -178,6 +192,8 @@ class SoruEklemeViewModel @Inject constructor(
                 _uiState.update { it.copy(soruImagePath = path, errorMessage = null) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(errorMessage = "Görsel kaydedilemedi: ${e.localizedMessage}") }
+            } catch (oom: OutOfMemoryError) {
+                _uiState.update { it.copy(errorMessage = "Görsel çok büyük, sıkıştırılamadı.") }
             }
         }
     }
@@ -189,6 +205,8 @@ class SoruEklemeViewModel @Inject constructor(
                 _uiState.update { it.copy(solutionImagePath = path, errorMessage = null) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(errorMessage = "Çözüm görseli kaydedilemedi: ${e.localizedMessage}") }
+            } catch (oom: OutOfMemoryError) {
+                _uiState.update { it.copy(errorMessage = "Görsel çok büyük, sıkıştırılamadı.") }
             }
         }
     }
@@ -219,11 +237,9 @@ class SoruEklemeViewModel @Inject constructor(
 
     fun setExamType(type: String) {
         if (_uiState.value.examType == type) return
-
         val alan = _uiState.value.userAlan
         val subjects = DersTaksonomisi.getDersler(type, alan)
         val firstSubject = subjects.firstOrNull()?.id ?: "matematik"
-
         _uiState.update {
             it.copy(
                 examType = type,
@@ -316,16 +332,12 @@ class SoruEklemeViewModel @Inject constructor(
         _uiState.update { it.copy(extractedText = null, ocrStatusMessage = null) }
     }
 
-    /**
-     * Koşullu OCR Metin Ayıklama Servisi
-     */
     fun extractTextFromQuestionImage() {
         val currentImagePath = _uiState.value.soruImagePath
         if (currentImagePath.isNullOrBlank()) {
             _uiState.update { it.copy(errorMessage = "Metin ayıklamak için önce bir soru görseli ekleyin.") }
             return
         }
-
         viewModelScope.launch {
             _uiState.update { it.copy(isOcrExtracting = true, ocrStatusMessage = null) }
             val result = ocrHelper.recognizeText(currentImagePath)
@@ -365,7 +377,6 @@ class SoruEklemeViewModel @Inject constructor(
     fun cleanOcrWithAi() {
         val rawText = _uiState.value.extractedText
         if (rawText.isNullOrBlank()) return
-
         viewModelScope.launch {
             _uiState.update { it.copy(isCleaningOcr = true, ocrStatusMessage = null) }
             val result = aiRepository.cleanOcrText(rawText)
@@ -390,16 +401,12 @@ class SoruEklemeViewModel @Inject constructor(
 
     fun cleanOcrTextWithAi() = cleanOcrWithAi()
 
-    /**
-     * Soru görselini yapay zekaya analiz ettirerek Ders, Konu, Sınav Türü ve Doğru Cevabı otomatik belirler.
-     */
     fun autoTagWithAi() {
         val currentImagePath = _uiState.value.soruImagePath
         if (currentImagePath.isNullOrBlank()) {
             _uiState.update { it.copy(errorMessage = "Otomatik analiz için önce bir soru fotoğrafı ekleyin.") }
             return
         }
-
         viewModelScope.launch {
             _uiState.update { it.copy(isAutoTagging = true, errorMessage = null, autoTagSuccessMessage = null) }
             val bytes = gorselDepo.getGorselBytes(currentImagePath)
@@ -407,7 +414,6 @@ class SoruEklemeViewModel @Inject constructor(
                 _uiState.update { it.copy(isAutoTagging = false, errorMessage = "Soru görseli okunamadı.") }
                 return@launch
             }
-
             val result = aiRepository.detectQuestionMetadata(bytes)
             result.onSuccess { metadata ->
                 val detectedExam = if (metadata.examType.equals("AYT", ignoreCase = true)) "AYT" else "TYT"
@@ -418,10 +424,8 @@ class SoruEklemeViewModel @Inject constructor(
                             it.ad.equals(metadata.subjectId, ignoreCase = true) ||
                             metadata.subjectId.contains(it.id, ignoreCase = true)
                 }?.id ?: subjects.firstOrNull()?.id ?: "matematik"
-
                 val dersName = DersTaksonomisi.getDersAdi(detectedExam, matchingSubject)
                 val successMsg = "✓ AI Analizi Tamamlandı: $dersName > ${metadata.topic}"
-
                 _uiState.update { current ->
                     current.copy(
                         isAutoTagging = false,
@@ -454,22 +458,15 @@ class SoruEklemeViewModel @Inject constructor(
             val currentState = _uiState.value
             val examType = currentState.examType
             val subjectId = currentState.subjectId
-
-            // 1. Konu kataloğundaki üniteler ve konular
             val units = konuKatalog.getUniteList(examType, subjectId)
             val catalogTopics = units.flatMap { it.konular }
-
-            // 2. Kullanıcının Room'daki geçmiş konuları
             val userTopics = try {
                 soruRepository.getDistinctTopics(subjectId).first()
             } catch (e: Exception) {
                 emptyList()
             }
-
-            // Birleştir ve tekilleştir
             val combined = (userTopics + catalogTopics).distinct().filter { it.isNotBlank() }
             val frequent = (userTopics.take(4) + catalogTopics.take(8)).distinct().take(8)
-
             _uiState.update {
                 it.copy(
                     catalogUnits = units,
@@ -504,16 +501,62 @@ class SoruEklemeViewModel @Inject constructor(
         _uiState.update { it.copy(isCropperOpen = false) }
     }
 
+    /**
+     * Kırpma sonrası String path akışı (cache dosya -> kalıcı GorselDepo kopya, uiState güncelle)
+     */
     fun applyCroppedImage(newPath: String) {
-        val isSolution = _uiState.value.cropTargetIsSolution
-        _uiState.update {
-            if (isSolution) {
-                it.copy(solutionImagePath = newPath, isCropperOpen = false)
-            } else {
-                it.copy(soruImagePath = newPath, isCropperOpen = false)
+        viewModelScope.launch {
+            try {
+                val isSolution = _uiState.value.cropTargetIsSolution
+                val permanentPath = try {
+                    val file = File(newPath)
+                    if (file.exists() && file.isFile) {
+                        // cache'den kalıcıya kopyala ve sıkıştır
+                        gorselDepo.kaydetDosyadan(file, isSolution)
+                    } else newPath
+                } catch (_: Exception) { newPath }
+                _uiState.update {
+                    if (isSolution) {
+                        it.copy(solutionImagePath = permanentPath, isCropperOpen = false, errorMessage = null)
+                    } else {
+                        it.copy(soruImagePath = permanentPath, isCropperOpen = false, errorMessage = null)
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isCropperOpen = false, errorMessage = "Kırpma kaydedilemedi: ${e.localizedMessage}") }
+            } catch (oom: OutOfMemoryError) {
+                _uiState.update { it.copy(isCropperOpen = false, errorMessage = "Kırpma bellek yetersiz.") }
             }
         }
     }
+
+    /**
+     * Kırpma sonrası Bitmap akışı: GorselDepo.kaydetBitmap ile kaydet ve uiState güncelle
+     * ImageCropperDialog doğru Uri ile çağrıldıktan sonra bitmap döndüğünde kullanılır.
+     */
+    fun onCropComplete(croppedBitmap: Bitmap) {
+        viewModelScope.launch {
+            try {
+                val isSolution = _uiState.value.cropTargetIsSolution
+                val newPath = gorselDepo.kaydetBitmap(croppedBitmap, isSolution)
+                _uiState.update {
+                    if (isSolution) {
+                        it.copy(solutionImagePath = newPath, isCropperOpen = false, errorMessage = null)
+                    } else {
+                        it.copy(soruImagePath = newPath, isCropperOpen = false, errorMessage = null)
+                    }
+                }
+                try { if (!croppedBitmap.isRecycled) croppedBitmap.recycle() } catch (_: Exception) {}
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isCropperOpen = false, errorMessage = "Kırpma kaydedilemedi: ${e.localizedMessage}") }
+            } catch (oom: OutOfMemoryError) {
+                _uiState.update { it.copy(isCropperOpen = false, errorMessage = "Kırpma bellek yetersiz.") }
+            }
+        }
+    }
+
+    // Alias for screen
+    fun handleCroppedBitmap(bitmap: Bitmap) = onCropComplete(bitmap)
 
     fun loadSoruForEdit(soruId: Long) {
         viewModelScope.launch {
@@ -550,25 +593,20 @@ class SoruEklemeViewModel @Inject constructor(
     fun saveSoru(onSuccess: () -> Unit) {
         val state = _uiState.value
         val imagePath = state.soruImagePath
-
         if (imagePath.isNullOrBlank()) {
             _uiState.update { it.copy(errorMessage = "Lütfen bir soru fotoğrafı ekleyin.") }
             return
         }
-
         if (state.topic.isBlank()) {
             _uiState.update { it.copy(errorMessage = "Lütfen bir konu başlığı seçin veya yazın.") }
             return
         }
-
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true, errorMessage = null) }
             try {
                 val yilParsed = state.kaynakYil.trim().toIntOrNull()
                 val soruNoParsed = state.kaynakSoruNo.trim().toIntOrNull()
-
                 val existingSoru = state.editingSoruId?.let { soruRepository.getSoru(it) }
-
                 val soru = Soru(
                     id = state.editingSoruId ?: 0L,
                     imagePath = imagePath,
@@ -598,13 +636,11 @@ class SoruEklemeViewModel @Inject constructor(
                     createdAt = existingSoru?.createdAt ?: System.currentTimeMillis(),
                     updatedAt = System.currentTimeMillis()
                 )
-
                 if (state.editingSoruId != null) {
                     soruRepository.updateSoru(soru)
                 } else {
                     soruRepository.soruEkle(soru)
                 }
-
                 _uiState.update { it.copy(isSaving = false, isSaved = true) }
                 onSuccess()
             } catch (e: Exception) {
@@ -614,6 +650,8 @@ class SoruEklemeViewModel @Inject constructor(
                         errorMessage = "Soru kaydedilirken hata oluştu: ${e.localizedMessage}"
                     )
                 }
+            } catch (oom: OutOfMemoryError) {
+                _uiState.update { it.copy(isSaving = false, errorMessage = "Bellek yetersiz, soru kaydedilemedi.") }
             }
         }
     }

@@ -127,7 +127,7 @@ fun FiltreBar(
                 {
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = null,
+                        contentDescription = "Seçili: Tümü",
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -143,7 +143,7 @@ fun FiltreBar(
                 {
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = null,
+                        contentDescription = "Seçili: TYT",
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -159,7 +159,7 @@ fun FiltreBar(
                 {
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = null,
+                        contentDescription = "Seçili: AYT",
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -206,7 +206,7 @@ fun FiltreBar(
                     },
                     leadingIcon = {
                         if (selectedSubjectId == null) {
-                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Check, contentDescription = "Seçili", modifier = Modifier.size(16.dp))
                         }
                     }
                 )
@@ -226,7 +226,7 @@ fun FiltreBar(
                         },
                         leadingIcon = {
                             if (isSelected) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Check, contentDescription = "Seçili", modifier = Modifier.size(16.dp))
                             }
                         }
                     )
@@ -273,7 +273,7 @@ fun FiltreBar(
                     },
                     leadingIcon = {
                         if (selectedMistakeType == null) {
-                            Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.Check, contentDescription = "Seçili", modifier = Modifier.size(16.dp))
                         }
                     }
                 )
@@ -293,7 +293,7 @@ fun FiltreBar(
                         },
                         leadingIcon = {
                             if (isSelected) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Check, contentDescription = "Seçili", modifier = Modifier.size(16.dp))
                             }
                         }
                     )
@@ -310,7 +310,7 @@ fun FiltreBar(
                     onClick = { publisherMenuExpanded = true },
                     label = { Text(text = if (isPublisherSelected) "Yayın: $selectedPublisher" else "Yayın") },
                     trailingIcon = {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Yayın Seç", modifier = Modifier.size(18.dp))
                     },
                     colors = if (isPublisherSelected) {
                         FilterChipDefaults.filterChipColors(
@@ -332,7 +332,7 @@ fun FiltreBar(
                         },
                         leadingIcon = {
                             if (selectedPublisher == null) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Check, contentDescription = "Seçili", modifier = Modifier.size(16.dp))
                             }
                         }
                     )
@@ -347,7 +347,7 @@ fun FiltreBar(
                             },
                             leadingIcon = {
                                 if (isSelected) {
-                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Check, contentDescription = "Seçili", modifier = Modifier.size(16.dp))
                                 }
                             }
                         )
@@ -365,7 +365,7 @@ fun FiltreBar(
                     onClick = { examNameMenuExpanded = true },
                     label = { Text(text = if (isExamNameSelected) "Deneme: $selectedExamName" else "Deneme") },
                     trailingIcon = {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = "Deneme Seç", modifier = Modifier.size(18.dp))
                     },
                     colors = if (isExamNameSelected) {
                         FilterChipDefaults.filterChipColors(
@@ -387,7 +387,7 @@ fun FiltreBar(
                         },
                         leadingIcon = {
                             if (selectedExamName == null) {
-                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Check, contentDescription = "Seçili", modifier = Modifier.size(16.dp))
                             }
                         }
                     )
@@ -402,7 +402,7 @@ fun FiltreBar(
                             },
                             leadingIcon = {
                                 if (isSelected) {
-                                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Check, contentDescription = "Seçili", modifier = Modifier.size(16.dp))
                                 }
                             }
                         )
@@ -420,7 +420,7 @@ fun FiltreBar(
                 {
                     Icon(
                         imageVector = Icons.Default.Check,
-                        contentDescription = null,
+                        contentDescription = "Filtre: Çözülmeyenler Seçili",
                         modifier = Modifier.size(16.dp)
                     )
                 }
@@ -435,7 +435,7 @@ fun FiltreBar(
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Default.Star,
-                    contentDescription = null,
+                    contentDescription = "Favoriler Filtresi",
                     tint = if (onlyFavorites) Color(0xFFFFB300) else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp)
                 )
@@ -450,7 +450,7 @@ fun FiltreBar(
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Default.Schedule,
-                    contentDescription = null,
+                    contentDescription = "Tekrar Zamanı Filtresi",
                     tint = if (onlyDueReview) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp)
                 )

@@ -40,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -68,8 +69,8 @@ fun SoruDetayScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
 
-    var selectedTabIndex by remember { mutableStateOf(0) }
-    var editedNoteText by remember { mutableStateOf("") }
+    var selectedTabIndex by rememberSaveable { mutableStateOf(0) }
+    var editedNoteText by rememberSaveable { mutableStateOf("") }
 
     val soru = uiState.soru
 
@@ -136,19 +137,19 @@ fun SoruDetayScreen(
                     selected = selectedTabIndex == 0,
                     onClick = { selectedTabIndex = 0 },
                     text = { Text("Soru Detayı", fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal) },
-                    icon = { Icon(Icons.Default.Description, contentDescription = null) }
+                    icon = { Icon(Icons.Default.Description, contentDescription = "Soru Detayı") }
                 )
                 Tab(
                     selected = selectedTabIndex == 1,
                     onClick = { selectedTabIndex = 1 },
                     text = { Text("AI Çözümü", fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal) },
-                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) }
+                    icon = { Icon(Icons.Default.AutoAwesome, contentDescription = "AI Çözümü") }
                 )
                 Tab(
                     selected = selectedTabIndex == 2,
                     onClick = { selectedTabIndex = 2 },
                     text = { Text("Benzer Soru", fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal) },
-                    icon = { Icon(Icons.Default.Psychology, contentDescription = null) }
+                    icon = { Icon(Icons.Default.Psychology, contentDescription = "Benzer Soru") }
                 )
             }
 

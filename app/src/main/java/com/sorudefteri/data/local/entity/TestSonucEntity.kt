@@ -1,13 +1,20 @@
 package com.sorudefteri.data.local.entity
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.sorudefteri.domain.model.TestResult
 
 /**
  * Kullanıcının tamamladığı test ve denemelerin Room veritabanı kayıt modeli.
  */
-@Entity(tableName = "test_sonuclari")
+@Entity(
+    tableName = "test_sonuclari",
+    indices = [
+        Index(value = ["completedAt"]),
+        Index(value = ["examType"])
+    ]
+)
 data class TestSonucEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0L,

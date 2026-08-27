@@ -17,6 +17,7 @@ import com.sorudefteri.domain.repository.SoruRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import androidx.paging.map
 import kotlinx.coroutines.withContext
@@ -48,7 +49,7 @@ class SoruRepositoryImpl @Inject constructor(
     override fun getAllSorular(): Flow<List<Soru>> {
         return soruDao.getAllSorular().map { list ->
             list.map { it.toDomain() }
-        }
+        }.flowOn(Dispatchers.Default)
     }
 
     override fun getFilteredSorular(
@@ -59,17 +60,17 @@ class SoruRepositoryImpl @Inject constructor(
     ): Flow<List<Soru>> {
         return soruDao.getFilteredSorular(examType, subjectId, mistakeType, isSolved).map { list ->
             list.map { it.toDomain() }
-        }
+        }.flowOn(Dispatchers.Default)
     }
 
     override fun searchSorular(query: String): Flow<List<Soru>> {
         return soruDao.searchSorular(query).map { list ->
             list.map { it.toDomain() }
-        }
+        }.flowOn(Dispatchers.Default)
     }
 
     override fun getSoruById(id: Long): Flow<Soru?> {
-        return soruDao.getSoruById(id).map { it?.toDomain() }
+        return soruDao.getSoruById(id).map { it?.toDomain() }.flowOn(Dispatchers.Default)
     }
 
     override suspend fun getSoru(id: Long): Soru? = withContext(Dispatchers.IO) {
@@ -191,11 +192,11 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override suspend fun advanceReviewStage(id: Long) = withContext(Dispatchers.IO) {
+        // Atomik increment: read current stage via direct query then compute next review date
         val soru = soruDao.getSoruByIdDirect(id) ?: return@withContext
         val currentStage = soru.reviewStage
         val nextStage = (currentStage + 1).coerceAtMost(5)
         val now = System.currentTimeMillis()
-
         val intervalDays = when (nextStage) {
             1 -> 1L
             2 -> 3L
@@ -204,17 +205,13 @@ class SoruRepositoryImpl @Inject constructor(
             else -> 30L
         }
         val nextReviewTimestamp = now + (intervalDays * 24 * 60 * 60 * 1000L)
-
-        soruDao.updateReviewStatus(
-            id = id,
-            stage = nextStage,
-            nextReviewDate = nextReviewTimestamp,
-            lastReviewedAt = now
-        )
+        // Atomik güncelleme (race-safe) - DAO'daki atomik sorgu
+        soruDao.advanceReviewStageAtomik(id, nextReviewTimestamp, now)
     }
 
     override suspend fun deleteSorularByIds(ids: List<Long>) = withContext(Dispatchers.IO) {
         if (ids.isEmpty()) return@withContext
+        // Görselleri temizle
         ids.forEach { id ->
             val soru = soruDao.getSoruByIdDirect(id)
             if (soru != null) {
@@ -224,7 +221,10 @@ class SoruRepositoryImpl @Inject constructor(
                 }
             }
         }
-        soruDao.deleteSorularByIds(ids)
+        // SQLite IN clause limit (~999) aşılmaması için chunked
+        ids.chunked(500).forEach { chunk ->
+            soruDao.deleteSorularByIds(chunk)
+        }
     }
 
     override suspend fun updateSolvedStatusBatch(ids: List<Long>, isSolved: Boolean) = withContext(Dispatchers.IO) {
@@ -250,11 +250,11 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override fun getFavoriteSorular(): Flow<List<Soru>> {
-        return soruDao.getFavoriteSorular().map { list -> list.map { it.toDomain() } }
+        return soruDao.getFavoriteSorular().map { list -> list.map { it.toDomain() } }.flowOn(Dispatchers.Default)
     }
 
     override fun getDueReviewSorular(): Flow<List<Soru>> {
-        return soruDao.getDueReviewSorular().map { list -> list.map { it.toDomain() } }
+        return soruDao.getDueReviewSorular().map { list -> list.map { it.toDomain() } }.flowOn(Dispatchers.Default)
     }
 
     override suspend fun getDueReviewSorularList(currentTime: Long): List<Soru> = withContext(Dispatchers.IO) {
@@ -298,7 +298,12 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override fun getDistinctTopics(subjectId: String): Flow<List<String>> {
-        return soruDao.getDistinctTopicsForSubject(subjectId)
+        return soruDao.getDistinctTopicsForSubject(subjectId).flowOn(Dispatchers.Default)
+    }
+
+    // ThreadLocal SDF cache for stats
+    private val statsDateFormatTL = ThreadLocal.withInitial {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
     }
 
     override fun getIstatistikler(): Flow<IstatistikOzetWrapper> {
@@ -322,8 +327,8 @@ class SoruRepositoryImpl @Inject constructor(
                 type?.let { HataTipiDagilimi(mistakeType = it, count = tuple.count) }
             }
 
-            val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            val dailyMap = allSorular.groupBy { dateFormat.format(Date(it.createdAt)) }
+            val dateFormat = statsDateFormatTL.get() ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val dailyMap = allSorular.groupBy { synchronized(dateFormat) { dateFormat.format(Date(it.createdAt)) } }
             val sonAktiviteler = dailyMap.map { (dateStr, list) ->
                 GunlukAktivite(
                     dateStr = dateStr,
@@ -340,7 +345,7 @@ class SoruRepositoryImpl @Inject constructor(
                 hataTipiDagilimi = mistakeList,
                 sonAktiviteler = sonAktiviteler
             )
-        }
+        }.flowOn(Dispatchers.Default)
     }
 
     override fun getSubjectStats(): Flow<List<DersSoruSayisi>> {
@@ -370,7 +375,7 @@ class SoruRepositoryImpl @Inject constructor(
                     color = color
                 )
             }.sortedByDescending { it.count }
-        }
+        }.flowOn(Dispatchers.Default)
     }
 
     override fun getMistakeStats(): Flow<List<HataTipiDagilimi>> {
@@ -400,12 +405,12 @@ class SoruRepositoryImpl @Inject constructor(
                     color = color
                 )
             }.sortedByDescending { it.count }
-        }
+        }.flowOn(Dispatchers.Default)
     }
 
     override fun getWeeklyActivity(): Flow<List<GunlukAktivite>> {
         return soruDao.getAllSorular().map { list ->
-            val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val dateFormat = statsDateFormatTL.get() ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
             val dayNameFormat = SimpleDateFormat("EEE", Locale("tr", "TR"))
 
             val last7Days = mutableListOf<GunlukAktivite>()
@@ -443,6 +448,6 @@ class SoruRepositoryImpl @Inject constructor(
             }
 
             last7Days
-        }
+        }.flowOn(Dispatchers.Default)
     }
 }

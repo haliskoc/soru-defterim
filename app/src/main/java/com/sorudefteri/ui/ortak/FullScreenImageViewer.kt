@@ -10,6 +10,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ImageNotSupported
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -28,10 +30,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil3.compose.AsyncImage
+import coil3.compose.SubcomposeAsyncImage
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import java.io.File
 
 /**
@@ -65,21 +70,30 @@ fun FullScreenImageViewer(
                     .pointerInput(Unit) {
                         detectTransformGestures { _, pan, zoom, _ ->
                             scale = (scale * zoom).coerceIn(1f, 5f)
-                            if (scale > 1f) {
-                                val maxOffset = (scale - 1) * 1000
-                                offset = Offset(
-                                    x = (offset.x + pan.x).coerceIn(-maxOffset, maxOffset),
-                                    y = (offset.y + pan.y).coerceIn(-maxOffset, maxOffset)
-                                )
-                            } else {
+                            if (scale == 1f) {
                                 offset = Offset.Zero
+                            } else {
+                                val maxOffsetX = (size.width * (scale - 1f)) / 2f
+                                val maxOffsetY = (size.height * (scale - 1f)) / 2f
+                                offset = Offset(
+                                    x = (offset.x + pan.x * scale).coerceIn(-maxOffsetX, maxOffsetX),
+                                    y = (offset.y + pan.y * scale).coerceIn(-maxOffsetY, maxOffsetY)
+                                )
                             }
                         }
                     },
                 contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
-                    model = File(imagePath),
+                val imageModel = if (imagePath.startsWith("http") || imagePath.startsWith("content://")) {
+                    imagePath
+                } else {
+                    File(imagePath)
+                }
+                SubcomposeAsyncImage(
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(imageModel)
+                        .crossfade(true)
+                        .build(),
                     contentDescription = title,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
@@ -89,7 +103,25 @@ fun FullScreenImageViewer(
                             scaleY = scale,
                             translationX = offset.x,
                             translationY = offset.y
-                        )
+                        ),
+                    loading = {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(modifier = Modifier.size(32.dp), color = Color.White)
+                        }
+                    },
+                    error = {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ImageNotSupported,
+                                contentDescription = "Görsel yüklenemedi",
+                                tint = Color.White.copy(alpha = 0.6f),
+                                modifier = Modifier.size(48.dp)
+                            )
+                        }
+                    }
                 )
             }
 
