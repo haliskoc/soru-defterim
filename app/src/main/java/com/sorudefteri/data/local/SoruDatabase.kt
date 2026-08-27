@@ -14,7 +14,7 @@ import com.sorudefteri.data.local.entity.TestSonucEntity
  */
 @Database(
     entities = [SoruEntity::class, TestSonucEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class SoruDatabase : RoomDatabase() {
@@ -71,6 +71,13 @@ abstract class SoruDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE sorular ADD COLUMN studentAnswer TEXT DEFAULT NULL")
                 db.execSQL("ALTER TABLE sorular ADD COLUMN difficulty TEXT DEFAULT NULL")
+            }
+        }
+
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sorular_nextReviewDate` ON `sorular` (`nextReviewDate`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sorular_reviewStage` ON `sorular` (`reviewStage`)")
             }
         }
     }

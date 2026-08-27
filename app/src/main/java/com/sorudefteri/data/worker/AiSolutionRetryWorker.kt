@@ -57,10 +57,12 @@ class AiSolutionRetryWorker @AssistedInject constructor(
             sendImageToAi: Boolean,
             extractedText: String?
         ) {
+            // WorkManager Data 10KB limit - truncate
+            val safeText = extractedText?.take(9000)
             val data = Data.Builder()
                 .putLong(KEY_SORU_ID, soruId)
                 .putBoolean(KEY_SEND_IMAGE, sendImageToAi)
-                .putString(KEY_EXTRACTED_TEXT, extractedText)
+                .putString(KEY_EXTRACTED_TEXT, safeText)
                 .build()
 
             val constraints = Constraints.Builder()
@@ -75,7 +77,11 @@ class AiSolutionRetryWorker @AssistedInject constructor(
                 .build()
 
             WorkManager.getInstance(context)
-                .enqueue(request)
+                .enqueueUniqueWork(
+                    "ai_retry_$soruId",
+                    androidx.work.ExistingWorkPolicy.REPLACE,
+                    request
+                )
         }
 
         fun cancelAll(context: Context) {
@@ -143,9 +149,10 @@ class AiSolutionRetryWorker @AssistedInject constructor(
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             e.printStackTrace()
-            // InterruptedIOException transient retry
-            if (e is InterruptedIOException && runAttemptCount < 3) return Result.retry()
-            if (runAttemptCount < 3) Result.retry() else Result.failure()
+            // Sadece network/timeout retry, diğerleri failure
+            val isRetryable = e is InterruptedIOException || e is java.io.IOException || e is android.database.sqlite.SQLiteException
+            if (isRetryable && runAttemptCount < 3) return Result.retry()
+            return Result.failure()
         }
     }
 
@@ -160,7 +167,7 @@ class AiSolutionRetryWorker @AssistedInject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(com.sorudefteri.R.mipmap.ic_launcher)
             .setContentTitle("AI Çözümü Hazır ✅")
             .setContentText("\"$topic\" için yapay zeka çözümü hazır. Dokunarak görüntüle.")
             .setStyle(NotificationCompat.BigTextStyle().bigText("\"$topic\" için yapay zeka çözümü hazır."))
@@ -175,7 +182,7 @@ class AiSolutionRetryWorker @AssistedInject constructor(
         createChannel()
         if (!hasNotificationPermission()) return
         val notification = NotificationCompat.Builder(applicationContext, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setSmallIcon(com.sorudefteri.R.mipmap.ic_launcher)
             .setContentTitle("AI Çözümü Başarısız")
             .setContentText(reason.take(100))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)

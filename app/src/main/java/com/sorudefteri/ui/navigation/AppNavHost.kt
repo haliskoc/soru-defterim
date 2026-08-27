@@ -57,7 +57,9 @@ fun AppNavHost(
     modifier: Modifier = Modifier,
     navController: NavHostController = rememberNavController(),
     windowWidthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact,
-    initialOnboardingSeen: Boolean = true
+    initialOnboardingSeen: Boolean = true,
+    deepLinkTarget: String? = null,
+    onDeepLinkHandled: () -> Unit = {}
 ) {
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
@@ -68,6 +70,27 @@ fun AppNavHost(
 
     val isMediumOrExpanded = windowWidthSizeClass == WindowWidthSizeClass.Medium || windowWidthSizeClass == WindowWidthSizeClass.Expanded
     val startDest: Any = if (initialOnboardingSeen) KutuphaneNav else OnboardingNav
+
+    // DeepLink handling (notification -> test)
+    LaunchedEffect(deepLinkTarget, initialOnboardingSeen) {
+        if (deepLinkTarget != null && initialOnboardingSeen) {
+            when (deepLinkTarget) {
+                "test_coz", "test" -> {
+                    // Navigate to Test oluşturma (due reviews will be shown as filter hint)
+                    navController.navigate(TestNav) {
+                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
+                "kutuphane" -> navController.navigate(KutuphaneNav) {
+                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                    launchSingleTop = true
+                }
+            }
+            onDeepLinkHandled()
+        }
+    }
 
     if (isMediumOrExpanded) {
         // TABLET / FOLDABLE / WIDE SCREEN LAYOUT: Side NavigationRail

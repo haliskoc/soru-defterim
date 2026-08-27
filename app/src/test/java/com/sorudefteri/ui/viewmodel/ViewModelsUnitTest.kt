@@ -104,6 +104,10 @@ class ViewModelsUnitTest {
         every { mockAyarlarDataStore.isWifiOnlyBackup } returns flowOf(true)
         every { mockAyarlarDataStore.autoBackupEnabledFlow } returns flowOf(false)
         every { mockAyarlarDataStore.wifiOnlyBackupFlow } returns flowOf(true)
+        every { mockAyarlarDataStore.promptSoruUretimiFlow } returns flowOf("")
+        every { mockAyarlarDataStore.promptCozumUretimiFlow } returns flowOf("")
+        every { mockAyarlarDataStore.promptOcrTemizlemeFlow } returns flowOf("")
+        every { mockAyarlarDataStore.promptBenzerSoruFlow } returns flowOf("")
         every { mockSoruRepository.getDistinctTopics(any()) } returns flowOf(listOf("Trigonometri", "Türev"))
         every { mockKonuKatalog.getUniteList(any(), any()) } returns listOf(
             KonuUnite(uniteAdi = "Fonksiyonlar", konular = listOf("Fonksiyon Grafikleri", "Bileşke"))
@@ -250,7 +254,7 @@ class ViewModelsUnitTest {
         val tumSorularFlow = MutableStateFlow(listOf(s1, s2, s3))
         every { mockSoruRepository.getAllSorular() } returns tumSorularFlow
 
-        val viewModel = KutuphaneViewModel(mockSoruRepository)
+        val viewModel = KutuphaneViewModel(mockSoruRepository, mockAyarlarDataStore)
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()
 
@@ -294,7 +298,7 @@ class ViewModelsUnitTest {
         val s2 = Soru(id = 2, imagePath = "2", examType = "TYT", subjectId = "mat", topic = "B")
         every { mockSoruRepository.getAllSorular() } returns flowOf(listOf(s1, s2))
 
-        val viewModel = KutuphaneViewModel(mockSoruRepository)
+        val viewModel = KutuphaneViewModel(mockSoruRepository, mockAyarlarDataStore)
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()
 
@@ -329,7 +333,9 @@ class ViewModelsUnitTest {
             ayarlarDataStore = mockAyarlarDataStore,
             soruRepository = mockSoruRepository,
             aiRepository = fakeAiRepository,
-            backupManager = fakeBackupManager
+            backupManager = fakeBackupManager,
+            gorselDepo = mockGorselDepo,
+            appContext = mockk(relaxed = true)
         )
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()
@@ -370,7 +376,9 @@ class ViewModelsUnitTest {
             ayarlarDataStore = mockAyarlarDataStore,
             soruRepository = mockSoruRepository,
             aiRepository = fakeAiRepository,
-            backupManager = fakeBackupManager
+            backupManager = fakeBackupManager,
+            gorselDepo = mockGorselDepo,
+            appContext = mockk(relaxed = true)
         )
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()

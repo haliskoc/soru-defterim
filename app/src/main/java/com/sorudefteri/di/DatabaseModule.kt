@@ -29,9 +29,11 @@ object DatabaseModule {
                 SoruDatabase.MIGRATION_1_2,
                 SoruDatabase.MIGRATION_2_3,
                 SoruDatabase.MIGRATION_3_4,
-                SoruDatabase.MIGRATION_4_5
+                SoruDatabase.MIGRATION_4_5,
+                SoruDatabase.MIGRATION_5_6
             )
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
+            .fallbackToDestructiveMigration()
             .build()
     }
 

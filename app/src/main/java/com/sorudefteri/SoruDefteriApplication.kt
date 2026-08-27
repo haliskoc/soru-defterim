@@ -12,8 +12,14 @@ import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import com.sorudefteri.data.backup.AutoBackupWorker
+import com.sorudefteri.data.local.AyarlarDataStore
 import com.sorudefteri.data.worker.ReminderScheduler
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import javax.inject.Inject
 
@@ -31,6 +37,11 @@ class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Conf
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
 
+    @Inject
+    lateinit var ayarlarDataStore: AyarlarDataStore
+
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
@@ -40,8 +51,20 @@ class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Conf
         super.onCreate()
         // Her gün saat 19:00'da tetiklenecek Aralıklı Tekrar bildirimini zamanla
         ReminderScheduler.scheduleDailyReminder(this)
-        // Otomatik yerel yedek (WorkManager 24h periyodik) - ayarlar içinde toggle ile yönetilir, şimdilik varsayılan Wi-Fi only
-        AutoBackupWorker.schedulePeriodic(this)
+        // Otomatik yerel yedek - sadece ayar açıksa schedule et, yoksa iptal et
+        appScope.launch {
+            try {
+                val isEnabled = ayarlarDataStore.isAutoBackupEnabled.first()
+                val isWifiOnly = ayarlarDataStore.isWifiOnlyBackup.first()
+                if (isEnabled) {
+                    AutoBackupWorker.schedulePeriodic(this@SoruDefteriApplication, isWifiOnly)
+                } else {
+                    AutoBackupWorker.cancel(this@SoruDefteriApplication)
+                }
+            } catch (_: Exception) {
+                // varsayılan: kapalıysa planlama yapma
+            }
+        }
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {

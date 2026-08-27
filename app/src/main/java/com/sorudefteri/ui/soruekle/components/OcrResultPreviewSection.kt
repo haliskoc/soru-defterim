@@ -56,7 +56,7 @@ fun OcrResultPreviewSection(
     modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
-    if (extractedText.isNullOrBlank() && !isOcrExtracting) return
+    if (extractedText.isNullOrBlank() && !isOcrExtracting && ocrStatusMessage.isNullOrBlank()) return
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -74,7 +74,7 @@ fun OcrResultPreviewSection(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         imageVector = Icons.Default.DocumentScanner,
-                        contentDescription = null,
+                        contentDescription = "OCR",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(20.dp)
                     )

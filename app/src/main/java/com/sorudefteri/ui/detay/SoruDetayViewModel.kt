@@ -275,8 +275,8 @@ class SoruDetayViewModel @Inject constructor(
      * AI çözüm isteği (Koşullu OCR destekli: Görsel toggle'ı ve ayıklanan metin desteğiyle).
      */
     fun requestAiSolution() {
+        if (_uiState.value.isAiLoading) return
         val currentSoru = _uiState.value.soru ?: return
-        val state = _uiState.value
 
         viewModelScope.launch {
             _uiState.update {
@@ -299,8 +299,9 @@ class SoruDetayViewModel @Inject constructor(
                 return@launch
             }
 
-            // Validasyon: görsel ve metin ikisi de yoksa erken çık
-            if (!state.sendImageToAi && state.extractedOcrText.isNullOrBlank()) {
+            // Fresh state after hasApiKey check (avoid stale snapshot)
+            val fresh = _uiState.value
+            if (!fresh.sendImageToAi && fresh.extractedOcrText.isNullOrBlank()) {
                 _uiState.update {
                     it.copy(
                         isAiLoading = false,
@@ -310,11 +311,17 @@ class SoruDetayViewModel @Inject constructor(
                 return@launch
             }
 
-            val result = aiRepository.getAiSolution(
-                soru = currentSoru,
-                sendImage = state.sendImageToAi,
-                extractedText = state.extractedOcrText
-            )
+            val result = try {
+                aiRepository.getAiSolution(
+                    soru = currentSoru,
+                    sendImage = fresh.sendImageToAi,
+                    extractedText = fresh.extractedOcrText
+                )
+            } catch (e: Exception) {
+                // Ensure loading flag cleared if repository throws (e.g., cancellation)
+                _uiState.update { it.copy(isAiLoading = false, aiError = e.localizedMessage) }
+                return@launch
+            }
 
             result.onSuccess { explanation ->
                 val updated = currentSoru.copy(
@@ -341,11 +348,12 @@ class SoruDetayViewModel @Inject constructor(
                 var queued = false
                 if (isNetworkError) {
                     try {
+                        val fq = _uiState.value
                         AiSolutionRetryWorker.enqueue(
                             context = appContext,
                             soruId = currentSoru.id,
-                            sendImageToAi = state.sendImageToAi,
-                            extractedText = state.extractedOcrText
+                            sendImageToAi = fq.sendImageToAi,
+                            extractedText = fq.extractedOcrText?.take(9000)
                         )
                         queued = true
                     } catch (_: Exception) {}
@@ -467,8 +475,8 @@ class SoruDetayViewModel @Inject constructor(
      * Bu soruyla birebir aynı kazanımı ölçen benzer bir soru ve çözümü üretir (Question Cloner).
      */
     fun generateSimilarQuestion() {
+        if (_uiState.value.isGeneratingSimilar) return
         val currentSoru = _uiState.value.soru ?: return
-        val state = _uiState.value
 
         viewModelScope.launch {
             _uiState.update {
@@ -492,19 +500,23 @@ class SoruDetayViewModel @Inject constructor(
                 return@launch
             }
 
-            val bytes = if (state.sendImageToAi) {
-                gorselDepo.getGorselBytes(currentSoru.imagePath)
-            } else {
-                null
-            }
+            val fresh = _uiState.value
+            val bytes = if (fresh.sendImageToAi) {
+                try { gorselDepo.getGorselBytes(currentSoru.imagePath) } catch (_: Exception) { null }
+            } else null
 
             val dersAdi = com.sorudefteri.domain.DersTaksonomisi.getDersAdi(currentSoru.examType, currentSoru.subjectId)
-            val result = aiRepository.generateSimilarQuestion(
-                imageBytes = bytes,
-                dersAdi = dersAdi,
-                konu = currentSoru.topic,
-                soruMetni = state.extractedOcrText
-            )
+            val result = try {
+                aiRepository.generateSimilarQuestion(
+                    imageBytes = bytes,
+                    dersAdi = dersAdi,
+                    konu = currentSoru.topic,
+                    soruMetni = fresh.extractedOcrText
+                )
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isGeneratingSimilar = false, similarQuestionError = e.localizedMessage) }
+                return@launch
+            }
             result.onSuccess { similar ->
                 _uiState.update {
                     it.copy(

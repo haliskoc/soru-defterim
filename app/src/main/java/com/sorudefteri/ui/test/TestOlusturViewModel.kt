@@ -2,8 +2,10 @@ package com.sorudefteri.ui.test
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sorudefteri.data.local.AyarlarDataStore
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.KonuKatalog
+import com.sorudefteri.domain.model.Alan
 import com.sorudefteri.domain.model.Ders
 import com.sorudefteri.domain.model.HataTipi
 import com.sorudefteri.domain.model.Soru
@@ -59,13 +61,23 @@ data class TestOlusturUiState(
 class TestOlusturViewModel @Inject constructor(
     private val soruRepository: SoruRepository,
     private val konuKatalog: KonuKatalog,
-    private val testSessionManager: TestSessionManager
+    private val testSessionManager: TestSessionManager,
+    private val ayarlarDataStore: AyarlarDataStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TestOlusturUiState())
     val uiState: StateFlow<TestOlusturUiState> = _uiState.asStateFlow()
 
+    private val _currentAlan = MutableStateFlow(Alan.SAYISAL)
+
     init {
+        viewModelScope.launch {
+            ayarlarDataStore.currentAlan.collect { alan ->
+                _currentAlan.value = alan
+                // Alan değiştiğinde UI'yi yeniden hesapla
+                _uiState.update { state -> recomputeUi(state) }
+            }
+        }
         loadQuestions()
     }
 
@@ -89,12 +101,20 @@ class TestOlusturViewModel @Inject constructor(
 
     private fun recomputeUi(state: TestOlusturUiState): TestOlusturUiState {
         val all = state.allQuestions
+        val alan = _currentAlan.value
 
-        // Sınav türüne göre uygun dersleri hazırla
+        // Sınav türüne ve kullanıcının Alan'ına göre uygun dersleri hazırla
         val rawDersler: List<Ders> = when (state.examType) {
             "TYT" -> DersTaksonomisi.tytDersleri
-            "AYT" -> (DersTaksonomisi.aytSayisalDersleri + DersTaksonomisi.aytEsitAgirlikDersleri + DersTaksonomisi.aytSozelDersleri).distinctBy { it.id }
-            else -> (DersTaksonomisi.tytDersleri + DersTaksonomisi.aytSayisalDersleri + DersTaksonomisi.aytEsitAgirlikDersleri + DersTaksonomisi.aytSozelDersleri).distinctBy { it.id }
+            "AYT" -> DersTaksonomisi.getAytDersler(alan)
+            "LGS" -> DersTaksonomisi.lgsDersleri
+            "KPSS" -> DersTaksonomisi.kpssDersleri
+            else -> when (alan) {
+                Alan.LGS -> DersTaksonomisi.lgsDersleri
+                Alan.KPSS -> DersTaksonomisi.kpssDersleri
+                Alan.SAYISAL, Alan.ESIT_AGIRLIK, Alan.SOZEL -> DersTaksonomisi.tytDersleri + DersTaksonomisi.getAytDersler(alan)
+                Alan.YDT -> DersTaksonomisi.tytDersleri + DersTaksonomisi.getAytDersler(alan)
+            }.distinctBy { it.id }
         }
 
         val subjectItems = rawDersler.map { ders ->

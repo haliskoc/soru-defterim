@@ -13,6 +13,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import java.io.File
 import java.io.FileNotFoundException
 import javax.inject.Inject
@@ -30,43 +31,60 @@ class OcrHelper @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
 
-    private val recognizer: TextRecognizer by lazy {
-        TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
-    }
+    @Volatile
+    private var _recognizer: TextRecognizer? = null
 
+    @Volatile
     private var isClosed = false
+
+    private fun getRecognizer(): TextRecognizer {
+        synchronized(this) {
+            if (_recognizer == null || isClosed) {
+                _recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+                isClosed = false
+            }
+            return _recognizer!!
+        }
+    }
 
     /**
      * Bitmap nesnesinden metin ayıklar. rotationDegrees EXIF'ten alınmalı (0 yerine).
      */
     suspend fun recognizeText(bitmap: Bitmap, rotationDegrees: Int = 0): Result<String> = withContext(Dispatchers.Default) {
-        suspendCancellableCoroutine { continuation ->
-            continuation.invokeOnCancellation {
-                // cancellation'da recognizer task iptali yok, ama lifecycle temizliği için log
+        try {
+            withTimeout(15000L) {
+                suspendCancellableCoroutine { continuation ->
+                    try {
+                        val inputImage = InputImage.fromBitmap(bitmap, rotationDegrees)
+                        val rec = getRecognizer()
+                        rec.process(inputImage)
+                            .addOnSuccessListener { visionText ->
+                                val cleaned = cleanOcrArtifacts(visionText.text)
+                                if (continuation.isActive) continuation.resume(Result.success(cleaned))
+                            }
+                            .addOnFailureListener { exception ->
+                                if (continuation.isActive) continuation.resume(
+                                    Result.failure(
+                                        Exception("Görselden metin okunamadı: ${exception.localizedMessage}", exception)
+                                    )
+                                )
+                            }
+                            .addOnCanceledListener {
+                                if (continuation.isActive) continuation.cancel()
+                            }
+                    } catch (e: Exception) {
+                        if (continuation.isActive) continuation.resume(Result.failure(e))
+                    } catch (oom: OutOfMemoryError) {
+                        if (continuation.isActive) continuation.resume(Result.failure(Exception("OCR OOM: ${oom.message}", oom)))
+                    }
+                }
             }
-            try {
-                // rotation 0 yerine GorselDepo rotasyonu kullan çağrısı: caller rotationDegrees vermeli
-                val inputImage = InputImage.fromBitmap(bitmap, rotationDegrees)
-                recognizer.process(inputImage)
-                    .addOnSuccessListener { visionText ->
-                        val cleaned = cleanOcrArtifacts(visionText.text)
-                        if (continuation.isActive) continuation.resume(Result.success(cleaned))
-                    }
-                    .addOnFailureListener { exception ->
-                        if (continuation.isActive) continuation.resume(
-                            Result.failure(
-                                Exception("Görselden metin okunamadı: ${exception.localizedMessage}", exception)
-                            )
-                        )
-                    }
-                    .addOnCanceledListener {
-                        if (continuation.isActive) continuation.cancel()
-                    }
-            } catch (e: Exception) {
-                if (continuation.isActive) continuation.resume(Result.failure(e))
-            } catch (oom: OutOfMemoryError) {
-                if (continuation.isActive) continuation.resume(Result.failure(Exception("OCR OOM: ${oom.message}", oom)))
-            }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            Result.failure(Exception("OCR zaman aşımına uğradı (15s). Lütfen daha küçük bir görseli deneyin.", e))
+        } catch (e: Exception) {
+            Result.failure(e)
+        } catch (oom: OutOfMemoryError) {
+            Result.failure(Exception("OCR OOM", oom))
         }
     }
 
@@ -74,30 +92,39 @@ class OcrHelper @Inject constructor(
      * Android Uri (content:// veya file://) üzerinden metin ayıklar.
      */
     suspend fun recognizeText(uri: Uri): Result<String> = withContext(Dispatchers.IO) {
-        suspendCancellableCoroutine { continuation ->
-            continuation.invokeOnCancellation { }
-            try {
-                val inputImage = InputImage.fromFilePath(context, uri)
-                recognizer.process(inputImage)
-                    .addOnSuccessListener { visionText ->
-                        val cleaned = cleanOcrArtifacts(visionText.text)
-                        if (continuation.isActive) continuation.resume(Result.success(cleaned))
+        try {
+            withTimeout(15000L) {
+                suspendCancellableCoroutine { continuation ->
+                    try {
+                        val inputImage = InputImage.fromFilePath(context, uri)
+                        getRecognizer().process(inputImage)
+                            .addOnSuccessListener { visionText ->
+                                val cleaned = cleanOcrArtifacts(visionText.text)
+                                if (continuation.isActive) continuation.resume(Result.success(cleaned))
+                            }
+                            .addOnFailureListener { exception ->
+                                if (continuation.isActive) continuation.resume(
+                                    Result.failure(
+                                        Exception("Uri üzerinden metin okunamadı: ${exception.localizedMessage}", exception)
+                                    )
+                                )
+                            }
+                            .addOnCanceledListener {
+                                if (continuation.isActive) continuation.cancel()
+                            }
+                    } catch (e: Exception) {
+                        if (continuation.isActive) continuation.resume(Result.failure(e))
+                    } catch (oom: OutOfMemoryError) {
+                        if (continuation.isActive) continuation.resume(Result.failure(Exception("OCR OOM", oom)))
                     }
-                    .addOnFailureListener { exception ->
-                        if (continuation.isActive) continuation.resume(
-                            Result.failure(
-                                Exception("Uri üzerinden metin okunamadı: ${exception.localizedMessage}", exception)
-                            )
-                        )
-                    }
-                    .addOnCanceledListener {
-                        if (continuation.isActive) continuation.cancel()
-                    }
-            } catch (e: Exception) {
-                if (continuation.isActive) continuation.resume(Result.failure(e))
-            } catch (oom: OutOfMemoryError) {
-                if (continuation.isActive) continuation.resume(Result.failure(Exception("OCR OOM", oom)))
+                }
             }
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            Result.failure(Exception("OCR zaman aşımına uğradı (15s).", e))
+        } catch (e: Exception) {
+            Result.failure(e)
+        } catch (oom: OutOfMemoryError) {
+            Result.failure(Exception("OCR OOM", oom))
         }
     }
 
@@ -200,7 +227,7 @@ class OcrHelper @Inject constructor(
             if (file.length() > 5 * 1024 * 1024) inSampleSize *= 2
             val opts = BitmapFactory.Options().apply {
                 this.inSampleSize = inSampleSize
-                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inPreferredConfig = Bitmap.Config.RGB_565
             }
             try {
                 BitmapFactory.decodeFile(file.absolutePath, opts)
@@ -228,7 +255,7 @@ class OcrHelper @Inject constructor(
             if (bytes.size > 5 * 1024 * 1024) inSampleSize *= 2
             val opts = BitmapFactory.Options().apply {
                 this.inSampleSize = inSampleSize
-                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inPreferredConfig = Bitmap.Config.RGB_565
             }
             try {
                 BitmapFactory.decodeByteArray(bytes, 0, bytes.size, opts)
@@ -272,7 +299,7 @@ class OcrHelper @Inject constructor(
     fun close() {
         if (isClosed) return
         try {
-            recognizer.close()
+            _recognizer?.close()
             isClosed = true
         } catch (_: Exception) {
         } catch (_: OutOfMemoryError) {}

@@ -65,8 +65,9 @@ object AiJsonParser {
      */
     fun sanitizeLatexEscapesInJson(jsonStr: String): String {
         // Standart JSON kaçışları: \", \\, \/, \b, \f, \n, \r, \t, \uXXXX
-        // Bunun dışındaki tekil \ karakterlerini \\ ile değiştir
-        val regex = Regex("""\\(?!["\\/bfnrt]|u[0-9a-fA-F]{4})""")
+        // LaTeX komutları \frac, \to, \neq vb. için \f, \t, \n, \b, \r tek başına valide sayılır ama
+        // \f + letter (frac), \t+letter (to), \n+letter (neq), \b+letter (binom), \r+letter (rightarrow) ise LaTeX'tir ve kaçışlanmalı
+        val regex = Regex("""\\(?!(?:["\\/]|b(?![a-zA-Z])|f(?![a-zA-Z])|n(?![a-zA-Z])|r(?![a-zA-Z])|t(?![a-zA-Z])|u[0-9a-fA-F]{4}))""")
         return jsonStr.replace(regex, "\\\\")
     }
 
@@ -95,12 +96,19 @@ object AiJsonParser {
         } catch (_: Exception) {
         }
 
-        // 3. Fallback parser (Regex tabanlı)
+        // 3. Fallback parser (Regex tabanlı) - önce ham text (tam çözüm içerir), sonra temizlenmiş candidate
         if (fallbackParser != null) {
             try {
                 val fallbackResult = fallbackParser(rawText)
                 if (fallbackResult != null) {
                     return Result.success(fallbackResult)
+                }
+            } catch (_: Exception) {
+            }
+            try {
+                val fallbackResult2 = fallbackParser(cleanCandidate)
+                if (fallbackResult2 != null) {
+                    return Result.success(fallbackResult2)
                 }
             } catch (_: Exception) {
             }

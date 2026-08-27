@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import android.content.Intent
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
@@ -11,6 +12,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sorudefteri.data.local.AyarlarDataStore
@@ -30,9 +33,12 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var ayarlarDataStore: AyarlarDataStore
 
+    private var deepLinkTarget by mutableStateOf<String?>(null)
+
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        deepLinkTarget = intent?.getStringExtra("navigate_to")
         enableEdgeToEdge()
         setContent {
             val windowSizeClass = calculateWindowSizeClass(this)
@@ -53,11 +59,22 @@ class MainActivity : ComponentActivity() {
                     if (isOnboardingSeen != null) {
                         AppNavHost(
                             windowWidthSizeClass = windowSizeClass.widthSizeClass,
-                            initialOnboardingSeen = isOnboardingSeen == true
+                            initialOnboardingSeen = isOnboardingSeen == true,
+                            deepLinkTarget = deepLinkTarget,
+                            onDeepLinkHandled = { deepLinkTarget = null }
                         )
                     }
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val target = intent.getStringExtra("navigate_to")
+        if (target != null) {
+            deepLinkTarget = target
         }
     }
 }

@@ -166,6 +166,38 @@ fun FiltreBar(
             } else null
         )
 
+        // Sınav Türü: LGS
+        FilterChip(
+            selected = selectedExamType == "LGS",
+            onClick = { onExamTypeSelected(if (selectedExamType == "LGS") null else "LGS") },
+            label = { Text("LGS") },
+            leadingIcon = if (selectedExamType == "LGS") {
+                {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Seçili: LGS",
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            } else null
+        )
+
+        // Sınav Türü: KPSS
+        FilterChip(
+            selected = selectedExamType == "KPSS",
+            onClick = { onExamTypeSelected(if (selectedExamType == "KPSS") null else "KPSS") },
+            label = { Text("KPSS") },
+            leadingIcon = if (selectedExamType == "KPSS") {
+                {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Seçili: KPSS",
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            } else null
+        )
+
         // Ders Filtresi Dropdown
         Box {
             val selectedSubjectName = availableSubjects.find { it.id == selectedSubjectId }?.name

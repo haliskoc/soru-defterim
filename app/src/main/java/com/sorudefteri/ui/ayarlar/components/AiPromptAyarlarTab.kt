@@ -84,9 +84,15 @@ fun AiPromptAyarlarTab(
     onGroqModelSelected: (String) -> Unit,
     onNvidiaModelSelected: (String) -> Unit = {},
     onFetchLiveModelsClick: (AiProviderType) -> Unit,
+    customPrompts: Map<AiPromptType, String> = emptyMap(),
+    onSavePrompt: (AiPromptType, String) -> Unit = { _, _ -> },
+    onResetPrompt: (AiPromptType) -> Unit = {},
+    onResetAllPrompts: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isKeyVisible by rememberSaveable { mutableStateOf(false) }
+    // Reset visibility when provider changes to avoid exposing new key
+    androidx.compose.runtime.LaunchedEffect(aiProvider) { isKeyVisible = false }
     var isModelDropdownExpanded by rememberSaveable { mutableStateOf(false) }
     var expandedPromptType by rememberSaveable { mutableStateOf<AiPromptType?>(null) }
 
@@ -268,7 +274,7 @@ fun AiPromptAyarlarTab(
             }
         }
 
-        // 3. Detaylı System Prompt Yönetimi
+        // 3. Detaylı System Prompt Yönetimi (editable)
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -276,13 +282,24 @@ fun AiPromptAyarlarTab(
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "System Prompt Yönetimi",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    TextButton(onClick = onResetAllPrompts) {
+                        Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Tümünü Sıfırla")
+                    }
+                }
                 Text(
-                    text = "System Prompt Yönetimi",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Yapay zekanın soru üretimi, çözüm adımları ve OCR düzeltme davranışını yöneten sistem promptlarını özelleştirebilirsiniz.",
+                    text = "Yapay zekanın soru üretimi, çözüm adımları ve OCR düzeltme davranışını yöneten sistem promptlarını özelleştirebilirsiniz. Boş bırakırsanız varsayılan kullanılır. 8000 karakter limiti.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -290,10 +307,13 @@ fun AiPromptAyarlarTab(
                 AiPromptType.entries.forEach { promptType ->
                     PromptAccordionItem(
                         promptType = promptType,
+                        customPrompt = customPrompts[promptType] ?: "",
                         isExpanded = expandedPromptType == promptType,
                         onToggleExpand = {
                             expandedPromptType = if (expandedPromptType == promptType) null else promptType
-                        }
+                        },
+                        onSave = { text -> onSavePrompt(promptType, text) },
+                        onReset = { onResetPrompt(promptType) }
                     )
                 }
             }
@@ -304,8 +324,11 @@ fun AiPromptAyarlarTab(
 @Composable
 private fun PromptAccordionItem(
     promptType: AiPromptType,
+    customPrompt: String,
     isExpanded: Boolean,
-    onToggleExpand: () -> Unit
+    onToggleExpand: () -> Unit,
+    onSave: (String) -> Unit,
+    onReset: () -> Unit
 ) {
     val defaultPrompt = when (promptType) {
         AiPromptType.SORU_URETIMI -> AiPromptManager.PROMPT_SORU_URETIMI_DEFAULT
@@ -313,6 +336,14 @@ private fun PromptAccordionItem(
         AiPromptType.OCR_TEMIZLEME -> AiPromptManager.PROMPT_OCR_TEMIZLEME_DEFAULT
         AiPromptType.BENZER_SORU -> AiPromptManager.PROMPT_BENZER_SORU_DEFAULT
     }
+    var editText by remember(promptType, customPrompt) { mutableStateOf(customPrompt) }
+    // Sync when external customPrompt changes (e.g., after reset)
+    androidx.compose.runtime.LaunchedEffect(customPrompt) {
+        if (editText != customPrompt) editText = customPrompt
+    }
+    val isCustom = customPrompt.isNotBlank()
+    val charCount = editText.length
+    val isTooLong = charCount > 8000
 
     OutlinedCard(
         shape = RoundedCornerShape(12.dp),
@@ -324,11 +355,20 @@ private fun PromptAccordionItem(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = promptType.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Bold
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = promptType.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    if (isCustom) {
+                        Text(
+                            text = "Özelleştirildi • $charCount char",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
 
                 IconButton(onClick = onToggleExpand, modifier = Modifier.size(48.dp)) {
                     Icon(
@@ -339,22 +379,72 @@ private fun PromptAccordionItem(
             }
 
             AnimatedVisibility(visible = isExpanded) {
-                Column(modifier = Modifier.padding(top = 8.dp)) {
+                Column(modifier = Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = promptType.description,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    // Varsayılan preview (collapsed height)
+                    Text(
+                        text = "Varsayılan şablon (salt okunur):",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
                     OutlinedTextField(
                         value = defaultPrompt,
                         onValueChange = {},
                         readOnly = true,
-                        label = { Text("Varsayılan Sistem Şablonu") },
                         modifier = Modifier.fillMaxWidth(),
-                        maxLines = 8,
-                        shape = RoundedCornerShape(8.dp)
+                        maxLines = 6,
+                        shape = RoundedCornerShape(8.dp),
+                        enabled = false,
+                        colors = OutlinedTextFieldDefaults.colors(disabledTextColor = MaterialTheme.colorScheme.onSurfaceVariant)
                     )
+                    Text(
+                        text = "Özelleştir (boş = varsayılan, 8000 limit). JSON beklenen tiplerde questionText/correctAnswer içermeli.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isTooLong) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    OutlinedTextField(
+                        value = editText,
+                        onValueChange = { editText = it },
+                        label = { Text("Özel Prompt") },
+                        placeholder = { Text("Boş bırak = varsayılan kullanılır") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3,
+                        maxLines = 10,
+                        shape = RoundedCornerShape(8.dp),
+                        isError = isTooLong,
+                        supportingText = {
+                            Text("${charCount}/8000", color = if (isTooLong) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { onSave(editText) },
+                            enabled = !isTooLong,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("Kaydet")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                editText = ""
+                                onReset()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Varsayılana Döndür")
+                        }
+                    }
                 }
             }
         }

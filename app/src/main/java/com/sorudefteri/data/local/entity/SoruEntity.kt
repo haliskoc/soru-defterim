@@ -18,7 +18,9 @@ import com.sorudefteri.domain.model.Soru
         Index(value = ["mistakeType"]),
         Index(value = ["isSolved"]),
         Index(value = ["isFavorite"]),
-        Index(value = ["createdAt"])
+        Index(value = ["createdAt"]),
+        Index(value = ["nextReviewDate"]),
+        Index(value = ["reviewStage"])
     ]
 )
 data class SoruEntity(

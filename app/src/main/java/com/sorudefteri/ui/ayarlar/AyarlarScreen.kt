@@ -65,6 +65,14 @@ fun AyarlarScreen(
         }
     }
 
+    val promptStatus by viewModel.promptStatus.collectAsStateWithLifecycle()
+    LaunchedEffect(promptStatus) {
+        promptStatus.first?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearPromptStatus()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -129,29 +137,44 @@ fun AyarlarScreen(
                         onResetAllDataClick = { showResetConfirmDialog = true }
                     )
 
-                    1 -> AiPromptAyarlarTab(
-                        aiProvider = uiState.aiProvider,
-                        geminiApiKey = uiState.geminiApiKey,
-                        groqApiKey = uiState.groqApiKey,
-                        nvidiaApiKey = uiState.nvidiaApiKey,
-                        geminiModel = uiState.geminiModel,
-                        groqModel = uiState.groqModel,
-                        nvidiaModel = uiState.nvidiaModel,
-                        isFetchingModels = uiState.isFetchingModels,
-                        fetchedGeminiModels = uiState.fetchedGeminiModels,
-                        fetchedGroqModels = uiState.fetchedGroqModels,
-                        fetchedNvidiaModels = uiState.fetchedNvidiaModels,
-                        modelFetchStatus = uiState.modelFetchStatus,
-                        isModelFetchError = uiState.isModelFetchError,
-                        onAiProviderSelected = { viewModel.setAiProvider(it) },
-                        onGeminiApiKeyChanged = { viewModel.setGeminiApiKey(it) },
-                        onGroqApiKeyChanged = { viewModel.setGroqApiKey(it) },
-                        onNvidiaApiKeyChanged = { viewModel.setNvidiaApiKey(it) },
-                        onGeminiModelSelected = { viewModel.setGeminiModel(it) },
-                        onGroqModelSelected = { viewModel.setGroqModel(it) },
-                        onNvidiaModelSelected = { viewModel.setNvidiaModel(it) },
-                        onFetchLiveModelsClick = { viewModel.fetchLiveModels(it) }
-                    )
+                    1 -> {
+                        val promptSoru by viewModel.promptSoruUretimiFlow.collectAsStateWithLifecycle()
+                        val promptCozum by viewModel.promptCozumUretimiFlow.collectAsStateWithLifecycle()
+                        val promptOcr by viewModel.promptOcrTemizlemeFlow.collectAsStateWithLifecycle()
+                        val promptBenzer by viewModel.promptBenzerSoruFlow.collectAsStateWithLifecycle()
+                        AiPromptAyarlarTab(
+                            aiProvider = uiState.aiProvider,
+                            geminiApiKey = uiState.geminiApiKey,
+                            groqApiKey = uiState.groqApiKey,
+                            nvidiaApiKey = uiState.nvidiaApiKey,
+                            geminiModel = uiState.geminiModel,
+                            groqModel = uiState.groqModel,
+                            nvidiaModel = uiState.nvidiaModel,
+                            isFetchingModels = uiState.isFetchingModels,
+                            fetchedGeminiModels = uiState.fetchedGeminiModels,
+                            fetchedGroqModels = uiState.fetchedGroqModels,
+                            fetchedNvidiaModels = uiState.fetchedNvidiaModels,
+                            modelFetchStatus = uiState.modelFetchStatus,
+                            isModelFetchError = uiState.isModelFetchError,
+                            onAiProviderSelected = { viewModel.setAiProvider(it) },
+                            onGeminiApiKeyChanged = { viewModel.setGeminiApiKey(it) },
+                            onGroqApiKeyChanged = { viewModel.setGroqApiKey(it) },
+                            onNvidiaApiKeyChanged = { viewModel.setNvidiaApiKey(it) },
+                            onGeminiModelSelected = { viewModel.setGeminiModel(it) },
+                            onGroqModelSelected = { viewModel.setGroqModel(it) },
+                            onNvidiaModelSelected = { viewModel.setNvidiaModel(it) },
+                            onFetchLiveModelsClick = { viewModel.fetchLiveModels(it) },
+                            customPrompts = mapOf(
+                                com.sorudefteri.data.ai.AiPromptType.SORU_URETIMI to promptSoru,
+                                com.sorudefteri.data.ai.AiPromptType.COZUM_URETIMI to promptCozum,
+                                com.sorudefteri.data.ai.AiPromptType.OCR_TEMIZLEME to promptOcr,
+                                com.sorudefteri.data.ai.AiPromptType.BENZER_SORU to promptBenzer
+                            ),
+                            onSavePrompt = { type, text -> viewModel.setCustomPrompt(type, text) },
+                            onResetPrompt = { type -> viewModel.resetPrompt(type) },
+                            onResetAllPrompts = { viewModel.resetAllPrompts() }
+                        )
+                    }
 
                     2 -> YedeklemeGuvenlikTab(
                         isBackupLoading = uiState.isBackupLoading,

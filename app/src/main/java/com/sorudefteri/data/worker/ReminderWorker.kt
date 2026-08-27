@@ -41,8 +41,8 @@ class ReminderWorker @AssistedInject constructor(
     override suspend fun doWork(): Result {
         return try {
             val currentTime = System.currentTimeMillis()
-            val dueSorular = soruDao.getDueReviewSorularList(currentTime)
-            val dueCount = dueSorular.size
+            // Use COUNT query for efficiency if possible, but keep list for future details
+            val dueCount = soruDao.getDueReviewSorularList(currentTime).size
 
             if (dueCount > 0) {
                 sendNotification(dueCount)
@@ -51,7 +51,9 @@ class ReminderWorker @AssistedInject constructor(
             Result.success()
         } catch (e: Exception) {
             e.printStackTrace()
-            Result.retry()
+            // Only retry on transient IO/DB busy, otherwise failure to avoid infinite loop
+            val isTransient = e is java.io.IOException || e is android.database.sqlite.SQLiteException
+            if (isTransient) Result.retry() else Result.failure()
         }
     }
 
@@ -85,7 +87,7 @@ class ReminderWorker @AssistedInject constructor(
         val notificationContent = "Bugün tekrar etmen gereken $dueCount soru var. Şimdi çözmeye başla!"
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle(notificationTitle)
             .setContentText(notificationContent)
             .setStyle(NotificationCompat.BigTextStyle().bigText(notificationContent))

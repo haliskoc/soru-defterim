@@ -1,19 +1,25 @@
 package com.sorudefteri.ui.ayarlar
 
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sorudefteri.data.ai.AiPromptType
+import com.sorudefteri.data.backup.AutoBackupWorker
 import com.sorudefteri.data.backup.BackupManager
+import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.data.local.AyarlarDataStore
 import com.sorudefteri.data.repository.SoruRepository
 import com.sorudefteri.domain.model.AiProviderType
 import com.sorudefteri.domain.model.Alan
 import com.sorudefteri.domain.repository.AiRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -63,12 +69,15 @@ class AyarlarViewModel @Inject constructor(
     private val ayarlarDataStore: AyarlarDataStore,
     private val soruRepository: SoruRepository,
     private val aiRepository: AiRepository,
-    private val backupManager: BackupManager
+    private val backupManager: BackupManager,
+    private val gorselDepo: GorselDepo,
+    @ApplicationContext private val appContext: Context
 ) : ViewModel() {
 
     private val _dynamicModelsState = MutableStateFlow(DynamicModelsInfo())
     private val _modelStatusState = MutableStateFlow<Pair<String?, Boolean>>(null to false)
     private val _backupState = MutableStateFlow(BackupState())
+    private val _promptStatusState = MutableStateFlow<Pair<String?, Boolean>>(null to false)
 
     private val preferencesFlow = combine(
         ayarlarDataStore.currentAlan,
@@ -117,6 +126,18 @@ class AyarlarViewModel @Inject constructor(
             isWifiOnly = prefs.second
         )
     }
+
+    // Prompt flows exposed directly for UI collect
+    val promptSoruUretimiFlow = ayarlarDataStore.promptSoruUretimiFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val promptCozumUretimiFlow = ayarlarDataStore.promptCozumUretimiFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val promptOcrTemizlemeFlow = ayarlarDataStore.promptOcrTemizlemeFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+    val promptBenzerSoruFlow = ayarlarDataStore.promptBenzerSoruFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), "")
+
+    val promptStatus: StateFlow<Pair<String?, Boolean>> = _promptStatusState
 
     val uiState: StateFlow<AyarlarUiState> = combine(
         preferencesFlow,
@@ -207,16 +228,76 @@ class AyarlarViewModel @Inject constructor(
     fun setAutoBackupEnabled(enabled: Boolean) {
         viewModelScope.launch {
             ayarlarDataStore.setAutoBackupEnabled(enabled)
-            if (enabled) {
-                // schedule will be handled by Application observer; immediate trigger via datastore
-            }
+            try {
+                if (enabled) {
+                    val wifiOnly = ayarlarDataStore.isWifiOnlyBackup.first()
+                    AutoBackupWorker.schedulePeriodic(appContext, wifiOnly)
+                } else {
+                    AutoBackupWorker.cancel(appContext)
+                }
+            } catch (_: Exception) {}
         }
     }
 
     fun setWifiOnly(enabled: Boolean) {
         viewModelScope.launch {
             ayarlarDataStore.setWifiOnlyBackup(enabled)
+            try {
+                val isAutoEnabled = ayarlarDataStore.isAutoBackupEnabled.first()
+                if (isAutoEnabled) {
+                    AutoBackupWorker.schedulePeriodic(appContext, enabled)
+                }
+            } catch (_: Exception) {}
         }
+    }
+
+    fun setCustomPrompt(type: AiPromptType, prompt: String) {
+        viewModelScope.launch {
+            // Validasyon: uzunluk
+            if (prompt.length > 8000) {
+                _promptStatusState.value = "Prompt çok uzun (${prompt.length}/8000)" to true
+                return@launch
+            }
+            // JSON beklenen tiplerde şema anahtarı kontrolü
+            if (type == AiPromptType.SORU_URETIMI || type == AiPromptType.BENZER_SORU) {
+                if (prompt.isNotBlank() && (!prompt.contains("questionText") || !prompt.contains("correctAnswer"))) {
+                    _promptStatusState.value = "Uyarı: JSON şeması questionText/correctAnswer içermiyor, parse hatası olabilir." to true
+                    // yine de kaydet, sadece uyar
+                }
+            }
+            try {
+                ayarlarDataStore.setCustomPrompt(type, prompt)
+                _promptStatusState.value = "${type.title} kaydedildi ✓" to false
+            } catch (e: Exception) {
+                _promptStatusState.value = "Kaydetme hatası: ${e.localizedMessage}" to true
+            }
+        }
+    }
+
+    fun resetPrompt(type: AiPromptType) {
+        viewModelScope.launch {
+            try {
+                ayarlarDataStore.resetPromptToDefault(type)
+                _promptStatusState.value = "${type.title} varsayılana döndü ✓" to false
+            } catch (e: Exception) {
+                _promptStatusState.value = "Sıfırlama hatası: ${e.localizedMessage}" to true
+            }
+        }
+    }
+
+    fun resetAllPrompts() {
+        viewModelScope.launch {
+            try {
+                ayarlarDataStore.resetAllPromptsToDefault()
+                _promptStatusState.value = "Tüm promptlar varsayılana döndü ✓" to false
+            } catch (e: Exception) {
+                _promptStatusState.value = "Sıfırlama hatası: ${e.localizedMessage}" to true
+            }
+        }
+    }
+
+    fun clearPromptStatus() {
+        _promptStatusState.value = null to false
     }
 
     fun fetchLiveModels(provider: AiProviderType) {
@@ -327,6 +408,9 @@ class AyarlarViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 soruRepository.deleteAllSorular()
+                // Diskteki görselleri de temizle (hayalet dosya kalmasın)
+                try { gorselDepo.tumGorselleriSil() } catch (_: Exception) {}
+                // Ayarları temizle ama onboarding flag'ini resetleme? Şimdilik tümü siliniyor, kullanıcı onboarding tekrar görecek
                 ayarlarDataStore.clearSettings()
                 onSuccess()
             } catch (e: Exception) {

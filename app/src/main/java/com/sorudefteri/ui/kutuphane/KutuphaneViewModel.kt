@@ -2,6 +2,7 @@ package com.sorudefteri.ui.kutuphane
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sorudefteri.data.local.AyarlarDataStore
 import com.sorudefteri.data.repository.SoruRepository
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.Alan
@@ -71,7 +72,8 @@ private data class FilterParams(
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class KutuphaneViewModel @Inject constructor(
-    private val soruRepository: SoruRepository
+    private val soruRepository: SoruRepository,
+    private val ayarlarDataStore: AyarlarDataStore
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -89,6 +91,17 @@ class KutuphaneViewModel @Inject constructor(
     private val _isSelectionMode = MutableStateFlow(false)
 
     private var lastDeletedSoru: Soru? = null
+
+    // Alan-aware: track current Alan for subject availability
+    private val _currentAlan = MutableStateFlow(Alan.SAYISAL)
+
+    init {
+        viewModelScope.launch {
+            ayarlarDataStore.currentAlan.collect { alan ->
+                _currentAlan.value = alan
+            }
+        }
+    }
 
     private val filterParamsFlow = combine(
         combine(
@@ -136,13 +149,18 @@ class KutuphaneViewModel @Inject constructor(
 
     val uiState: StateFlow<KutuphaneUiState> = combine(
         soruRepository.getAllSorular(),
-        filterParamsFlow
-    ) { sorular, filters ->
-        val availableSubjects = if (filters.examType == null) {
-            DersTaksonomisi.TYT_DERSLER + DersTaksonomisi.getAytDersler(Alan.SAYISAL)
-        } else {
-            DersTaksonomisi.getDersler(filters.examType, Alan.SAYISAL)
-        }
+        filterParamsFlow,
+        _currentAlan
+    ) { sorular, filters, currentAlan ->
+        val availableSubjects = when {
+            currentAlan == Alan.LGS || filters.examType.equals("LGS", ignoreCase = true) -> DersTaksonomisi.lgsDersleri
+            currentAlan == Alan.KPSS || filters.examType.equals("KPSS", ignoreCase = true) -> DersTaksonomisi.kpssDersleri
+            filters.examType == null -> {
+                // Show TYT + current Alan's AYT (or all if SAYISAL includes wide)
+                DersTaksonomisi.tytDersleri + DersTaksonomisi.getAytDersler(currentAlan)
+            }
+            else -> DersTaksonomisi.getDersler(filters.examType, currentAlan)
+        }.distinctBy { it.id }
 
         val availablePublishers = sorular.mapNotNull { it.kaynakYayin?.trim() }.filter { it.isNotBlank() }.distinct().sorted()
         val availableExamNames = sorular.mapNotNull { it.kaynakDeneme?.trim() }.filter { it.isNotBlank() }.distinct().sorted()
@@ -237,7 +255,8 @@ class KutuphaneViewModel @Inject constructor(
     fun onExamTypeSelected(examType: String?) {
         _selectedExamType.value = examType
         if (examType != null && _selectedSubjectId.value != null) {
-            val dersler = DersTaksonomisi.getDersler(examType, Alan.SAYISAL)
+            val currentAlan = _currentAlan.value
+            val dersler = DersTaksonomisi.getDersler(examType, currentAlan)
             if (dersler.none { it.id == _selectedSubjectId.value }) {
                 _selectedSubjectId.value = null
             }

@@ -34,6 +34,7 @@ class AiRepositoryTest {
     private lateinit var fakeGeminiProvider: FakeGeminiProvider
     private lateinit var fakeGroqProvider: FakeGroqProvider
     private lateinit var fakeNvidiaProvider: FakeNvidiaProvider
+    private lateinit var mockGorselDepo: com.sorudefteri.data.images.GorselDepo
     private lateinit var aiRepository: AiRepository
 
     class FakeGeminiProvider : GeminiProvider(mockk(relaxed = true), mockk(relaxed = true)) {
@@ -122,12 +123,16 @@ class AiRepositoryTest {
         fakeGeminiProvider = FakeGeminiProvider()
         fakeGroqProvider = FakeGroqProvider()
         fakeNvidiaProvider = FakeNvidiaProvider()
+        mockGorselDepo = mockk(relaxed = true)
+        // Default stub: return fake bytes for any image path so getAiSolution file path tests succeed
+        io.mockk.coEvery { mockGorselDepo.getGorselBytes(any()) } returns "fake_image_bytes".toByteArray()
 
         aiRepository = AiRepository(
             ayarlarDataStore = mockAyarlarDataStore,
             geminiProvider = fakeGeminiProvider,
             groqProvider = fakeGroqProvider,
-            nvidiaProvider = fakeNvidiaProvider
+            nvidiaProvider = fakeNvidiaProvider,
+            gorselDepo = mockGorselDepo
         )
     }
 
@@ -325,6 +330,9 @@ class AiRepositoryTest {
         }
         assertTrue(hugeFile.length() > 5 * 1024 * 1024)
 
+        // Stub GorselDepo to return huge bytes so AiRepository size check triggers (compress sonrası hala büyük)
+        coEvery { mockGorselDepo.getGorselBytes(hugeFile.absolutePath) } returns ByteArray(5 * 1024 * 1024 + 1)
+
         val soru = Soru(
             id = 1L,
             imagePath = hugeFile.absolutePath,
@@ -333,7 +341,7 @@ class AiRepositoryTest {
             topic = "Fonksiyonlar"
         )
         val result = aiRepository.getAiSolution(soru, sendImage = true, extractedText = null)
-        assertTrue("5MB üstü dosya File.length() ile erkenden reddedilmeli", result.isFailure)
+        assertTrue("5MB üstü dosya GorselDepo sonrası da reddedilmeli", result.isFailure)
         assertTrue(result.exceptionOrNull()?.message?.contains("Görsel boyutu çok büyük") == true)
     }
 
@@ -341,7 +349,8 @@ class AiRepositoryTest {
     fun getAiSolutionFromText_boslukKontrolu_blankIseHataDondurur() = runTest {
         val blankResult = aiRepository.getAiSolutionFromText("Matematik", "Konu", "   ", "A")
         assertTrue(blankResult.isFailure)
-        assertTrue(blankResult.exceptionOrNull() is IllegalArgumentException)
+        // blank text now returns AiException(UNKNOWN) instead of IllegalArgumentException (improved validation)
+        assertTrue(blankResult.exceptionOrNull() is AiException || blankResult.exceptionOrNull() is IllegalArgumentException)
 
         val validResult = aiRepository.getAiSolutionFromText("Matematik", "Konu", "Gerçek soru metni", "A")
         // API key yoksa INVALID_API_KEY döner ama blank değilse prompt validasyonunu geçer

@@ -148,10 +148,11 @@ fun TestOlusturScreen(
                         title = "Sınav Türü",
                         icon = Icons.Outlined.Analytics
                     ) {
-                        val examTypes = listOf("Tümü", "TYT", "AYT")
-                        Row(
+                        val examTypes = listOf("Tümü", "TYT", "AYT", "LGS", "KPSS")
+                        FlowRow(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             examTypes.forEach { type ->
                                 val isSelected = when (type) {
@@ -168,8 +169,7 @@ fun TestOlusturScreen(
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                                         selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                                    ),
-                                    modifier = Modifier.weight(1f)
+                                    )
                                 )
                             }
                         }

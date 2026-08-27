@@ -1,5 +1,6 @@
 package com.sorudefteri.data.ai
 
+import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.data.local.AyarlarDataStore
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.AiErrorType
@@ -9,10 +10,10 @@ import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.repository.AiRepository as AiRepositoryInterface
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileNotFoundException
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -27,8 +28,44 @@ class AiRepository @Inject constructor(
     private val ayarlarDataStore: AyarlarDataStore,
     private val geminiProvider: GeminiProvider,
     private val groqProvider: GroqProvider,
-    private val nvidiaProvider: NvidiaProvider
+    private val nvidiaProvider: NvidiaProvider,
+    private val gorselDepo: GorselDepo
 ) : AiRepositoryInterface {
+
+    companion object {
+        private const val MAX_IMAGE_BYTES = 5 * 1024 * 1024
+    }
+
+    private data class ProviderCredentials(val apiKey: String, val model: String)
+
+    private suspend fun resolveCredentials(provider: AiProviderType): Result<ProviderCredentials> {
+        return when (provider) {
+            AiProviderType.GEMINI -> {
+                val key = ayarlarDataStore.getGeminiApiKey().trim()
+                if (key.isBlank()) Result.failure(AiException(AiErrorType.INVALID_API_KEY, "API anahtarı bulunamadı. Lütfen Ayarlar bölümünden Gemini API anahtarınızı girin."))
+                else {
+                    val model = ayarlarDataStore.getGeminiModel().trim().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
+                    Result.success(ProviderCredentials(key, model))
+                }
+            }
+            AiProviderType.GROQ -> {
+                val key = ayarlarDataStore.getGroqApiKey().trim()
+                if (key.isBlank()) Result.failure(AiException(AiErrorType.INVALID_API_KEY, "API anahtarı bulunamadı. Lütfen Ayarlar bölümünden Groq API anahtarınızı girin."))
+                else {
+                    val model = ayarlarDataStore.getGroqModel().trim().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
+                    Result.success(ProviderCredentials(key, model))
+                }
+            }
+            AiProviderType.NVIDIA -> {
+                val key = ayarlarDataStore.getNvidiaApiKey().trim()
+                if (key.isBlank()) Result.failure(AiException(AiErrorType.INVALID_API_KEY, "API anahtarı bulunamadı. Lütfen Ayarlar bölümünden NVIDIA Build API anahtarınızı girin. (build.nvidia.com)"))
+                else {
+                    val model = ayarlarDataStore.getNvidiaModel().trim().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
+                    Result.success(ProviderCredentials(key, model))
+                }
+            }
+        }
+    }
 
     /**
      * Domain Soru nesnesi üzerinden AI çözümü üretir.
@@ -42,6 +79,15 @@ class AiRepository @Inject constructor(
         val dersAdi = DersTaksonomisi.getDersAdi(soru.examType, soru.subjectId)
         val mistakeName = soru.mistakeType?.displayName
 
+        // Guard: sendImage false ve text boş ise erkenden hata
+        if (!sendImage && extractedText.isNullOrBlank()) {
+            return Result.failure(
+                AiException(
+                    AiErrorType.UNKNOWN,
+                    "Gönderilecek veri yok: Lütfen 'Görseli AI'a gönder' açık olsun veya önce OCR ile metin çıkarın."
+                )
+            )
+        }
         if (!sendImage && !extractedText.isNullOrBlank()) {
             return getAiSolutionFromText(
                 dersAdi = dersAdi,
@@ -52,32 +98,36 @@ class AiRepository @Inject constructor(
             )
         }
 
-        // Görseli diskten oku — 5MB kontrolü readBytes ÖNCESİ File.length() ile
-        val file = File(soru.imagePath)
-        if (sendImage && file.exists() && file.canRead() && file.length() > 5 * 1024 * 1024) {
-            return Result.failure(
-                AiException(
-                    AiErrorType.UNKNOWN,
-                    "Görsel boyutu çok büyük (${file.length() / 1024}KB). Lütfen daha küçük bir görsel deneyin."
-                )
-            )
+        // imagePath blank kontrolü
+        if (sendImage && soru.imagePath.isBlank()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Görsel yolu boş."))
         }
-        val imageBytes = if (file.exists() && file.canRead()) {
-            withContext(Dispatchers.IO) {
-                try {
-                    file.readBytes()
-                } catch (_: Exception) {
-                    null
+
+        // file.length() check before file.readBytes() - 5MB kontrolü, legacy yerine GorselDepo kullanılıyor
+        // Görseli GorselDepo üzerinden oku (compress/OOM korumalı)
+        val imageBytes: ByteArray? = if (sendImage) {
+            try {
+                // Önce File.length check (hızlı fail), sonra GorselDepo compress
+                val file = File(soru.imagePath)
+                if (file.exists() && file.canRead() && file.length() > MAX_IMAGE_BYTES) {
+                    // GorselDepo compress deneyebilir ama 5MB üstü provider limiti - yine compress ile dene
+                    // Eğer compress sonrası hala büyükse provider zaten reddedecek, burada erken fail yerine compress'a bırakıyoruz
                 }
-            }
-        } else {
-            null
-        }
+                withContext(Dispatchers.IO) {
+                    gorselDepo.getGorselBytes(soru.imagePath)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { null }
+        } else null
 
         if (sendImage && imageBytes == null) {
             return Result.failure(
-                FileNotFoundException("Soru görseli bulunamadı veya okunamıyor: ${soru.imagePath}")
+                AiException(AiErrorType.UNKNOWN, "Soru görseli bulunamadı veya okunamıyor: ${soru.imagePath}")
             )
+        }
+        // Ek validasyon: boş byte array
+        if (sendImage && imageBytes != null && imageBytes.isEmpty()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Görsel verisi boş."))
         }
 
         return cozumIsteGelismi(
@@ -101,7 +151,10 @@ class AiRepository @Inject constructor(
         mistakeType: String?
     ): Result<String> {
         if (soruMetni.isBlank()) {
-            return Result.failure(IllegalArgumentException("Soru metni boş olamaz."))
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Soru metni boş olamaz."))
+        }
+        if (dersAdi.isBlank() && konu.isBlank()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Ders ve konu bilgisi boş."))
         }
         return cozumIsteGelismi(
             imageBytes = null,
@@ -118,29 +171,14 @@ class AiRepository @Inject constructor(
      */
     override suspend fun cleanOcrText(rawOcrText: String): Result<String> {
         if (rawOcrText.isBlank()) {
-            return Result.success("")
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Temizlenecek OCR metni boş."))
         }
-
         val providerType = ayarlarDataStore.getAiProvider()
+        val cred = resolveCredentials(providerType).getOrElse { return Result.failure(it) }
         return when (providerType) {
-            AiProviderType.GEMINI -> {
-                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
-                geminiProvider.cleanOcrText(rawOcrText, model, apiKey)
-            }
-            AiProviderType.GROQ -> {
-                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
-                groqProvider.cleanOcrText(rawOcrText, model, apiKey)
-            }
-            AiProviderType.NVIDIA -> {
-                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı girilmemiş. Ayarlar > NVIDIA Build bölümünden ekleyin."))
-                val model = ayarlarDataStore.getNvidiaModel().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
-                nvidiaProvider.cleanOcrText(rawOcrText, model, apiKey)
-            }
+            AiProviderType.GEMINI -> geminiProvider.cleanOcrText(rawOcrText, cred.model, cred.apiKey)
+            AiProviderType.GROQ -> groqProvider.cleanOcrText(rawOcrText, cred.model, cred.apiKey)
+            AiProviderType.NVIDIA -> nvidiaProvider.cleanOcrText(rawOcrText, cred.model, cred.apiKey)
         }
     }
 
@@ -148,26 +186,18 @@ class AiRepository @Inject constructor(
      * Aktif AI sağlayıcısı üzerinden görselden sınav türü, ders, konu ve cevap şıkkı tespiti yapar (Auto-Tagging).
      */
     override suspend fun detectQuestionMetadata(imageBytes: ByteArray): Result<QuestionMetadata> {
+        if (imageBytes.isEmpty()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Görsel verisi boş."))
+        }
+        if (imageBytes.size > MAX_IMAGE_BYTES) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Görsel boyutu çok büyük (${imageBytes.size/1024}KB)."))
+        }
         val providerType = ayarlarDataStore.getAiProvider()
+        val cred = resolveCredentials(providerType).getOrElse { return Result.failure(it) }
         return when (providerType) {
-            AiProviderType.GEMINI -> {
-                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
-                geminiProvider.detectMetadata(imageBytes, model, apiKey)
-            }
-            AiProviderType.GROQ -> {
-                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
-                groqProvider.detectMetadata(imageBytes, model, apiKey)
-            }
-            AiProviderType.NVIDIA -> {
-                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getNvidiaModel().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
-                nvidiaProvider.detectMetadata(imageBytes, model, apiKey)
-            }
+            AiProviderType.GEMINI -> geminiProvider.detectMetadata(imageBytes, cred.model, cred.apiKey)
+            AiProviderType.GROQ -> groqProvider.detectMetadata(imageBytes, cred.model, cred.apiKey)
+            AiProviderType.NVIDIA -> nvidiaProvider.detectMetadata(imageBytes, cred.model, cred.apiKey)
         }
     }
 
@@ -180,30 +210,18 @@ class AiRepository @Inject constructor(
         konu: String,
         soruMetni: String?
     ): Result<SimilarQuestionResult> {
-        // Geliştirici notu: NVIDIA Build görsel gönderimi destekler ama metin-only de çalışır
-        if (imageBytes == null && soruMetni.isNullOrBlank() && konu.isBlank()) {
-            return Result.failure(IllegalArgumentException("Benzer soru üretmek için görsel veya konu bilgisi gereklidir."))
+        if (imageBytes == null && soruMetni.isNullOrBlank() && konu.isBlank() && dersAdi.isBlank()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Benzer soru üretmek için görsel, metin, ders veya konu bilgisi gereklidir."))
+        }
+        if (dersAdi.isBlank() && konu.isBlank()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Benzer soru için ders veya konu boş olamaz."))
         }
         val providerType = ayarlarDataStore.getAiProvider()
+        val cred = resolveCredentials(providerType).getOrElse { return Result.failure(it) }
         return when (providerType) {
-            AiProviderType.GEMINI -> {
-                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
-                geminiProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
-            }
-            AiProviderType.GROQ -> {
-                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
-                groqProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
-            }
-            AiProviderType.NVIDIA -> {
-                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getNvidiaModel().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
-                nvidiaProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
-            }
+            AiProviderType.GEMINI -> geminiProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, cred.model, cred.apiKey)
+            AiProviderType.GROQ -> groqProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, cred.model, cred.apiKey)
+            AiProviderType.NVIDIA -> nvidiaProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, cred.model, cred.apiKey)
         }
     }
 
@@ -233,26 +251,15 @@ class AiRepository @Inject constructor(
         alan: String,
         sinavTipi: String
     ): Result<SimilarQuestionResult> {
+        if (dersAdi.isBlank() || konu.isBlank()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Soru üretmek için ders ve konu boş olamaz."))
+        }
         val providerType = ayarlarDataStore.getAiProvider()
+        val cred = resolveCredentials(providerType).getOrElse { return Result.failure(it) }
         return when (providerType) {
-            AiProviderType.GEMINI -> {
-                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
-                geminiProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, model, apiKey)
-            }
-            AiProviderType.GROQ -> {
-                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
-                groqProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, model, apiKey)
-            }
-            AiProviderType.NVIDIA -> {
-                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
-                if (apiKey.isBlank()) return Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı girilmemiş."))
-                val model = ayarlarDataStore.getNvidiaModel().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
-                nvidiaProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, model, apiKey)
-            }
+            AiProviderType.GEMINI -> geminiProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, cred.model, cred.apiKey)
+            AiProviderType.GROQ -> groqProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, cred.model, cred.apiKey)
+            AiProviderType.NVIDIA -> nvidiaProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, cred.model, cred.apiKey)
         }
     }
 
@@ -268,31 +275,11 @@ class AiRepository @Inject constructor(
      * Sağlayıcıdan canlı güncel modelleri çeker.
      */
     override suspend fun fetchLiveModels(provider: AiProviderType): Result<List<Pair<String, String>>> {
+        val cred = resolveCredentials(provider).getOrElse { return Result.failure(it) }
         return when (provider) {
-            AiProviderType.GEMINI -> {
-                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
-                if (apiKey.isBlank()) {
-                    Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı girilmemiş."))
-                } else {
-                    geminiProvider.listModels(apiKey)
-                }
-            }
-            AiProviderType.GROQ -> {
-                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
-                if (apiKey.isBlank()) {
-                    Result.failure(AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı girilmemiş."))
-                } else {
-                    groqProvider.listModels(apiKey)
-                }
-            }
-            AiProviderType.NVIDIA -> {
-                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
-                if (apiKey.isBlank()) {
-                    Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı girilmemiş. Ayarlar > NVIDIA Build bölümünden ekleyin."))
-                } else {
-                    nvidiaProvider.listModels(apiKey)
-                }
-            }
+            AiProviderType.GEMINI -> geminiProvider.listModels(cred.apiKey)
+            AiProviderType.GROQ -> groqProvider.listModels(cred.apiKey)
+            AiProviderType.NVIDIA -> nvidiaProvider.listModels(cred.apiKey)
         }
     }
 
@@ -316,75 +303,47 @@ class AiRepository @Inject constructor(
                 )
             )
         }
+        // imageBytes boş array kontrolü
+        if (imageBytes != null && imageBytes.isEmpty()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Görsel verisi boş."))
+        }
+        if (imageBytes != null && imageBytes.size > MAX_IMAGE_BYTES) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Görsel boyutu çok büyük (${imageBytes.size/1024}KB)."))
+        }
         val providerType = ayarlarDataStore.getAiProvider()
+        val cred = resolveCredentials(providerType).getOrElse { return Result.failure(it) }
 
         return when (providerType) {
-            AiProviderType.GEMINI -> {
-                val apiKey = ayarlarDataStore.getGeminiApiKey().trim()
-                if (apiKey.isBlank()) {
-                    return Result.failure(
-                        AiException(
-                            AiErrorType.INVALID_API_KEY,
-                            "API anahtarı bulunamadı. Lütfen Ayarlar bölümünden Gemini API anahtarınızı girin."
-                        )
-                    )
-                }
-                val model = ayarlarDataStore.getGeminiModel().ifBlank { AyarlarDataStore.DEFAULT_GEMINI_MODEL }
-                geminiProvider.cozumIsteDetayli(
-                    imageBytes = imageBytes,
-                    dersAdi = dersAdi,
-                    konu = konu,
-                    correctAnswer = correctAnswer,
-                    mistakeType = mistakeType,
-                    soruMetni = soruMetni,
-                    modelName = model,
-                    apiKey = apiKey
-                )
-            }
-            AiProviderType.GROQ -> {
-                val apiKey = ayarlarDataStore.getGroqApiKey().trim()
-                if (apiKey.isBlank()) {
-                    return Result.failure(
-                        AiException(
-                            AiErrorType.INVALID_API_KEY,
-                            "API anahtarı bulunamadı. Lütfen Ayarlar bölümünden Groq API anahtarınızı girin."
-                        )
-                    )
-                }
-                val model = ayarlarDataStore.getGroqModel().ifBlank { AyarlarDataStore.DEFAULT_GROQ_MODEL }
-                groqProvider.cozumIsteDetayli(
-                    imageBytes = imageBytes,
-                    dersAdi = dersAdi,
-                    konu = konu,
-                    correctAnswer = correctAnswer,
-                    mistakeType = mistakeType,
-                    soruMetni = soruMetni,
-                    modelName = model,
-                    apiKey = apiKey
-                )
-            }
-            AiProviderType.NVIDIA -> {
-                val apiKey = ayarlarDataStore.getNvidiaApiKey().trim()
-                if (apiKey.isBlank()) {
-                    return Result.failure(
-                        AiException(
-                            AiErrorType.INVALID_API_KEY,
-                            "API anahtarı bulunamadı. Lütfen Ayarlar bölümünden NVIDIA Build API anahtarınızı girin. (build.nvidia.com)"
-                        )
-                    )
-                }
-                val model = ayarlarDataStore.getNvidiaModel().ifBlank { AyarlarDataStore.DEFAULT_NVIDIA_MODEL }
-                nvidiaProvider.cozumIsteDetayli(
-                    imageBytes = imageBytes,
-                    dersAdi = dersAdi,
-                    konu = konu,
-                    correctAnswer = correctAnswer,
-                    mistakeType = mistakeType,
-                    soruMetni = soruMetni,
-                    modelName = model,
-                    apiKey = apiKey
-                )
-            }
+            AiProviderType.GEMINI -> geminiProvider.cozumIsteDetayli(
+                imageBytes = imageBytes,
+                dersAdi = dersAdi,
+                konu = konu,
+                correctAnswer = correctAnswer,
+                mistakeType = mistakeType,
+                soruMetni = soruMetni,
+                modelName = cred.model,
+                apiKey = cred.apiKey
+            )
+            AiProviderType.GROQ -> groqProvider.cozumIsteDetayli(
+                imageBytes = imageBytes,
+                dersAdi = dersAdi,
+                konu = konu,
+                correctAnswer = correctAnswer,
+                mistakeType = mistakeType,
+                soruMetni = soruMetni,
+                modelName = cred.model,
+                apiKey = cred.apiKey
+            )
+            AiProviderType.NVIDIA -> nvidiaProvider.cozumIsteDetayli(
+                imageBytes = imageBytes,
+                dersAdi = dersAdi,
+                konu = konu,
+                correctAnswer = correctAnswer,
+                mistakeType = mistakeType,
+                soruMetni = soruMetni,
+                modelName = cred.model,
+                apiKey = cred.apiKey
+            )
         }
     }
 
@@ -397,14 +356,16 @@ class AiRepository @Inject constructor(
         konu: String,
         correctAnswer: String? = null
     ): Result<String> {
+        if (imagePath.isBlank()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Görsel yolu boş."))
+        }
         val file = File(imagePath)
         if (!file.exists() || !file.canRead()) {
             return Result.failure(
-                FileNotFoundException("Soru görseli bulunamadı veya okunamıyor: $imagePath")
+                AiException(AiErrorType.UNKNOWN, "Soru görseli bulunamadı veya okunamıyor: $imagePath")
             )
         }
-        // 5MB kontrolü File.length() ile readBytes öncesi
-        if (file.length() > 5 * 1024 * 1024) {
+        if (file.length() > MAX_IMAGE_BYTES) {
             return Result.failure(
                 AiException(
                     AiErrorType.UNKNOWN,
@@ -413,13 +374,17 @@ class AiRepository @Inject constructor(
             )
         }
 
-        val imageBytes = withContext(Dispatchers.IO) {
-            try {
-                file.readBytes()
-            } catch (e: Exception) {
-                null
+        val imageBytes = try {
+            withContext(Dispatchers.IO) {
+                // GorselDepo compress yolunu tercih et
+                gorselDepo.getGorselBytes(imagePath)
             }
-        } ?: return Result.failure(IOException("Soru görseli diskten okunamadı: $imagePath"))
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { null }
+
+        if (imageBytes == null) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Soru görseli diskten okunamadı: $imagePath"))
+        }
 
         return cozumIste(
             imageBytes = imageBytes,
@@ -438,7 +403,10 @@ class AiRepository @Inject constructor(
         konu: String,
         correctAnswer: String? = null
     ): Result<String> {
-        if (imageBytes.size > 5 * 1024 * 1024) {
+        if (imageBytes.isEmpty()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Görsel verisi boş."))
+        }
+        if (imageBytes.size > MAX_IMAGE_BYTES) {
             return Result.failure(
                 AiException(
                     AiErrorType.UNKNOWN,
