@@ -33,20 +33,19 @@ import javax.inject.Singleton
 @Singleton
 open class GeminiProvider @Inject constructor(
     private val okHttpClient: OkHttpClient,
-    private val promptManager: AiPromptManager
-) : CozumProvider {
-
-    private val json = Json {
+    private val promptManager: AiPromptManager,
+    private val json: Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
         encodeDefaults = true
         coerceInputValues = true
     }
+) : CozumProvider {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     companion object {
-        const val FALLBACK_MODEL = "gemini-2.5-flash"
+        const val FALLBACK_MODEL = "gemini-2.5-flash" // use AiProviderType.GEMINI.defaultModel centrally
         const val MAX_RETRIES = 3
     }
 
@@ -61,7 +60,7 @@ open class GeminiProvider @Inject constructor(
         }
 
         try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models"
+            val url = "https://generativelanguage.googleapis.com/v1/models"
             val httpRequest = Request.Builder()
                 .url(url)
                 .addHeader("x-goog-api-key", apiKey)
@@ -409,7 +408,7 @@ open class GeminiProvider @Inject constructor(
 
             val requestJson = json.encodeToString(GeminiRequest.serializer(), requestBody)
             val cleanModel = modelName.removePrefix("models/").trim()
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent"
+            val url = "https://generativelanguage.googleapis.com/v1/models/$cleanModel:generateContent"
 
             val httpRequest = Request.Builder()
                 .url(url)

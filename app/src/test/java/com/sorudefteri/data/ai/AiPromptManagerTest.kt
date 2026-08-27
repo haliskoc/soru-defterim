@@ -51,11 +51,12 @@ class AiPromptManagerTest {
             sinavTipi = "AYT"
         )
 
-        assertTrue(prompt.contains("Ders: Fizik"))
-        assertTrue(prompt.contains("Konu: Kuvvet ve Hareket"))
-        assertTrue(prompt.contains("Zorluk Seviyesi: Zor"))
-        assertTrue(prompt.contains("Alan: Sayısal"))
-        assertTrue(prompt.contains("Sınav Türü: AYT"))
+        // Ders/konu artık wrapTrustedBlock ile sarılı, direkt "Ders: Fizik" yerine içerik + tag kontrolü
+        assertTrue(prompt.contains("Fizik") && prompt.contains("<ders>"))
+        assertTrue(prompt.contains("Kuvvet ve Hareket") && prompt.contains("<konu>"))
+        assertTrue(prompt.contains("Zor") && prompt.contains("<zorluk>"))
+        assertTrue(prompt.contains("Sayısal") && prompt.contains("<alan>"))
+        assertTrue(prompt.contains("AYT") && prompt.contains("<sinav_turu>"))
     }
 
     @Test
@@ -70,8 +71,8 @@ class AiPromptManagerTest {
             mistakeType = "İşlem Hatası"
         )
 
-        assertTrue(prompt.contains("Ders: Matematik"))
-        assertTrue(prompt.contains("Konu: Türev"))
+        assertTrue(prompt.contains("Matematik") && prompt.contains("<ders>"))
+        assertTrue(prompt.contains("Türev") && prompt.contains("<konu>"))
         assertTrue(prompt.contains("Doğru cevap şıkkı: B"))
         assertTrue(prompt.contains("İşlem Hatası"))
         assertTrue(prompt.contains("f(x) = x^3 - 3x"))
@@ -100,8 +101,8 @@ class AiPromptManagerTest {
             kaynakSoruMetni = "P1.V1 = P2.V2 ideal gaz denklemi sorusu"
         )
 
-        assertTrue(prompt.contains("Ders: Kimya"))
-        assertTrue(prompt.contains("Konu: Gaz Yasaları"))
+        assertTrue(prompt.contains("Kimya") && prompt.contains("<ders>"))
+        assertTrue(prompt.contains("Gaz Yasaları") && prompt.contains("<konu>"))
         assertTrue(prompt.contains("kaynak_soru_metni"))
         assertTrue(prompt.contains("P1.V1 = P2.V2"))
     }
@@ -115,9 +116,10 @@ class AiPromptManagerTest {
         val effective = promptManager.getEffectivePrompt(AiPromptType.SORU_URETIMI)
         assertEquals(customPrompt, effective)
 
-        // 2. buildPrompt içinde özel prompt kullanımı
+        // 2. buildPrompt içinde özel prompt kullanımı (wrap sonrası da içermeli)
         val built = promptManager.buildSoruUretimiPrompt("Biyoloji", "Fotosentez")
-        assertTrue(built.startsWith(customPrompt))
+        assertTrue(built.contains(customPrompt))
+        assertTrue(built.contains("Biyoloji") && built.contains("Fotosentez"))
 
         // 3. Özel prompt sıfırlandığında varsayılana dönme
         coEvery { mockAyarlarDataStore.getCustomPromptValue(AiPromptType.SORU_URETIMI) } returns ""
@@ -128,11 +130,14 @@ class AiPromptManagerTest {
     @Test
     fun customTemplateParametresi_geciciOlarakBasePromptuEzebilir() = runTest {
         val oneOffTemplate = "Geçici tek seferlik şablon."
+        coEvery { mockAyarlarDataStore.getCustomPromptValue(AiPromptType.SORU_URETIMI) } returns ""
         val prompt = promptManager.buildSoruUretimiPrompt(
             dersAdi = "Tarih",
             konu = "Kurtuluş Savaşı",
             customTemplate = oneOffTemplate
         )
-        assertTrue(prompt.startsWith(oneOffTemplate))
+        // customTemplate basePrompt olarak en başta yer almalı (wrap sonrası da olsa içermeli)
+        assertTrue(prompt.contains(oneOffTemplate))
+        assertTrue(prompt.contains("Tarih") && prompt.contains("Kurtuluş Savaşı"))
     }
 }

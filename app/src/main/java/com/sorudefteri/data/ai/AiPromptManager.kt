@@ -203,11 +203,11 @@ class AiPromptManager @Inject constructor(
 
             ---
             Hedef Kriterler:
-            - Sınav Türü: $safeSinav
-            - Alan: $safeAlan
-            - Ders: $safeDers
-            - Konu: $safeKonu
-            - Zorluk Seviyesi: $safeZorluk
+            - Sınav Türü: ${wrapTrustedBlock("sinav_turu", safeSinav)}
+            - Alan: ${wrapTrustedBlock("alan", safeAlan)}
+            - Ders: ${wrapTrustedBlock("ders", safeDers)}
+            - Konu: ${wrapTrustedBlock("konu", safeKonu)}
+            - Zorluk Seviyesi: ${wrapTrustedBlock("zorluk", safeZorluk)}
         """.trimIndent()
     }
 
@@ -251,8 +251,8 @@ class AiPromptManager @Inject constructor(
             $basePrompt
 
             ---
-            Ders: $safeDers
-            Konu: $safeKonu
+            Ders: ${wrapTrustedBlock("ders", safeDers)}
+            Konu: ${wrapTrustedBlock("konu", safeKonu)}
             $answerInfo
             $mistakeInfo
             $textInfo
@@ -299,8 +299,8 @@ class AiPromptManager @Inject constructor(
             $basePrompt
 
             ---
-            Ders: $safeDers
-            Konu: $safeKonu
+            Ders: ${wrapTrustedBlock("ders", safeDers)}
+            Konu: ${wrapTrustedBlock("konu", safeKonu)}
             $sourceInfo
         """.trimIndent()
     }

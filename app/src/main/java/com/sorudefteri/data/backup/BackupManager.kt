@@ -169,8 +169,9 @@ open class BackupManager @Inject constructor(
 
                     for ((index, soru) in sorular.withIndex()) {
                         val soruFile = File(soru.imagePath)
-                        // TODO(P0): ZIP entry isimleri deterministic olmalı (örn. soru ID / hash tabanlı); UUID rastgeleliği tekrarlanabilirliği ve diff'i zorlaştırır. Mevcut davranış korunuyor.
-                        val uniqueImageName = "images/soru_${index}_${UUID.randomUUID()}.jpg"
+                        // Deterministic: soru.id tabanlı, id 0 ise index fallback
+                        val imageKey = if (soru.id != 0L) soru.id else (index + 1).toLong()
+                        val uniqueImageName = "images/soru_${imageKey}.jpg"
 
                         if (soruFile.exists() && soruFile.isFile) {
                             zipOut.putNextEntry(ZipEntry(uniqueImageName))
@@ -187,8 +188,8 @@ open class BackupManager @Inject constructor(
                         if (!soru.solutionImagePath.isNullOrBlank()) {
                             val solutionFile = File(soru.solutionImagePath)
                             if (solutionFile.exists() && solutionFile.isFile) {
-                                // TODO(P0): Deterministic isim için aynı not — çözüm görseli de ID tabanlı isimlendirmeye geçebilir.
-                                uniqueSolutionName = "images/cozum_${index}_${UUID.randomUUID()}.jpg"
+                                val solKey = if (soru.id != 0L) soru.id else (index + 1).toLong()
+                                uniqueSolutionName = "images/cozum_${solKey}.jpg"
                                 zipOut.putNextEntry(ZipEntry(uniqueSolutionName))
                                 FileInputStream(solutionFile).use { fileIn ->
                                     var len: Int

@@ -34,15 +34,14 @@ import javax.inject.Singleton
 @Singleton
 open class NvidiaProvider @Inject constructor(
     private val okHttpClient: OkHttpClient,
-    private val promptManager: AiPromptManager
-) : CozumProvider {
-
-    private val json = Json {
+    private val promptManager: AiPromptManager,
+    private val json: Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
         encodeDefaults = true
         coerceInputValues = true
     }
+) : CozumProvider {
 
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 

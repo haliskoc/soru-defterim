@@ -204,7 +204,7 @@ class GorselDepo @Inject constructor(
 
                         val decodeOpts = BitmapFactory.Options().apply {
                             this.inSampleSize = inSampleSize
-                            inPreferredConfig = Bitmap.Config.ARGB_8888
+                            inPreferredConfig = Bitmap.Config.RGB_565
                         }
                         var bmp: Bitmap? = null
                         var scaled: Bitmap? = null
@@ -418,7 +418,7 @@ class GorselDepo @Inject constructor(
 
                 val decodeOptions = BitmapFactory.Options().apply {
                     this.inSampleSize = inSampleSize
-                    inPreferredConfig = Bitmap.Config.ARGB_8888
+                    inPreferredConfig = Bitmap.Config.RGB_565
                 }
 
                 // 3) Asıl bitmap'i decode et - OOM korumalı
@@ -460,7 +460,7 @@ class GorselDepo @Inject constructor(
             }
             val opts = BitmapFactory.Options().apply {
                 this.inSampleSize = inSampleSize
-                inPreferredConfig = Bitmap.Config.ARGB_8888
+                inPreferredConfig = Bitmap.Config.RGB_565
             }
             try {
                 context.contentResolver.openInputStream(uri)?.use { input ->

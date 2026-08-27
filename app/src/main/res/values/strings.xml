@@ -1,3 +1,73 @@
 <resources>
     <string name="app_name">Soru Defterim</string>
+    <!-- Navigation -->
+    <string name="nav_kutuphane">Kütüphane</string>
+    <string name="nav_test">Test Çöz</string>
+    <string name="nav_istatistik">İstatistik</string>
+    <string name="nav_ayarlar">Ayarlar</string>
+    <!-- Kutuphane -->
+    <string name="kutuphane_title">Soru Defterim</string>
+    <string name="kutuphane_search_hint">Konu, ders veya not içinde ara…</string>
+    <string name="kutuphane_empty_no_match">Eşleşen Soru Bulunamadı</string>
+    <string name="kutuphane_empty_no_match_desc">Arama kriterlerinize uygun soru yok. Filtreleri temizlemeyi deneyin.</string>
+    <string name="kutuphane_empty_no_question">Henüz Soru Eklenmedi</string>
+    <string name="kutuphane_empty_no_question_desc">Çözemediğin veya yanlış yaptığın soruların fotoğrafını çekerek arşivlemeye başla!</string>
+    <string name="kutuphane_count">%1$d Soru • %2$d Çözüldü</string>
+    <string name="kutuphane_selected">%1$d Soru Seçildi</string>
+    <!-- FiltreBar -->
+    <string name="filter_tumu">Tümü</string>
+    <string name="filter_tyt">TYT</string>
+    <string name="filter_ayt">AYT</string>
+    <string name="filter_lgs">LGS</string>
+    <string name="filter_kpss">KPSS</string>
+    <string name="filter_ders_sec">Ders Seç</string>
+    <string name="filter_hata_tipi">Hata Tipi</string>
+    <string name="filter_temizle">Temizle</string>
+    <!-- Soru Ekle -->
+    <string name="soru_ekle_title">Soru Ekle</string>
+    <string name="soru_ekle_foto_cek">Fotoğraf Çek</string>
+    <string name="soru_ekle_galeriden_sec">Galeriden Seç</string>
+    <string name="soru_ekle_form_ile">Form ile Ekle</string>
+    <string name="soru_ekle_soru_gorseli">Soru Görseli</string>
+    <string name="soru_ekle_cozum_gorseli">Çözüm Görseli</string>
+    <!-- Istatistik -->
+    <string name="istatistik_title">İstatistikler</string>
+    <string name="istatistik_total">Toplam Soru</string>
+    <string name="istatistik_solved">Çözülen</string>
+    <string name="istatistik_unsolved">Çözülmeyen</string>
+    <string name="istatistik_success_rate">Başarı Oranı</string>
+    <!-- Test -->
+    <string name="test_olustur_title">Test Oluştur</string>
+    <string name="test_coz_title">Test Çöz</string>
+    <string name="test_bitir">Bitir</string>
+    <string name="test_sonraki">Sonraki</string>
+    <string name="test_onceki">Önceki</string>
+    <!-- Ayarlar -->
+    <string name="ayarlar_title">Ayarlar</string>
+    <string name="ayarlar_genel">Genel</string>
+    <string name="ayarlar_ai_prompt">AI &amp; Prompt</string>
+    <string name="ayarlar_yedek">Yedek &amp; Güvenlik</string>
+    <string name="ayarlar_api_key_hint">API anahtarınızı yapıştırın…</string>
+    <!-- AI -->
+    <string name="ai_cozum_title">AI Çözümü</string>
+    <string name="ai_benzer_soru">Benzer Soru</string>
+    <string name="ai_soru_detay">Soru Detayı</string>
+    <!-- Bildirim -->
+    <string name="notification_channel_spaced">Aralıklı Tekrar Hatırlatıcıları</string>
+    <string name="notification_title">Tekrar Vakti! 📚</string>
+    <string name="notification_content">Bugün tekrar etmen gereken %1$d soru var. Şimdi çözmeye başla!</string>
+    <!-- Hata -->
+    <string name="error_gorsel_yuklenemedi">Görsel yüklenemedi</string>
+    <string name="error_gorsel_buyuk">Görsel boyutu çok büyük</string>
+    <!-- A11y -->
+    <string name="cd_search">Ara</string>
+    <string name="cd_clear_search">Aramayı Temizle</string>
+    <string name="cd_sort">Sıralama Seçenekleri</string>
+    <string name="cd_favorite">Favori</string>
+    <string name="cd_delete">Sil</string>
+    <string name="cd_close">Kapat</string>
+    <string name="cd_back">Geri</string>
+    <string name="cd_add_question">Soru Ekle</string>
+    <string name="cd_zoom_image">Büyüt</string>
+    <string name="cd_ocr">OCR</string>
 </resources>

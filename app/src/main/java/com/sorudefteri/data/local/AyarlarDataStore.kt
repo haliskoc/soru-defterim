@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -350,22 +351,25 @@ class AyarlarDataStore @Inject constructor(
 
     suspend fun setGeminiApiKey(apiKey: String) {
         val trimmed = apiKey.trim()
-        // TODO: apply() async - kritik anahtar yazımında commit() tercih edilebilir (senkron garanti)
-        encryptedPrefs.edit().putString(ENC_GEMINI_API_KEY, trimmed).apply()
+        withContext(Dispatchers.IO) {
+            encryptedPrefs.edit().putString(ENC_GEMINI_API_KEY, trimmed).commit()
+        }
         _geminiApiKeyFlow.value = trimmed
     }
 
     suspend fun setGroqApiKey(apiKey: String) {
         val trimmed = apiKey.trim()
-        // TODO: apply() → commit() için değerlendirme: API key kritik veri, senkron yazım gerekebilir
-        encryptedPrefs.edit().putString(ENC_GROQ_API_KEY, trimmed).apply()
+        withContext(Dispatchers.IO) {
+            encryptedPrefs.edit().putString(ENC_GROQ_API_KEY, trimmed).commit()
+        }
         _groqApiKeyFlow.value = trimmed
     }
 
     suspend fun setNvidiaApiKey(apiKey: String) {
         val trimmed = apiKey.trim()
-        // TODO: apply() async riski - commit() ile senkron yazım düşünülmeli
-        encryptedPrefs.edit().putString(ENC_NVIDIA_API_KEY, trimmed).apply()
+        withContext(Dispatchers.IO) {
+            encryptedPrefs.edit().putString(ENC_NVIDIA_API_KEY, trimmed).commit()
+        }
         _nvidiaApiKeyFlow.value = trimmed
     }
 
