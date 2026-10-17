@@ -1,14 +1,22 @@
 package com.sorudefteri.ui.test
 
+import android.view.HapticFeedbackConstants
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,6 +31,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,10 +45,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Brush
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.AlertDialog
@@ -63,8 +75,12 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -78,6 +94,7 @@ import coil3.compose.AsyncImage
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.TestQuestion
 import com.sorudefteri.ui.ortak.FullScreenImageViewer
+import com.sorudefteri.ui.ortak.drawing.DrawingOverlayCanvas
 import java.io.File
 import java.util.Locale
 
@@ -95,6 +112,12 @@ fun TestCozScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val scrollState = rememberScrollState()
     val navListState = rememberLazyListState()
+    var isTestDrawingActive by rememberSaveable { mutableStateOf(false) }
+
+    // Test ekranı her açıldığında aktif oturum sorularını güvenle yükle
+    LaunchedEffect(Unit) {
+        viewModel.refreshSession()
+    }
 
     // Geri tuşuna basıldığında çıkış onay dialogu
     BackHandler {
@@ -110,13 +133,31 @@ fun TestCozScreen(
         }
     }
 
+    // Zaman Baskısı: 15s, 10s, 5s haptik titreşim uyarısı
+    val view = LocalView.current
+    LaunchedEffect(uiState.currentQuestionRemainingSeconds) {
+        if (uiState.isTimePressure) {
+            val rem = uiState.currentQuestionRemainingSeconds
+            if (rem == 15L || rem == 10L || rem == 5L) {
+                try {
+                    view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                } catch (_: Exception) {}
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 CenterAlignedTopAppBar(
                     title = {
-                        // Sayaç / Kronometre
-                        TimerBadge(seconds = uiState.elapsedSeconds)
+                        // Sayaç / Kronometre veya Geri Sayım
+                        TimerBadge(
+                            seconds = uiState.elapsedSeconds,
+                            remainingSeconds = uiState.currentQuestionRemainingSeconds,
+                            isTimePressure = uiState.isTimePressure,
+                            isWarning = uiState.isTimeWarning
+                        )
                     },
                     navigationIcon = {
                         IconButton(onClick = { viewModel.setShowExitDialog(true) }) {
@@ -127,6 +168,13 @@ fun TestCozScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { isTestDrawingActive = !isTestDrawingActive }) {
+                            Icon(
+                                imageVector = Icons.Default.Brush,
+                                contentDescription = if (isTestDrawingActive) "Karalamayı Kapat" else "Karalama Modu",
+                                tint = if (isTestDrawingActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         TextButton(
                             onClick = { viewModel.setShowFinishDialog(true) }
                         ) {
@@ -201,10 +249,25 @@ fun TestCozScreen(
                     .padding(innerPadding),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "Test oturumu bulunamadı.",
-                    style = MaterialTheme.typography.bodyLarge
-                )
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(24.dp)
+                ) {
+                    Text(
+                        text = "Test oturumu bulunamadı.",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Oturum zaman aşımına uğramış veya uygulama yeniden başlatılmış olabilir.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Button(onClick = onNavigateBack) {
+                        Text("Geri Dön ve Yeni Test Oluştur")
+                    }
+                }
             }
         } else {
             Column(
@@ -221,39 +284,56 @@ fun TestCozScreen(
                     listState = navListState
                 )
 
-                // Aktif Soru İçeriği (Animasyonlu Geçiş)
-                AnimatedContent(
-                    targetState = uiState.currentIndex,
-                    transitionSpec = {
-                        if (targetState > initialState) {
-                            (slideInHorizontally { width -> width } + fadeIn()).togetherWith(
-                                slideOutHorizontally { width -> -width } + fadeOut()
-                            )
-                        } else {
-                            (slideInHorizontally { width -> -width } + fadeIn()).togetherWith(
-                                slideOutHorizontally { width -> width } + fadeOut()
-                            )
-                        }
-                    },
-                    label = "QuestionAnimation",
+                // Aktif Soru İçeriği (Animasyonlu Geçiş & Stylus Karalama Katmanı)
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .weight(1f)
-                ) { targetIndex ->
-                    val question = uiState.questions.getOrNull(targetIndex)
-                    val currentAnswer = uiState.userAnswers[targetIndex]
-
-                    if (question != null) {
-                        QuestionContent(
-                            question = question,
-                            selectedAnswer = currentAnswer,
-                            questionIndex = targetIndex,
-                            onAnswerSelected = { option ->
-                                viewModel.selectAnswer(option)
-                            },
-                            onZoomImage = { path, title ->
-                                viewModel.openZoomImage(path, title)
+                ) {
+                    AnimatedContent(
+                        targetState = uiState.currentIndex,
+                        transitionSpec = {
+                            if (targetState > initialState) {
+                                (slideInHorizontally { width -> width } + fadeIn()).togetherWith(
+                                    slideOutHorizontally { width -> -width } + fadeOut()
+                                )
+                            } else {
+                                (slideInHorizontally { width -> -width } + fadeIn()).togetherWith(
+                                    slideOutHorizontally { width -> width } + fadeOut()
+                                )
                             }
+                        },
+                        label = "QuestionAnimation",
+                        modifier = Modifier.fillMaxSize()
+                    ) { targetIndex ->
+                        val question = uiState.questions.getOrNull(targetIndex)
+                        val currentAnswer = uiState.userAnswers[targetIndex]
+
+                        if (question != null) {
+                            QuestionContent(
+                                question = question,
+                                selectedAnswer = currentAnswer,
+                                questionIndex = targetIndex,
+                                isTimeWarning = uiState.isTimeWarning && targetIndex == uiState.currentIndex,
+                                remainingSeconds = uiState.currentQuestionRemainingSeconds,
+                                onAnswerSelected = { option ->
+                                    viewModel.selectAnswer(option)
+                                },
+                                onZoomImage = { path, title ->
+                                    viewModel.openZoomImage(path, title)
+                                }
+                            )
+                        }
+                    }
+
+                    // Lenovo Stylus Karalama ve Çizim Katmanı (Soru bazlı kalıcı)
+                    val activeQuestion = uiState.questions.getOrNull(uiState.currentIndex)
+                    if (activeQuestion != null) {
+                        DrawingOverlayCanvas(
+                            soruId = activeQuestion.soru.id,
+                            modifier = Modifier.fillMaxSize(),
+                            isDrawingActive = isTestDrawingActive,
+                            onDrawingActiveChange = { isTestDrawingActive = it }
                         )
                     }
                 }
@@ -360,27 +440,49 @@ fun TestCozScreen(
 }
 
 /**
- * Üst bardaki sayaç rozeti
+ * Üst bardaki sayaç rozeti (Normal sayaç veya Zaman Baskısı geri sayımı)
  */
 @Composable
-private fun TimerBadge(seconds: Long) {
-    val minutes = seconds / 60
-    val remainingSec = seconds % 60
+private fun TimerBadge(
+    seconds: Long,
+    remainingSeconds: Long = 0L,
+    isTimePressure: Boolean = false,
+    isWarning: Boolean = false
+) {
+    val displaySeconds = if (isTimePressure) remainingSeconds else seconds
+    val minutes = displaySeconds / 60
+    val remainingSec = displaySeconds % 60
     val timeFormatted = String.format(Locale.getDefault(), "%02d:%02d", minutes, remainingSec)
+
+    val warningColor = if (remainingSeconds <= 5) Color(0xFFD32F2F) else Color(0xFFF57C00)
+    val containerColor = when {
+        isWarning -> warningColor.copy(alpha = 0.2f)
+        isTimePressure -> MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.8f)
+        else -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
+    }
+    val contentColor = when {
+        isWarning -> warningColor
+        isTimePressure -> MaterialTheme.colorScheme.onTertiaryContainer
+        else -> MaterialTheme.colorScheme.onPrimaryContainer
+    }
 
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f),
-        modifier = Modifier.padding(horizontal = 8.dp)
+        color = containerColor,
+        modifier = Modifier
+            .padding(horizontal = 8.dp)
+            .then(
+                if (isWarning) Modifier.border(1.5.dp, warningColor, RoundedCornerShape(16.dp)) else Modifier
+            )
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.Timer,
+                imageVector = if (isTimePressure) Icons.Default.Bolt else Icons.Default.Timer,
                 contentDescription = null,
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                tint = contentColor,
                 modifier = Modifier.size(18.dp)
             )
             Spacer(modifier = Modifier.width(6.dp))
@@ -388,7 +490,7 @@ private fun TimerBadge(seconds: Long) {
                 text = timeFormatted,
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onPrimaryContainer
+                color = contentColor
             )
         }
     }
@@ -433,7 +535,7 @@ private fun QuestionNumberRibbon(
 
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(backgroundColor)
                     .border(1.5.dp, borderColor, CircleShape)
@@ -459,6 +561,8 @@ private fun QuestionContent(
     question: TestQuestion,
     selectedAnswer: String?,
     questionIndex: Int,
+    isTimeWarning: Boolean = false,
+    remainingSeconds: Long = 0L,
     onAnswerSelected: (String) -> Unit,
     onZoomImage: (path: String, title: String) -> Unit
 ) {
@@ -472,6 +576,49 @@ private fun QuestionContent(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // Son 15 saniye uyarı kartı ve animasyonu
+        if (isTimeWarning && remainingSeconds > 0) {
+            val infiniteTransition = rememberInfiniteTransition(label = "warningPulse")
+            val pulseAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.5f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(500, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "warningAlpha"
+            )
+            val warningColor = if (remainingSeconds <= 5) Color(0xFFD32F2F) else Color(0xFFF57C00)
+
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = warningColor.copy(alpha = 0.15f * pulseAlpha),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.5.dp, warningColor.copy(alpha = pulseAlpha), RoundedCornerShape(12.dp))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = warningColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "⚠️ Son $remainingSeconds saniye! Zaman dolmak üzere!",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = warningColor
+                    )
+                }
+            }
+        }
+
         // Soru Üst Bilgi Rozetleri
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -529,11 +676,24 @@ private fun QuestionContent(
             }
         }
 
-        // Soru Görsel Kartı (Zoomable)
+        // Soru Görsel Kartı (Zoomable & Zaman Baskısı Nabız Çerçeveli)
+        // TELEFON Adım 1: önce görseli incele
+        Text(
+            text = "Adım 1 — Soruyu İncele (büyütmek için dokun)",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary
+        )
+        val warningCardBorder = if (isTimeWarning) {
+            val warningBorderColor = if (remainingSeconds <= 5) Color(0xFFD32F2F) else Color(0xFFF57C00)
+            BorderStroke(2.dp, warningBorderColor)
+        } else null
+
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            border = warningCardBorder,
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
@@ -572,17 +732,17 @@ private fun QuestionContent(
             }
         }
 
-        // Şıklar (A, B, C, D, E)
+        // Şıklar (A, B, C, D, E) — TELEFON: Adım 2, büyük hedefler
         Text(
-            text = "Cevabınızı İşaretleyin",
+            text = "Adım 2 — Cevabınızı İşaretleyin",
             style = MaterialTheme.typography.titleSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurface
         )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
             verticalAlignment = Alignment.CenterVertically
         ) {
             CEVAP_SIKLARI.forEach { option ->
@@ -593,7 +753,7 @@ private fun QuestionContent(
                     label = "optionBg_$option"
                 )
                 val textColor by animateColorAsState(
-                    targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                     label = "optionText_$option"
                 )
                 val borderColor by animateColorAsState(
@@ -603,7 +763,7 @@ private fun QuestionContent(
 
                 Box(
                     modifier = Modifier
-                        .size(54.dp)
+                        .size(58.dp)
                         .clip(CircleShape)
                         .background(backgroundColor)
                         .border(
@@ -652,8 +812,9 @@ private fun TestCozBottomBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Önceki Soru Butonu
@@ -661,7 +822,9 @@ private fun TestCozBottomBar(
                 onClick = onPrevious,
                 enabled = !isFirst,
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 52.dp)
             ) {
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.ArrowBack,
@@ -679,7 +842,9 @@ private fun TestCozBottomBar(
                 onClick = onClear,
                 enabled = hasAnswer,
                 shape = RoundedCornerShape(12.dp),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 52.dp)
             ) {
                 Icon(
                     imageVector = Icons.Outlined.RadioButtonUnchecked,
@@ -687,7 +852,7 @@ private fun TestCozBottomBar(
                     modifier = Modifier.size(16.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Boş Bırak", fontSize = 12.sp)
+                Text("Boş Bırak", fontSize = 13.sp, fontWeight = FontWeight.Bold)
             }
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -701,7 +866,9 @@ private fun TestCozBottomBar(
                 } else {
                     ButtonDefaults.buttonColors()
                 },
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 52.dp)
             ) {
                 Text(if (isLast) "Bitir" else "Sonraki")
                 Spacer(modifier = Modifier.width(4.dp))

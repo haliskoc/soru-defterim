@@ -1,17 +1,14 @@
 package com.sorudefteri.ui.navigation
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -19,12 +16,17 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationRail
 import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.windowsizeclass.WindowWidthSizeClass
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination
@@ -37,16 +39,32 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.toRoute
+import com.sorudefteri.domain.model.TestFiltre
+import com.sorudefteri.domain.model.TestQuestion
+import com.sorudefteri.domain.repository.SoruRepository
+import com.sorudefteri.domain.repository.TestSessionManager
 import com.sorudefteri.ui.ayarlar.AyarlarScreen
 import com.sorudefteri.ui.detay.SoruDetayScreen
 import com.sorudefteri.ui.istatistik.IstatistikScreen
 import com.sorudefteri.ui.kamera.KameraScreen
 import com.sorudefteri.ui.kutuphane.KutuphaneScreen
 import com.sorudefteri.ui.onboarding.OnboardingScreen
+import com.sorudefteri.ui.reels.SoruReelsScreen
 import com.sorudefteri.ui.soruekle.SoruEklemeScreen
 import com.sorudefteri.ui.test.TestCozScreen
 import com.sorudefteri.ui.test.TestOlusturScreen
 import com.sorudefteri.ui.test.TestSonucScreen
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
+
+@EntryPoint
+@InstallIn(SingletonComponent::class)
+interface NavHostEntryPoint {
+    fun testSessionManager(): TestSessionManager
+    fun soruRepository(): SoruRepository
+}
 
 /**
  * Root Navigation Host composable managing destinations, backstack, onboarding routing,
@@ -59,33 +77,104 @@ fun AppNavHost(
     windowWidthSizeClass: WindowWidthSizeClass = WindowWidthSizeClass.Compact,
     initialOnboardingSeen: Boolean = true,
     deepLinkTarget: String? = null,
-    onDeepLinkHandled: () -> Unit = {}
+    onDeepLinkHandled: () -> Unit = {},
+    testSessionManager: TestSessionManager? = null,
+    soruRepository: SoruRepository? = null
 ) {
+    val context = LocalContext.current
+    val actualSessionManager = androidx.compose.runtime.remember(context, testSessionManager) {
+        testSessionManager ?: try {
+            EntryPointAccessors.fromApplication(context.applicationContext, NavHostEntryPoint::class.java).testSessionManager()
+        } catch (e: Exception) {
+            null
+        }
+    }
+    val actualSoruRepository = androidx.compose.runtime.remember(context, soruRepository) {
+        soruRepository ?: try {
+            EntryPointAccessors.fromApplication(context.applicationContext, NavHostEntryPoint::class.java).soruRepository()
+        } catch (e: Exception) {
+            null
+        }
+    }
+
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination
 
+    // Dosyadan açılan .sdefteri paketinin içe aktarma onayı için bekleyen Uri'si
+    var pendingImportUri by rememberSaveable { mutableStateOf<String?>(null) }
+
     val isMainNavDestination = currentDestination?.let { dest ->
-        dest.hasRoute<KutuphaneNav>() || dest.hasRoute<TestNav>() || dest.hasRoute<IstatistikNav>() || dest.hasRoute<AyarlarNav>()
+        dest.hasRoute<KutuphaneNav>() || dest.hasRoute<ReelsNav>() || dest.hasRoute<TestNav>() || dest.hasRoute<IstatistikNav>() || dest.hasRoute<AyarlarNav>()
     } ?: false
 
     val isMediumOrExpanded = windowWidthSizeClass == WindowWidthSizeClass.Medium || windowWidthSizeClass == WindowWidthSizeClass.Expanded
     val startDest: Any = if (initialOnboardingSeen) KutuphaneNav else OnboardingNav
 
-    // DeepLink handling (notification -> test)
+    // DeepLink handling (notification -> test / test_due, dosya -> yedek içe aktarma)
     LaunchedEffect(deepLinkTarget, initialOnboardingSeen) {
         if (deepLinkTarget != null && initialOnboardingSeen) {
-            when (deepLinkTarget) {
+            if (deepLinkTarget.startsWith("import::")) {
+                // SD Defteri yedek dosyasıyla açılış: Ayarlar > Yedek sekmesine git,
+                // onay dialogu için Uri'yi beklemeye al.
+                pendingImportUri = deepLinkTarget.removePrefix("import::")
+                navController.navigate(AyarlarNav) {
+                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            } else when (deepLinkTarget) {
+                "test_due", "sorudefteri://test/due" -> {
+                    // Günün Kurtarma Paketi Deep Link: Due soruları yükle ve doğrudan Test Çöz ekranına geç
+                    if (actualSoruRepository != null && actualSessionManager != null) {
+                        val dueQuestions = actualSoruRepository.getDueReviewSorularList()
+                        if (dueQuestions.isNotEmpty()) {
+                            val testQuestions = dueQuestions.map { TestQuestion(soru = it) }
+                            val filter = TestFiltre(
+                                examType = null,
+                                selectedSubjects = emptySet(),
+                                selectedTopics = emptySet(),
+                                selectedMistakeTypes = emptySet(),
+                                onlyUnsolved = false,
+                                questionCount = testQuestions.size
+                            )
+                            actualSessionManager.startSession(testQuestions, filter)
+                            navController.navigate(TestCozNav) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = false }
+                                launchSingleTop = true
+                                restoreState = false
+                            }
+                        } else {
+                            navController.navigate(TestNav) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = false }
+                                launchSingleTop = true
+                                restoreState = false
+                            }
+                        }
+                    } else {
+                        navController.navigate(TestNav) {
+                            popUpTo(navController.graph.findStartDestination().id) { saveState = false }
+                            launchSingleTop = true
+                            restoreState = false
+                        }
+                    }
+                }
                 "test_coz", "test" -> {
                     // Navigate to Test oluşturma (due reviews will be shown as filter hint)
                     navController.navigate(TestNav) {
-                        popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                        popUpTo(navController.graph.findStartDestination().id) { saveState = false }
                         launchSingleTop = true
-                        restoreState = true
+                        restoreState = false
                     }
+                }
+                "reels" -> navController.navigate(ReelsNav) {
+                    popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                    launchSingleTop = true
+                    restoreState = true
                 }
                 "kutuphane" -> navController.navigate(KutuphaneNav) {
                     popUpTo(navController.graph.findStartDestination().id) { saveState = true }
                     launchSingleTop = true
+                    restoreState = true
                 }
             }
             onDeepLinkHandled()
@@ -95,11 +184,7 @@ fun AppNavHost(
     if (isMediumOrExpanded) {
         // TABLET / FOLDABLE / WIDE SCREEN LAYOUT: Side NavigationRail
         Row(modifier = modifier.fillMaxSize()) {
-            AnimatedVisibility(
-                visible = isMainNavDestination,
-                enter = slideInHorizontally(initialOffsetX = { -it }),
-                exit = slideOutHorizontally(targetOffsetX = { -it })
-            ) {
+            if (isMainNavDestination) {
                 NavigationSideRail(
                     navController = navController,
                     currentDestination = currentDestination
@@ -110,7 +195,9 @@ fun AppNavHost(
                 AppNavGraph(
                     navController = navController,
                     startDestination = startDest,
-                    windowWidthSizeClass = windowWidthSizeClass
+                    windowWidthSizeClass = windowWidthSizeClass,
+                    pendingImportUri = pendingImportUri,
+                    onPendingImportHandled = { pendingImportUri = null }
                 )
             }
         }
@@ -119,11 +206,7 @@ fun AppNavHost(
         Scaffold(
             modifier = modifier.fillMaxSize(),
             bottomBar = {
-                AnimatedVisibility(
-                    visible = isMainNavDestination,
-                    enter = slideInVertically(initialOffsetY = { it }),
-                    exit = slideOutVertically(targetOffsetY = { it })
-                ) {
+                if (isMainNavDestination) {
                     BottomNavBar(
                         navController = navController,
                         currentDestination = currentDestination
@@ -135,9 +218,12 @@ fun AppNavHost(
                 navController = navController,
                 startDestination = startDest,
                 windowWidthSizeClass = windowWidthSizeClass,
+                pendingImportUri = pendingImportUri,
+                onPendingImportHandled = { pendingImportUri = null },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(bottom = innerPadding.calculateBottomPadding())
+                    .consumeWindowInsets(innerPadding)
             )
         }
     }
@@ -148,6 +234,8 @@ private fun AppNavGraph(
     navController: NavHostController,
     startDestination: Any,
     windowWidthSizeClass: WindowWidthSizeClass,
+    pendingImportUri: String? = null,
+    onPendingImportHandled: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     NavHost(
@@ -192,6 +280,20 @@ private fun AppNavGraph(
                 },
                 onCameraClick = {
                     navController.navigate(KameraNav(isSolution = false))
+                },
+                onStartDueTest = {
+                    navController.navigate(TestCozNav) {
+                        launchSingleTop = true
+                    }
+                }
+            )
+        }
+
+        // 2.1. Soru Reels Ekranı (Dikey Feed, Hızlı Çözüm, Beğeni ve Hap Bilgi)
+        composable<ReelsNav> {
+            SoruReelsScreen(
+                onNavigateToDetail = { soruId ->
+                    navController.navigate(SoruDetayNav(soruId = soruId))
                 }
             )
         }
@@ -287,7 +389,9 @@ private fun AppNavGraph(
         composable<TestNav> {
             TestOlusturScreen(
                 onStartTest = {
-                    navController.navigate(TestCozNav)
+                    navController.navigate(TestCozNav) {
+                        launchSingleTop = true
+                    }
                 }
             )
         }
@@ -297,7 +401,8 @@ private fun AppNavGraph(
             TestCozScreen(
                 onFinishTest = {
                     navController.navigate(TestSonucNav) {
-                        popUpTo<TestNav>()
+                        popUpTo<TestCozNav>() { inclusive = true }
+                        launchSingleTop = true
                     }
                 },
                 onNavigateBack = {
@@ -311,13 +416,29 @@ private fun AppNavGraph(
             TestSonucScreen(
                 onNewTest = {
                     navController.navigate(TestNav) {
-                        popUpTo<TestNav> { inclusive = true }
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            inclusive = false
+                            saveState = false
+                        }
+                        launchSingleTop = true
+                        restoreState = false
                     }
                 },
                 onNavigateToLibrary = {
                     navController.navigate(KutuphaneNav) {
                         popUpTo(navController.graph.findStartDestination().id) {
-                            saveState = true
+                            inclusive = false
+                            saveState = false
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+                onNavigateToStats = {
+                    navController.navigate(IstatistikNav) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            inclusive = false
+                            saveState = false
                         }
                         launchSingleTop = true
                         restoreState = true
@@ -328,18 +449,36 @@ private fun AppNavGraph(
 
         // 9. İstatistik & Analitik Ekranı
         composable<IstatistikNav> {
-            IstatistikScreen()
+            IstatistikScreen(
+                onNavigateToAdd = {
+                    navController.navigate(SoruEkleNav())
+                },
+                onStartTargetedTest = {
+                    navController.navigate(TestCozNav) {
+                        launchSingleTop = true
+                    }
+                },
+                onStartDueTest = {
+                    navController.navigate(TestCozNav) {
+                        launchSingleTop = true
+                    }
+                }
+            )
         }
 
         // 10. Ayarlar Ekranı
         composable<AyarlarNav> {
-            AyarlarScreen()
+            AyarlarScreen(
+                pendingImportUri = pendingImportUri,
+                onPendingImportHandled = onPendingImportHandled
+            )
         }
     }
 }
 
 /**
  * Yan Menü (NavigationRail) bileşeni - Tablet ve Geniş Ekranlar için.
+ * Küçük düzeltme: üstte uygulama rozeti, altta sürüm ipucu.
  */
 @Composable
 fun NavigationSideRail(
@@ -351,6 +490,28 @@ fun NavigationSideRail(
         modifier = modifier.fillMaxHeight(),
         containerColor = MaterialTheme.colorScheme.surface,
         header = {
+            Spacer(modifier = Modifier.height(12.dp))
+            Surface(
+                shape = androidx.compose.foundation.shape.CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(48.dp)
+            ) {
+                Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
+                    Text(
+                        text = "SD",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Soru Defterim",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(modifier = Modifier.height(8.dp))
         }
     ) {
@@ -370,12 +531,22 @@ fun NavigationSideRail(
                 selected = isSelected,
                 onClick = {
                     if (!isSelected) {
-                        navController.navigate(item.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
+                        if (item.route == TestNav) {
+                            navController.navigate(TestNav) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = false
                             }
-                            launchSingleTop = true
-                            restoreState = true
+                        } else {
+                            navController.navigate(item.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
                         }
                     }
                 }
@@ -387,6 +558,8 @@ fun NavigationSideRail(
 
 /**
  * Alt Menü (NavigationBar) bileşeni - Telefon ve Kompakt Ekranlar için.
+ * TELEFON YENİ TASARIM: dikey kullanıma uygun, büyük dokunma hedefli,
+ * seçili hap göstergeli, tek satırlık kısa etiketli 5'li bar.
  */
 @Composable
 fun BottomNavBar(
@@ -394,28 +567,50 @@ fun BottomNavBar(
     currentDestination: NavDestination?,
     modifier: Modifier = Modifier
 ) {
-    NavigationBar(modifier = modifier) {
+    NavigationBar(
+        modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 4.dp
+    ) {
         BottomNavItem.items.forEach { item ->
             val isSelected = currentDestination?.hierarchy?.any { it.hasRoute(item.route::class) } == true
             NavigationBarItem(
                 icon = {
                     Icon(
                         imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
-                        contentDescription = item.title
+                        contentDescription = item.title,
+                        modifier = Modifier.size(24.dp)
                     )
                 },
                 label = {
-                    Text(text = item.title)
+                    Text(
+                        text = item.shortTitle,
+                        maxLines = 1,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold
+                        else androidx.compose.ui.text.font.FontWeight.Medium
+                    )
                 },
                 selected = isSelected,
+                alwaysShowLabel = true,
                 onClick = {
                     if (!isSelected) {
-                        navController.navigate(item.route) {
-                            popUpTo(navController.graph.findStartDestination().id) {
-                                saveState = true
+                        if (item.route == TestNav) {
+                            navController.navigate(TestNav) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = false
                             }
-                            launchSingleTop = true
-                            restoreState = true
+                        } else {
+                            navController.navigate(item.route) {
+                                popUpTo(navController.graph.findStartDestination().id) {
+                                    saveState = true
+                                }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
                         }
                     }
                 }

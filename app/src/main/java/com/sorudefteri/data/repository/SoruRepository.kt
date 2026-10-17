@@ -1,11 +1,22 @@
 package com.sorudefteri.data.repository
 
+import android.content.Context
 import androidx.compose.ui.graphics.Color
 import com.sorudefteri.data.images.GorselDepo
+import com.sorudefteri.data.local.FtsQuerySanitizer
+import com.sorudefteri.data.local.SoruIcerikHash
+import com.sorudefteri.data.local.dao.BenzerSoruDao
+import com.sorudefteri.data.local.dao.DenemeSinaviDao
+import com.sorudefteri.data.local.dao.SoruChatDao
 import com.sorudefteri.data.local.dao.SoruDao
+import com.sorudefteri.data.local.dao.TestSonucDao
 import com.sorudefteri.data.local.entity.SoruEntity
+import com.sorudefteri.data.local.entity.TestSonucEntity
 import com.sorudefteri.data.local.entity.toEntity
 import com.sorudefteri.domain.DersTaksonomisi
+import com.sorudefteri.domain.model.BenzerSoru
+import com.sorudefteri.domain.model.SimilarQuestionResult
+import com.sorudefteri.domain.model.toBenzerSoru
 import com.sorudefteri.domain.model.DersSoruSayisi
 import com.sorudefteri.domain.model.GunlukAktivite
 import com.sorudefteri.domain.model.HataTipi
@@ -14,6 +25,7 @@ import com.sorudefteri.domain.model.IstatistikOzet
 import com.sorudefteri.domain.model.IstatistikOzetWrapper
 import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.repository.SoruRepository
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -21,10 +33,12 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import androidx.paging.map
 import kotlinx.coroutines.withContext
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import com.sorudefteri.domain.manager.BadgeManager
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -37,7 +51,13 @@ typealias SoruRepository = com.sorudefteri.domain.repository.SoruRepository
 @Singleton
 class SoruRepositoryImpl @Inject constructor(
     private val soruDao: SoruDao,
-    private val gorselDepo: GorselDepo
+    private val testSonucDao: TestSonucDao,
+    private val benzerSoruDao: BenzerSoruDao,
+    private val gorselDepo: GorselDepo,
+    private val badgeManager: BadgeManager? = null,
+    private val soruChatDao: SoruChatDao? = null,
+    private val denemeSinaviDao: DenemeSinaviDao? = null,
+    @ApplicationContext private val context: Context? = null
 ) : com.sorudefteri.domain.repository.SoruRepository {
 
     override val totalCount: Flow<Int> = soruDao.getTotalCount()
@@ -64,10 +84,37 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override fun searchSorular(query: String): Flow<List<Soru>> {
-        return soruDao.searchSorular(query).map { list ->
+        val cleanQuery = query.trim()
+        if (cleanQuery.isBlank()) {
+            return getAllSorular()
+        }
+        val normalizedQuery = DersTaksonomisi.normalizeTurkish(cleanQuery)
+        return soruDao.getAllSorular().map { list ->
+            list.filter { entity ->
+                DersTaksonomisi.containsTurkish(DersTaksonomisi.getNormalizedDersAdi(entity.subjectId), normalizedQuery) ||
+                DersTaksonomisi.containsTurkish(entity.examType, normalizedQuery) ||
+                DersTaksonomisi.containsTurkish(entity.topic, normalizedQuery) ||
+                DersTaksonomisi.containsTurkish(entity.note, normalizedQuery) ||
+                DersTaksonomisi.containsTurkish(entity.kaynakYayin, normalizedQuery) ||
+                DersTaksonomisi.containsTurkish(entity.kaynakDeneme, normalizedQuery) ||
+                DersTaksonomisi.containsTurkish(entity.questionText, normalizedQuery) ||
+                DersTaksonomisi.containsTurkish(entity.ocrMetni, normalizedQuery) ||
+                DersTaksonomisi.containsTurkish(entity.aiExplanation, normalizedQuery)
+            }.map { it.toDomain() }
+        }.flowOn(Dispatchers.Default)
+    }
+
+    override fun searchSorularFts(query: String): Flow<List<Soru>> {
+        val sanitized = FtsQuerySanitizer.sanitize(query)
+        if (sanitized.isBlank()) {
+            return searchSorular(query)
+        }
+        return soruDao.searchSorularFts(sanitized).map { list ->
             list.map { it.toDomain() }
         }.flowOn(Dispatchers.Default)
     }
+
+    private fun sanitizeFtsQuery(rawQuery: String): String = FtsQuerySanitizer.sanitize(rawQuery)
 
     override fun getSoruById(id: Long): Flow<Soru?> {
         return soruDao.getSoruById(id).map { it?.toDomain() }.flowOn(Dispatchers.Default)
@@ -79,7 +126,10 @@ class SoruRepositoryImpl @Inject constructor(
 
     override suspend fun soruEkle(soru: Soru): Long = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
+        // Akıllı içe aktarma/de-dedup: içerik parmak izini burada kesinleştir
+        val hash = if (soru.contentHash.isBlank()) SoruIcerikHash.hesapla(soru) else soru.contentHash
         val entity = soru.copy(
+            contentHash = hash,
             createdAt = if (soru.createdAt > 0) soru.createdAt else now,
             updatedAt = now
         ).toEntity()
@@ -99,36 +149,67 @@ class SoruRepositoryImpl @Inject constructor(
         soruDao.updateSoru(soru)
     }
 
-    override suspend fun soruSil(soru: Soru) = withContext(Dispatchers.IO) {
-        // Görselleri yerel depodan temizle
+    private suspend fun cleanQuestionAssociatedFilesAndData(soru: SoruEntity) {
+        // 1. Görselleri temizle
         gorselDepo.gorselSil(soru.imagePath)
         if (!soru.solutionImagePath.isNullOrBlank()) {
             gorselDepo.gorselSil(soru.solutionImagePath)
         }
-        soruDao.deleteSoru(soru.toEntity())
+
+        // 2. Ses kaydını temizle
+        soru.audioPath?.let { path ->
+            if (path.isNotBlank()) {
+                try {
+                    val f = File(path)
+                    if (f.exists()) {
+                        f.delete()
+                    } else if (context != null) {
+                        val relF = File(context.filesDir, path)
+                        if (relF.exists()) relF.delete()
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        // 3. Çizim karalama (Scratchpad) dosyasını temizle
+        if (context != null) {
+            try {
+                com.sorudefteri.ui.ortak.drawing.ScratchpadStorageHelper.clearDrawing(context, soru.id)
+            } catch (_: Exception) {}
+        }
+
+        // 4. İlgili SoruChat ve BenzerSoru kayıtlarını temizle
+        try {
+            soruChatDao?.clearMessagesForSoru(soru.id)
+        } catch (_: Exception) {}
+        try {
+            benzerSoruDao.deleteAllForSoru(soru.id)
+        } catch (_: Exception) {}
+    }
+
+    override suspend fun soruSil(soru: Soru) = withContext(Dispatchers.IO) {
+        val entity = soru.toEntity()
+        cleanQuestionAssociatedFilesAndData(entity)
+        soruDao.deleteSoru(entity)
     }
 
     suspend fun deleteSoru(soru: SoruEntity) = withContext(Dispatchers.IO) {
-        gorselDepo.gorselSil(soru.imagePath)
-        soru.solutionImagePath?.let { gorselDepo.gorselSil(it) }
+        cleanQuestionAssociatedFilesAndData(soru)
         soruDao.deleteSoru(soru)
     }
 
     override suspend fun soruSilById(id: Long) = withContext(Dispatchers.IO) {
         val soruEntity = soruDao.getSoruByIdDirect(id)
         if (soruEntity != null) {
-            gorselDepo.gorselSil(soruEntity.imagePath)
-            if (!soruEntity.solutionImagePath.isNullOrBlank()) {
-                gorselDepo.gorselSil(soruEntity.solutionImagePath)
-            }
+            cleanQuestionAssociatedFilesAndData(soruEntity)
             soruDao.deleteSoruById(id)
         }
     }
 
     suspend fun deleteSoruById(id: Long, soru: SoruEntity?) = withContext(Dispatchers.IO) {
-        soru?.let {
-            gorselDepo.gorselSil(it.imagePath)
-            it.solutionImagePath?.let { sol -> gorselDepo.gorselSil(sol) }
+        val entity = soru ?: soruDao.getSoruByIdDirect(id)
+        if (entity != null) {
+            cleanQuestionAssociatedFilesAndData(entity)
         }
         soruDao.deleteSoruById(id)
     }
@@ -207,18 +288,33 @@ class SoruRepositoryImpl @Inject constructor(
         val nextReviewTimestamp = now + (intervalDays * 24 * 60 * 60 * 1000L)
         // Atomik güncelleme (race-safe) - DAO'daki atomik sorgu
         soruDao.advanceReviewStageAtomik(id, nextReviewTimestamp, now)
+        if (currentStage < 5 && nextStage == 5) {
+            badgeManager?.onMasterStageReached()
+        }
+    }
+
+    override suspend fun regressReviewStage(id: Long) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val nextReviewTimestamp = now + (24 * 60 * 60 * 1000L) // +1 day
+        soruDao.regressReviewStageAtomik(id, nextReviewTimestamp, now)
+    }
+
+    override suspend fun regressReviewStageBatch(ids: List<Long>) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        val now = System.currentTimeMillis()
+        val nextReviewTimestamp = now + (24 * 60 * 60 * 1000L) // +1 day
+        ids.chunked(500).forEach { chunk ->
+            soruDao.regressReviewStageBatch(chunk, nextReviewTimestamp, now)
+        }
     }
 
     override suspend fun deleteSorularByIds(ids: List<Long>) = withContext(Dispatchers.IO) {
         if (ids.isEmpty()) return@withContext
-        // Görselleri temizle
+        // Tüm ilişkili dosyaları ve verileri temizle
         ids.forEach { id ->
             val soru = soruDao.getSoruByIdDirect(id)
             if (soru != null) {
-                gorselDepo.gorselSil(soru.imagePath)
-                if (!soru.solutionImagePath.isNullOrBlank()) {
-                    gorselDepo.gorselSil(soru.solutionImagePath)
-                }
+                cleanQuestionAssociatedFilesAndData(soru)
             }
         }
         // SQLite IN clause limit (~999) aşılmaması için chunked
@@ -241,12 +337,42 @@ class SoruRepositoryImpl @Inject constructor(
     override suspend fun insertAllSorular(sorular: List<Soru>): List<Long> = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val entities = sorular.map { s ->
+            val hash = if (s.contentHash.isBlank()) SoruIcerikHash.hesapla(s) else s.contentHash
             s.copy(
+                contentHash = hash,
                 createdAt = if (s.createdAt > 0) s.createdAt else now,
                 updatedAt = now
             ).toEntity()
         }
         soruDao.insertAll(entities)
+    }
+
+    /** Akıllı içe aktarma: içerik parmak izine göre var olan soruları topluca getir. */
+    suspend fun getSoruEntitiesByContentHashes(hashes: List<String>): List<SoruEntity> = withContext(Dispatchers.IO) {
+        if (hashes.isEmpty()) emptyList()
+        else hashes.distinct().chunked(400).flatMap { batch -> soruDao.getByContentHashes(batch) }
+    }
+
+    /** Merge güncelleme: id korunur, tüm alanlar gönderilen entity ile yazılır (bağlantılı kayıtlar etkilenmez). */
+    suspend fun updateSoruEntityFull(entity: SoruEntity) = withContext(Dispatchers.IO) {
+        soruDao.updateEntityFull(entity)
+    }
+
+    /**
+     * Tek seferlik bakım: contentHash'i boş olan (eski sürümde eklenen) tüm sorulara
+     * parmak izi yazar. Uygulama açılışında bir kez çağrılır.
+     */
+    override suspend fun backfillContentHashes(): Int = withContext(Dispatchers.IO) {
+        val rows = soruDao.getRowsWithMissingContentHash()
+        var updated = 0
+        for (row in rows) {
+            val hash = SoruIcerikHash.hesapla(row.toDomain())
+            if (hash.isNotBlank()) {
+                soruDao.updateContentHash(row.id, hash)
+                updated++
+            }
+        }
+        updated
     }
 
     override fun getFavoriteSorular(): Flow<List<Soru>> {
@@ -268,8 +394,10 @@ class SoruRepositoryImpl @Inject constructor(
         mistakeType: String?,
         isSolved: Boolean?,
         isFavorite: Boolean?,
+        onlyDueReview: Boolean?,
         kaynak: String?
     ): Flow<androidx.paging.PagingData<Soru>> {
+        val sanitizedFts = query?.let { sanitizeFtsQuery(it) }?.ifBlank { null }
         return androidx.paging.Pager(
             config = androidx.paging.PagingConfig(
                 pageSize = 20,
@@ -277,15 +405,29 @@ class SoruRepositoryImpl @Inject constructor(
                 initialLoadSize = 40
             )
         ) {
-            soruDao.getPagedFilteredSorular(
-                query = query,
-                examType = examType,
-                subjectId = subjectId,
-                mistakeType = mistakeType,
-                isSolved = isSolved,
-                isFavorite = isFavorite,
-                kaynak = kaynak
-            )
+            if (sanitizedFts != null) {
+                soruDao.getPagedFilteredSorularFts(
+                    query = sanitizedFts,
+                    examType = examType,
+                    subjectId = subjectId,
+                    mistakeType = mistakeType,
+                    isSolved = isSolved,
+                    isFavorite = isFavorite,
+                    onlyDueReview = onlyDueReview,
+                    kaynak = kaynak
+                )
+            } else {
+                soruDao.getPagedFilteredSorular(
+                    query = query,
+                    examType = examType,
+                    subjectId = subjectId,
+                    mistakeType = mistakeType,
+                    isSolved = isSolved,
+                    isFavorite = isFavorite,
+                    onlyDueReview = onlyDueReview,
+                    kaynak = kaynak
+                )
+            }
         }.flow.map { pagingData ->
             pagingData.map { it.toDomain() }
         }
@@ -355,23 +497,17 @@ class SoruRepositoryImpl @Inject constructor(
             Color(0xFF795548), Color(0xFF607D8B), Color(0xFF673AB7), Color(0xFF2196F3)
         )
 
-        return soruDao.getAllSorular().map { list ->
-            if (list.isEmpty()) return@map emptyList()
-
-            val grouped = list.groupBy { it.subjectId }
-            grouped.entries.mapIndexed { index, entry ->
-                val subjectId = entry.key
-                val subjectQuestions = entry.value
-                val count = subjectQuestions.size
-                val solved = subjectQuestions.count { it.isSolved }
+        return soruDao.getSubjectDistributionWithSolved().map { tuples ->
+            tuples.mapIndexed { index, tuple ->
+                val subjectId = tuple.subjectId
                 val subjectName = DersTaksonomisi.getDersAdi(subjectId)
                 val color = subjectColors[index % subjectColors.size]
 
                 DersSoruSayisi(
                     subjectId = subjectId,
                     subjectName = subjectName,
-                    count = count,
-                    solvedCount = solved,
+                    count = tuple.count,
+                    solvedCount = tuple.solvedCount,
                     color = color
                 )
             }.sortedByDescending { it.count }
@@ -379,19 +515,15 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override fun getMistakeStats(): Flow<List<HataTipiDagilimi>> {
-        return soruDao.getAllSorular().map { list ->
-            val mistakeQuestions = list.filter { !it.mistakeType.isNullOrBlank() }
-            val totalMistakes = mistakeQuestions.size
-
+        return soruDao.getMistakeTypeDistribution().map { tuples ->
+            val totalMistakes = tuples.sumOf { it.count }
             if (totalMistakes == 0) {
                 return@map emptyList()
             }
 
-            val grouped = mistakeQuestions.groupBy { it.mistakeType!! }
-
-            grouped.entries.map { entry ->
-                val mistakeCode = entry.key
-                val count = entry.value.size
+            tuples.map { tuple ->
+                val mistakeCode = tuple.mistakeType
+                val count = tuple.count
                 val hataTipi = HataTipi.fromString(mistakeCode)
                 val displayName = hataTipi?.displayName ?: mistakeCode
                 val color = hataTipi?.defaultColor ?: Color(0xFF78909C)
@@ -449,5 +581,52 @@ class SoruRepositoryImpl @Inject constructor(
 
             last7Days
         }.flowOn(Dispatchers.Default)
+    }
+
+    override fun getAllTestResults(): Flow<List<TestSonucEntity>> = testSonucDao.getAllTestResults()
+
+    override fun getBenzerSorular(soruId: Long): Flow<List<BenzerSoru>> =
+        benzerSoruDao.getBenzerSorularForSoru(soruId).map { list ->
+            list.map { it.toDomain() }
+        }.flowOn(Dispatchers.Default)
+
+    override suspend fun saveBenzerSoru(soruId: Long, result: SimilarQuestionResult): Long =
+        withContext(Dispatchers.IO) {
+            val benzer = result.toBenzerSoru(soruId)
+            benzerSoruDao.insertBenzerSoru(benzer.toEntity())
+        }
+
+    override suspend fun deleteBenzerSoru(id: Long) = withContext(Dispatchers.IO) {
+        benzerSoruDao.deleteBenzerSoruById(id)
+    }
+
+    override suspend fun deleteAllBenzerSorular(soruId: Long) = withContext(Dispatchers.IO) {
+        benzerSoruDao.deleteAllForSoru(soruId)
+    }
+
+    override fun getChatMessagesForSoru(soruId: Long): Flow<List<com.sorudefteri.data.local.entity.SoruChatMessageEntity>> {
+        return soruChatDao?.getMessagesForSoru(soruId) ?: kotlinx.coroutines.flow.flowOf(emptyList())
+    }
+
+    override suspend fun insertChatMessage(message: com.sorudefteri.data.local.entity.SoruChatMessageEntity): Long = withContext(Dispatchers.IO) {
+        soruChatDao?.insertMessage(message) ?: 0L
+    }
+
+    override suspend fun clearChatMessagesForSoru(soruId: Long) = withContext(Dispatchers.IO) {
+        soruChatDao?.clearMessagesForSoru(soruId)
+        Unit
+    }
+
+    override fun getAllDenemeler(): Flow<List<com.sorudefteri.data.local.entity.DenemeSinaviEntity>> {
+        return denemeSinaviDao?.getAllDenemeler() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+    }
+
+    override suspend fun insertDeneme(entity: com.sorudefteri.data.local.entity.DenemeSinaviEntity): Long = withContext(Dispatchers.IO) {
+        denemeSinaviDao?.insertDeneme(entity) ?: 0L
+    }
+
+    override suspend fun deleteDeneme(id: Long) = withContext(Dispatchers.IO) {
+        denemeSinaviDao?.deleteDenemeById(id)
+        Unit
     }
 }

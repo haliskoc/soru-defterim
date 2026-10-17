@@ -4,20 +4,32 @@ import android.net.Uri
 import com.sorudefteri.data.backup.BackupManager
 import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.data.local.AyarlarDataStore
+import com.sorudefteri.data.local.entity.TestSonucEntity
 import com.sorudefteri.data.repository.SoruRepository
 import com.sorudefteri.domain.KonuKatalog
 import com.sorudefteri.domain.KonuUnite
 import com.sorudefteri.domain.model.AiProviderType
 import com.sorudefteri.domain.model.Alan
+import com.sorudefteri.domain.model.DersSoruSayisi
+import com.sorudefteri.domain.model.GunlukAktivite
 import com.sorudefteri.domain.model.HataTipi
+import com.sorudefteri.domain.model.HataTipiDagilimi
 import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.SortOrder
 import com.sorudefteri.domain.model.Soru
+import com.sorudefteri.domain.model.TestFiltre
+import com.sorudefteri.domain.model.TestQuestion
+import com.sorudefteri.domain.model.TestResult
 import com.sorudefteri.domain.repository.AiRepository
+import com.sorudefteri.domain.repository.TestSessionManager
 import com.sorudefteri.ui.ayarlar.AyarlarViewModel
+import com.sorudefteri.ui.istatistik.IstatistikViewModel
 import com.sorudefteri.ui.kutuphane.KutuphaneViewModel
 import com.sorudefteri.ui.soruekle.SoruEklemeViewModel
+import com.sorudefteri.ui.test.TestOlusturViewModel
+import com.sorudefteri.ui.test.TestSonucViewModel
+import kotlinx.coroutines.CoroutineScope
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -75,6 +87,7 @@ class ViewModelsUnitTest {
     private lateinit var mockSoruRepository: SoruRepository
     private lateinit var mockGorselDepo: GorselDepo
     private lateinit var mockKonuKatalog: KonuKatalog
+    private lateinit var mockTestSessionManager: TestSessionManager
     private lateinit var mockAyarlarDataStore: AyarlarDataStore
     private lateinit var fakeAiRepository: FakeAiRepository
     private lateinit var fakeBackupManager: FakeBackupManager
@@ -85,6 +98,7 @@ class ViewModelsUnitTest {
         mockSoruRepository = mockk(relaxed = true)
         mockGorselDepo = mockk(relaxed = true)
         mockKonuKatalog = mockk(relaxed = true)
+        mockTestSessionManager = mockk(relaxed = true)
         mockAyarlarDataStore = mockk(relaxed = true)
         fakeAiRepository = FakeAiRepository()
         fakeBackupManager = FakeBackupManager()
@@ -96,19 +110,33 @@ class ViewModelsUnitTest {
         every { mockAyarlarDataStore.geminiApiKey } returns flowOf("test_gemini_key")
         every { mockAyarlarDataStore.groqApiKey } returns flowOf("test_groq_key")
         every { mockAyarlarDataStore.nvidiaApiKey } returns flowOf("test_nvidia_key")
-        every { mockAyarlarDataStore.geminiModel } returns flowOf("gemini-2.5-flash")
-        every { mockAyarlarDataStore.groqModel } returns flowOf("meta-llama/llama-4-scout-17b-16e-instruct")
-        every { mockAyarlarDataStore.nvidiaModel } returns flowOf("meta/llama-3.1-405b-instruct")
+        every { mockAyarlarDataStore.geminiModel } returns flowOf("gemini-2.0-flash")
+        every { mockAyarlarDataStore.groqModel } returns flowOf("llama-3.2-11b-vision-preview")
+        every { mockAyarlarDataStore.nvidiaModel } returns flowOf("meta/llama-3.2-11b-vision-instruct")
         every { mockAyarlarDataStore.themeMode } returns flowOf(0)
         every { mockAyarlarDataStore.isAutoBackupEnabled } returns flowOf(false)
         every { mockAyarlarDataStore.isWifiOnlyBackup } returns flowOf(true)
+        every { mockAyarlarDataStore.driveLastSyncTime } returns flowOf(0L)
         every { mockAyarlarDataStore.autoBackupEnabledFlow } returns flowOf(false)
         every { mockAyarlarDataStore.wifiOnlyBackupFlow } returns flowOf(true)
+        every { mockAyarlarDataStore.stylusDoubleTapActionFlow } returns flowOf(com.sorudefteri.ui.ortak.drawing.StylusDoubleTapAction.PEN_ERASER_TOGGLE)
+        every { mockAyarlarDataStore.stylusPalmRejectionFlow } returns flowOf(true)
+        every { mockAyarlarDataStore.stylusHapticFeedbackFlow } returns flowOf(true)
         every { mockAyarlarDataStore.promptSoruUretimiFlow } returns flowOf("")
         every { mockAyarlarDataStore.promptCozumUretimiFlow } returns flowOf("")
         every { mockAyarlarDataStore.promptOcrTemizlemeFlow } returns flowOf("")
         every { mockAyarlarDataStore.promptBenzerSoruFlow } returns flowOf("")
         every { mockSoruRepository.getDistinctTopics(any()) } returns flowOf(listOf("Trigonometri", "Türev"))
+        every { mockSoruRepository.totalCount } returns flowOf(0)
+        every { mockSoruRepository.solvedCount } returns flowOf(0)
+        every { mockSoruRepository.unsolvedCount } returns flowOf(0)
+        every { mockSoruRepository.dueReviewCount } returns flowOf(0)
+        every { mockSoruRepository.getSubjectStats() } returns flowOf(emptyList())
+        every { mockSoruRepository.getMistakeStats() } returns flowOf(emptyList())
+        every { mockSoruRepository.getWeeklyActivity() } returns flowOf(emptyList())
+        every { mockSoruRepository.getAllTestResults() } returns flowOf(emptyList())
+        every { mockSoruRepository.getAllSorular() } returns flowOf(emptyList())
+        every { mockSoruRepository.getAllDenemeler() } returns flowOf(emptyList())
         every { mockKonuKatalog.getUniteList(any(), any()) } returns listOf(
             KonuUnite(uniteAdi = "Fonksiyonlar", konular = listOf("Fonksiyon Grafikleri", "Bileşke"))
         )
@@ -119,7 +147,7 @@ class ViewModelsUnitTest {
             QuestionMetadata(examType = "TYT", subjectId = "fizik", topic = "Kaldırma Kuvveti", correctAnswer = "D")
         )
         var liveModelsResult: Result<List<Pair<String, String>>> = Result.success(
-            listOf("gemini-2.5-flash" to "Gemini 2.5 Flash", "gemini-2.5-pro" to "Gemini 2.5 Pro")
+            listOf("gemini-2.0-flash" to "Gemini 2.0 Flash", "gemini-1.5-pro" to "Gemini 1.5 Pro")
         )
         var solutionResult: Result<String> = Result.success("Fake Solution")
         var similarResult: Result<SimilarQuestionResult> = Result.success(SimilarQuestionResult("", emptyMap(), "A", ""))
@@ -133,6 +161,12 @@ class ViewModelsUnitTest {
         override suspend fun detectQuestionMetadata(imageBytes: ByteArray): Result<QuestionMetadata> = metadataResult
         override suspend fun hasApiKey(): Boolean = true
         override suspend fun fetchLiveModels(provider: AiProviderType): Result<List<Pair<String, String>>> = liveModelsResult
+        override suspend fun sendSoruChatMessage(
+            soru: Soru,
+            chatHistory: List<com.sorudefteri.data.local.entity.SoruChatMessageEntity>,
+            userMessage: String,
+            sendImage: Boolean
+        ): Result<String> = solutionResult
     }
 
     class FakeBackupManager : BackupManager(mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true), mockk(relaxed = true)) {
@@ -254,7 +288,7 @@ class ViewModelsUnitTest {
         val tumSorularFlow = MutableStateFlow(listOf(s1, s2, s3))
         every { mockSoruRepository.getAllSorular() } returns tumSorularFlow
 
-        val viewModel = KutuphaneViewModel(mockSoruRepository, mockAyarlarDataStore)
+        val viewModel = KutuphaneViewModel(mockSoruRepository, mockAyarlarDataStore, TestSessionManager())
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()
 
@@ -298,7 +332,7 @@ class ViewModelsUnitTest {
         val s2 = Soru(id = 2, imagePath = "2", examType = "TYT", subjectId = "mat", topic = "B")
         every { mockSoruRepository.getAllSorular() } returns flowOf(listOf(s1, s2))
 
-        val viewModel = KutuphaneViewModel(mockSoruRepository, mockAyarlarDataStore)
+        val viewModel = KutuphaneViewModel(mockSoruRepository, mockAyarlarDataStore, TestSessionManager())
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()
 
@@ -358,7 +392,7 @@ class ViewModelsUnitTest {
 
         // Canlı model listesi çekme (Başarılı)
         fakeAiRepository.liveModelsResult = Result.success(
-            listOf("gemini-2.5-flash" to "Gemini 2.5 Flash", "gemini-2.5-pro" to "Gemini 2.5 Pro")
+            listOf("gemini-2.0-flash" to "Gemini 2.0 Flash", "gemini-1.5-pro" to "Gemini 1.5 Pro")
         )
 
         viewModel.fetchLiveModels(AiProviderType.GEMINI)
@@ -403,5 +437,220 @@ class ViewModelsUnitTest {
         testScheduler.advanceUntilIdle()
         assertTrue(resetDone)
         coVerify(exactly = 1) { mockSoruRepository.deleteAllSorular() }
+    }
+
+    // =========================================================================
+    // 4. Faz 1: Görsel Temizleme, Leitner Motoru & Öncelikli Soru Seçimi Testleri
+    // =========================================================================
+
+    @Test
+    fun soruEklemeViewModel_onCleared_kaydedilmemisIseGorselleriSiler() = runTest {
+        val viewModel = SoruEklemeViewModel(
+            soruRepository = mockSoruRepository,
+            gorselDepo = mockGorselDepo,
+            konuKatalog = mockKonuKatalog,
+            ayarlarDataStore = mockAyarlarDataStore,
+            aiRepository = fakeAiRepository,
+            ocrHelper = mockOcrHelper
+        )
+        viewModel.cleanupScope = CoroutineScope(mainDispatcherRule.testDispatcher)
+
+        viewModel.setSoruImagePath("/path/temp_soru.jpg")
+        viewModel.setSolutionImagePath("/path/temp_cozum.jpg")
+
+        // Kaydedilmeden ekrandan çıkış (onCleared)
+        viewModel.onCleared()
+        testScheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { mockGorselDepo.gorselSil("/path/temp_soru.jpg") }
+        coVerify(exactly = 1) { mockGorselDepo.gorselSil("/path/temp_cozum.jpg") }
+    }
+
+    @Test
+    fun soruEklemeViewModel_onCleared_kaydedilmisIseGorselleriSilmez() = runTest {
+        val viewModel = SoruEklemeViewModel(
+            soruRepository = mockSoruRepository,
+            gorselDepo = mockGorselDepo,
+            konuKatalog = mockKonuKatalog,
+            ayarlarDataStore = mockAyarlarDataStore,
+            aiRepository = fakeAiRepository,
+            ocrHelper = mockOcrHelper
+        )
+        viewModel.cleanupScope = CoroutineScope(mainDispatcherRule.testDispatcher)
+
+        viewModel.setSoruImagePath("/path/saved_soru.jpg")
+        viewModel.setTopic("Trigonometri")
+        coEvery { mockSoruRepository.soruEkle(any()) } returns 1L
+
+        viewModel.saveSoru { }
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.isSaved)
+
+        // Kaydedildikten sonra onCleared
+        viewModel.onCleared()
+        testScheduler.advanceUntilIdle()
+
+        coVerify(exactly = 0) { mockGorselDepo.gorselSil("/path/saved_soru.jpg") }
+    }
+
+    @Test
+    fun testSonucViewModel_sonuclarYuklendigindeDogruVeYanlisSorularIcinTekrarKademesiniGunceller() = runTest {
+        val s1 = Soru(id = 10, imagePath = "1", examType = "TYT", subjectId = "mat", topic = "A")
+        val s2 = Soru(id = 20, imagePath = "2", examType = "TYT", subjectId = "mat", topic = "B")
+        val s3 = Soru(id = 30, imagePath = "3", examType = "TYT", subjectId = "mat", topic = "C")
+
+        val tq1 = TestQuestion(soru = s1, userAnswer = "A", isCorrect = true)
+        val tq2 = TestQuestion(soru = s2, userAnswer = "B", isCorrect = false)
+        val tq3 = TestQuestion(soru = s3, userAnswer = null, isCorrect = null) // boş
+
+        val testResult = TestResult(
+            totalQuestions = 3,
+            correctCount = 1,
+            wrongCount = 1,
+            emptyCount = 1,
+            questions = listOf(tq1, tq2, tq3),
+            totalTimeSeconds = 120L
+        )
+
+        val mockSessionManager = mockk<TestSessionManager>(relaxed = true)
+        every { mockSessionManager.lastResult } returns MutableStateFlow(testResult)
+
+        val viewModel = TestSonucViewModel(
+            testSessionManager = mockSessionManager,
+            soruRepository = mockSoruRepository,
+            aiRepository = mockk(relaxed = true)
+        )
+        testScheduler.advanceUntilIdle()
+
+        // tq1 doğru -> advanceReviewStage(10L)
+        coVerify(exactly = 1) { mockSoruRepository.advanceReviewStage(10L) }
+        // tq2 yanlış -> regressReviewStage(20L)
+        coVerify(exactly = 1) { mockSoruRepository.regressReviewStage(20L) }
+        // tq3 boş -> regressReviewStage(30L) ÇAĞRILMAMALI (Item 1.1 pedagojik düzeltmesi)
+        coVerify(exactly = 0) { mockSoruRepository.regressReviewStage(30L) }
+
+        // loadResult() tekrar çağrılsa bile flag sayesinde tekrar tetiklenmemeli
+        viewModel.loadResult()
+        testScheduler.advanceUntilIdle()
+
+        coVerify(exactly = 1) { mockSoruRepository.advanceReviewStage(10L) }
+        coVerify(exactly = 1) { mockSoruRepository.regressReviewStage(20L) }
+        coVerify(exactly = 0) { mockSoruRepository.regressReviewStage(30L) }
+    }
+
+    @Test
+    fun testOlusturViewModel_startTest_tekrarZamaniGelenSorularaOncelikVerir() = runTest {
+        val now = System.currentTimeMillis()
+        // due sorular (nextReviewDate geçmişte)
+        val sDue1 = Soru(id = 1, imagePath = "1", examType = "TYT", subjectId = "mat", topic = "Türev", nextReviewDate = now - 10000L, isSolved = false)
+        val sDue2 = Soru(id = 2, imagePath = "2", examType = "TYT", subjectId = "mat", topic = "İntegral", nextReviewDate = now - 5000L, isSolved = false)
+        // non-due sorular (nextReviewDate gelecekte)
+        val sOther1 = Soru(id = 3, imagePath = "3", examType = "TYT", subjectId = "mat", topic = "Limit", nextReviewDate = now + 100000L, isSolved = false)
+        val sOther2 = Soru(id = 4, imagePath = "4", examType = "TYT", subjectId = "mat", topic = "Polinom", nextReviewDate = now + 100000L, isSolved = false)
+
+        val questionsFlow = MutableStateFlow(listOf(sOther1, sDue1, sOther2, sDue2))
+        every { mockSoruRepository.getAllSorular() } returns questionsFlow
+
+        val testSessionManager = mockk<TestSessionManager>(relaxed = true)
+        val viewModel = TestOlusturViewModel(
+            soruRepository = mockSoruRepository,
+            konuKatalog = mockKonuKatalog,
+            testSessionManager = testSessionManager,
+            ayarlarDataStore = mockAyarlarDataStore
+        )
+        backgroundScope.launch { viewModel.uiState.collect() }
+        testScheduler.advanceUntilIdle()
+
+        // Soru sayısını 2 olarak belirle
+        viewModel.setQuestionCount(2)
+        viewModel.startTest { }
+
+        // Seçilen 2 soru da due olanlardan (id 1 ve 2) olmalı
+        coVerify(exactly = 1) {
+            testSessionManager.startSession(
+                match { list ->
+                    list.size == 2 && list.all { it.soru.id in listOf(1L, 2L) }
+                },
+                any()
+            )
+        }
+    }
+
+    // =========================================================================
+    // 5. IstatistikViewModel Testleri (Faz 1)
+    // =========================================================================
+
+    @Test
+    fun istatistikViewModel_bosVeri_varsayilanDegerlerDogru() = runTest {
+        val viewModel = IstatistikViewModel(mockSoruRepository, mockKonuKatalog, mockTestSessionManager)
+        backgroundScope.launch { viewModel.uiState.collect() }
+        testScheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(0, state.totalCount)
+        assertEquals(0, state.solvedCount)
+        assertEquals(0, state.unsolvedCount)
+        assertEquals(0f, state.successRate, 0.01f)
+        assertEquals(0, state.totalTestCount)
+        assertEquals(0f, state.averageNet, 0.01f)
+        assertTrue(state.recentTestResults.isEmpty())
+        assertTrue(state.isEmpty)
+        assertFalse(state.isLoading)
+    }
+
+    @Test
+    fun istatistikViewModel_testSonuclariVeSorularBirlestirilir_metriklerHesaplanir() = runTest {
+        every { mockSoruRepository.totalCount } returns flowOf(10)
+        every { mockSoruRepository.solvedCount } returns flowOf(7)
+        every { mockSoruRepository.unsolvedCount } returns flowOf(3)
+
+        val t1 = TestSonucEntity(id = 1L, totalQuestions = 20, correctCount = 16, wrongCount = 4, emptyCount = 0, netCount = 15.0f, successRate = 75, totalTimeSeconds = 1200L, examType = "TYT")
+        val t2 = TestSonucEntity(id = 2L, totalQuestions = 20, correctCount = 18, wrongCount = 2, emptyCount = 0, netCount = 17.5f, successRate = 88, totalTimeSeconds = 1100L, examType = "AYT")
+        val t3 = TestSonucEntity(id = 3L, totalQuestions = 10, correctCount = 9, wrongCount = 1, emptyCount = 0, netCount = 8.75f, successRate = 90, totalTimeSeconds = 600L, examType = "Genel")
+
+        every { mockSoruRepository.getAllTestResults() } returns flowOf(listOf(t1, t2, t3))
+
+        val viewModel = IstatistikViewModel(mockSoruRepository, mockKonuKatalog, mockTestSessionManager)
+        backgroundScope.launch { viewModel.uiState.collect() }
+        testScheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(10, state.totalCount)
+        assertEquals(7, state.solvedCount)
+        assertEquals(3, state.unsolvedCount)
+        assertEquals(70f, state.successRate, 0.01f)
+        assertEquals(3, state.totalTestCount)
+        // Ortalama Net: (15.0 + 17.5 + 8.75) / 3 = 41.25 / 3 = 13.75f
+        assertEquals(13.75f, state.averageNet, 0.01f)
+        assertEquals(3, state.recentTestResults.size)
+        assertEquals("TYT", state.recentTestResults[0].examType)
+        assertFalse(state.isEmpty)
+    }
+
+    @Test
+    fun istatistikViewModel_recentTestResults_enFazla10AdetDoner() = runTest {
+        val testList = (1..15).map { index ->
+            TestSonucEntity(
+                id = index.toLong(),
+                totalQuestions = 10,
+                correctCount = 8,
+                wrongCount = 2,
+                emptyCount = 0,
+                netCount = 7.5f,
+                successRate = 80,
+                totalTimeSeconds = 500L,
+                examType = "TYT"
+            )
+        }
+        every { mockSoruRepository.getAllTestResults() } returns flowOf(testList)
+
+        val viewModel = IstatistikViewModel(mockSoruRepository, mockKonuKatalog, mockTestSessionManager)
+        backgroundScope.launch { viewModel.uiState.collect() }
+        testScheduler.advanceUntilIdle()
+
+        val state = viewModel.uiState.value
+        assertEquals(15, state.totalTestCount)
+        assertEquals(10, state.recentTestResults.size)
+        assertEquals(7.5f, state.averageNet, 0.01f)
     }
 }

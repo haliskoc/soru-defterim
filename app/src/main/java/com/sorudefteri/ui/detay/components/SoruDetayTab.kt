@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DocumentScanner
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Notes
@@ -48,6 +49,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import com.sorudefteri.domain.model.Soru
 import java.io.File
@@ -68,6 +70,9 @@ fun SoruDetayTab(
     onPerformOcr: () -> Unit,
     onToggleSendImageToAi: (Boolean) -> Unit,
     onAdvanceLeitnerStage: (Boolean) -> Unit,
+    onTeacherShareClick: () -> Unit = {},
+    onCopyImageClick: (() -> Unit)? = null,
+    audioMemoContent: (@Composable () -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -97,15 +102,36 @@ fun SoruDetayTab(
                             .clickable { onZoomImage(soru.imagePath, "Soru Görseli") }
                     )
 
-                    IconButton(
-                        onClick = { onZoomImage(soru.imagePath, "Soru Görseli") },
+                    Row(
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .padding(8.dp)
-                            .background(Color.Black.copy(alpha = 0.6f), CircleShape)
-                            .size(36.dp)
+                            .padding(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Icon(Icons.Default.ZoomIn, contentDescription = "Büyüt", tint = Color.White, modifier = Modifier.size(20.dp))
+                        if (onCopyImageClick != null) {
+                            IconButton(
+                                onClick = onCopyImageClick,
+                                modifier = Modifier
+                                    .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                    .size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = "Görseli Kopyala",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
+                        IconButton(
+                            onClick = { onZoomImage(soru.imagePath, "Soru Görseli") },
+                            modifier = Modifier
+                                .background(Color.Black.copy(alpha = 0.6f), CircleShape)
+                                .size(36.dp)
+                        ) {
+                            Icon(Icons.Default.ZoomIn, contentDescription = "Büyüt", tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
                     }
                 }
 
@@ -134,8 +160,31 @@ fun SoruDetayTab(
                         Text(if (soru.isSolved) "Çözüldü (Geri Al)" else "Çözüldü Olarak İşaretle")
                     }
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Hocama Sor (WhatsApp) Butonu
+                Button(
+                    onClick = onTeacherShareClick,
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color(0xFF25D366)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("👨‍🏫", fontSize = 16.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Hocama Sor (WhatsApp)",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
+
+        // Sesli Not / Çözüm Kartı
+        audioMemoContent?.invoke()
 
         // 2. Metadata & Etiketler
         Card(

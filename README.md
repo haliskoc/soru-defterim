@@ -162,3 +162,65 @@ Uygulama, Room Mapping, Spaced Repetition, Matematiksel LaTeX Parser ve Sınav T
 
 ## 📄 Lisans (License)
 Bu proje MIT lisansı altında lisanslanmıştır.
+
+---
+
+## 🛠️ Düşük RAM Derleme (8 GB sistemler)
+
+Bu proje 8 GB RAM'e sığacak şekilde yapılandırılmıştır. `gradle.properties`
+içindeki bellek sınırları bilinçli olarak mütevazıdır:
+
+| Bileşen | Önce | Şimdi |
+|---|---|---|
+| Gradle Daemon | 1536m + 512m meta | **1024m + 512m meta** |
+| Kotlin Daemon | 2048m + 512m meta | **1024m + 512m meta** |
+| Toplam tavan | ~4.5 GB | **~3.1 GB** |
+| İşçi paralelliği | 1 | 1 (`parallel=false`) |
+
+Ayrıca `SerialGC`, artımlı derleme ve yerel derleme önbelleği açık.
+
+### Neden `release` R8 kucultmesi kullanmiyor?
+
+`minifyReleaseWithR8` tek basina 2 GB'tan fazla bellek istiyor. 8 GB'lik
+makinede, masaustu ortami acikken Gradle daemon'i OOM killer tarafindan
+olduruluyordu:
+
+* tepe bellek ~6.7 GB / 7.2 GB, yogun swap
+* `Gradle build daemon disappeared unexpectedly`
+* 1024m ile denendiginde: **Metaspace tukeniyor**, derleme 22+ dakika takili kaliyor
+
+Bu yuzden `./derle.sh release`, `-PlowRam=true` ile R8'i ve kaynak
+sikistirmayi kapatir. Cikti yine de gecerli bir Release APK'dir (debug flag
+yok, imzali, kurulabilir) - yalnizca kucultulmemistir. Tam kucultme gerekirse
+Android Studio / emulator / tarayici kapaliyken `./derle.sh release-full`
+kullanin.
+
+`gradle.properties` kalici olarak degismez; `-PlowRam` yalnizca o calistirmayi
+etkiler.
+
+Kullanim:
+
+```bash
+./derle.sh            # Debug APK
+./derle.sh release    # Release APK (R8 kucultme KAPALI - 8 GB icin guvenli)
+./derle.sh release-full  # Tam R8 kucultmeli Release (cok bellek ister)
+./derle.sh temiz      # Tam temiz Debug derlemesi
+./derle.sh test       # Birim testleri
+./derle.sh serbest    # Arka plan daemon'larini kapat (~1.5 GB RAM geri ver)
+```
+
+> **Önemli:** `./derle.sh serbest` boşta bekleyen Gradle/Kotlin daemon'larını
+> kapatır. Bunlar boştayken ~1.5 GB RAM'i elinde tutarlar ve 8 GB'lık
+> sistemde tarayıcı/IDE ile birlikte kasmaya yol açar.
+
+### Ölçülen sonuçlar (8 GB RAM)
+
+| Derleme | Süre | Tepe RAM |
+|---|---|---|
+| Temiz Debug | ~2 dk 54 sn | ~5.8 GB (masaüstü dahil) |
+| Debug (tekrar) | ~30 sn | — |
+| Release (R8'siz) | `./derle.sh release` | ~5.5 GB |
+
+İlk kurulumda `--stop` sonrası diskte kalan bayat Gradle kilidi
+(`~/.gradle/caches/journal-1/journal-1.lock`) "Timeout waiting to lock journal
+cache" hatası verirse: `./derle.sh serbest` çalıştırın.

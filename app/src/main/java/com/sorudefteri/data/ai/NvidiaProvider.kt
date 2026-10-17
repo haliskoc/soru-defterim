@@ -38,7 +38,8 @@ open class NvidiaProvider @Inject constructor(
     private val json: Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
-        encodeDefaults = true
+        encodeDefaults = false
+        explicitNulls = false
         coerceInputValues = true
     }
 ) : CozumProvider {
@@ -46,7 +47,7 @@ open class NvidiaProvider @Inject constructor(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     companion object {
-        const val FALLBACK_MODEL = "meta/llama-3.1-405b-instruct"
+        const val FALLBACK_MODEL = "meta/llama-3.2-90b-vision-instruct"
         const val MAX_RETRIES = 3
     }
 
@@ -78,7 +79,15 @@ open class NvidiaProvider @Inject constructor(
                         .filter { it.active != false }
                         .map { it.id to it.id }
                     if (models.isEmpty()) {
-                        Result.failure(AiException(AiErrorType.MODEL_UNAVAILABLE, "Kullanılabilir NVIDIA modeli bulunamadı."))
+                        Result.success(
+                            listOf(
+                                "meta/llama-3.2-11b-vision-instruct" to "meta/llama-3.2-11b-vision-instruct",
+                                "meta/llama-3.2-90b-vision-instruct" to "meta/llama-3.2-90b-vision-instruct",
+                                "microsoft/phi-3-vision-128k-instruct" to "microsoft/phi-3-vision-128k-instruct",
+                                "meta/llama-3.1-70b-instruct" to "meta/llama-3.1-70b-instruct",
+                                "nvidia/llama-3.1-nemotron-70b-instruct" to "nvidia/llama-3.1-nemotron-70b-instruct"
+                            )
+                        )
                     } else {
                         Result.success(models)
                     }
@@ -118,7 +127,26 @@ open class NvidiaProvider @Inject constructor(
             return@withContext Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı boş olamaz. Lütfen Ayarlar sayfasından anahtarınızı girin."))
         }
         val prompt = promptManager.buildCozumUretimiPrompt(dersAdi, konu, soruMetni, correctAnswer, mistakeType, customPromptTemplate)
-        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel == "meta/llama-3.1-405b-instruct") FALLBACK_MODEL else rawModel
+        executeNvidiaWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+    }
+
+    open suspend fun chatIste(
+        imageBytes: ByteArray?,
+        prompt: String,
+        modelName: String,
+        apiKey: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı boş olamaz."))
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel == "meta/llama-3.1-405b-instruct") {
+            FALLBACK_MODEL
+        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true)) {
+            FALLBACK_MODEL
+        } else {
+            rawModel
+        }
         executeNvidiaWithRetry(imageBytes, prompt, effectiveModel, apiKey)
     }
 
@@ -130,7 +158,8 @@ open class NvidiaProvider @Inject constructor(
     ): Result<String> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) return@withContext Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı boş olamaz."))
         val prompt = promptManager.buildOcrTemizlemePrompt(rawOcrText, customPromptTemplate)
-        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel == "meta/llama-3.1-405b-instruct") FALLBACK_MODEL else rawModel
         executeNvidiaWithRetry(null, prompt, effectiveModel, apiKey)
     }
 
@@ -145,7 +174,14 @@ open class NvidiaProvider @Inject constructor(
     ): Result<SimilarQuestionResult> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) return@withContext Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı boş olamaz."))
         val prompt = promptManager.buildBenzerSoruPrompt(dersAdi, konu, soruMetni, customPromptTemplate)
-        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel == "meta/llama-3.1-405b-instruct") {
+            FALLBACK_MODEL
+        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true)) {
+            FALLBACK_MODEL
+        } else {
+            rawModel
+        }
         val rawResult = executeNvidiaWithRetry(imageBytes, prompt, effectiveModel, apiKey)
         rawResult.mapCatching { rawText ->
             val parseResult = AiJsonParser.cleanAndParseJson(rawText, SimilarQuestionResult.serializer()) { AiJsonParser.parseSimilarQuestionFallback(it) }
@@ -165,7 +201,8 @@ open class NvidiaProvider @Inject constructor(
     ): Result<SimilarQuestionResult> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) return@withContext Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı boş olamaz."))
         val prompt = promptManager.buildSoruUretimiPrompt(dersAdi, konu, zorluk, alan, sinavTipi, customPromptTemplate)
-        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel == "meta/llama-3.1-405b-instruct") FALLBACK_MODEL else rawModel
         val rawResult = executeNvidiaWithRetry(null, prompt, effectiveModel, apiKey)
         rawResult.mapCatching { rawText ->
             val parseResult = AiJsonParser.cleanAndParseJson(rawText, SimilarQuestionResult.serializer()) { AiJsonParser.parseSimilarQuestionFallback(it) }
@@ -179,7 +216,8 @@ open class NvidiaProvider @Inject constructor(
         apiKey: String
     ): Result<QuestionMetadata> = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) return@withContext Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı boş olamaz."))
-        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel == "meta/llama-3.1-405b-instruct") FALLBACK_MODEL else rawModel
         val prompt = """
             Görseldeki YKS (TYT veya AYT) sorusunu incele ve JSON formatında şu bilgileri çıkar:
             1. examType: "TYT" veya "AYT"

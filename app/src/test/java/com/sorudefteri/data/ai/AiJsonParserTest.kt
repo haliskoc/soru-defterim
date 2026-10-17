@@ -5,6 +5,7 @@ import com.sorudefteri.domain.model.AiException
 import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -100,6 +101,36 @@ class AiJsonParserTest {
     }
 
     @Test
+    fun `cleanAndParseJson should preserve newlines before text and words`() {
+        val raw = """
+            {
+              "questionText": "Perde düzlemine paralel konumdadır.\n\nBu durumda; ışık akısı \Phi'dir.\n\nBuna göre;\nI. Düzlem ayna yaklaştırılırsa E artar.\nII. Düzlem ayna kaldırılırsa \Phi azalır.",
+              "options": {
+                "A": "Yalnız I",
+                "B": "Yalnız II",
+                "C": "I ve II",
+                "D": "I ve III",
+                "E": "I, II ve III"
+              },
+              "correctAnswer": "C",
+              "solution": "Aydınlanma şiddeti E = I/d^2 artar."
+            }
+        """.trimIndent()
+
+        val result = AiJsonParser.cleanAndParseJson(
+            rawText = raw,
+            serializer = SimilarQuestionResult.serializer(),
+            fallbackParser = { AiJsonParser.parseSimilarQuestionFallback(it) }
+        )
+
+        assertTrue(result.isSuccess)
+        val question = result.getOrNull()
+        assertNotNull(question)
+        assertTrue("Gerçek newline karakteri içermeli", question!!.questionText.contains("\nI. Düzlem ayna"))
+        assertFalse("Çiğ \\n literal string kalmamalı", question.questionText.contains("\\nI."))
+    }
+
+    @Test
     fun `cleanAndParseJson should fallback to Regex parsing when JSON is slightly broken`() {
         val brokenJson = """
             İşte soru:
@@ -165,5 +196,145 @@ class AiJsonParserTest {
         val exception = result.exceptionOrNull()
         assertTrue(exception is AiException)
         assertEquals(AiErrorType.PARSING_FAILED, (exception as AiException).errorType)
+    }
+
+    @Test
+    fun `cleanAndParseJson should preserve latex commands with single backslash without corruption`() {
+        val raw = """
+            {
+              "questionText": "Limit x \rightarrow 0 iken f(x) \rightarrow 1 ve x \neq 0 koşulu ile \frac{a}{b} ve [(0 / 0)\right] belirsizliği incelenir. Ayrıca \to, \beta ve \theta değerleri verilsin.",
+              "options": {
+                "A": "\frac{1}{2}",
+                "B": "x \neq 0",
+                "C": "\rightarrow \infty",
+                "D": "\right)",
+                "E": "0"
+              },
+              "correctAnswer": "A",
+              "solution": "x \neq 0 olduğundan payda sıfır olamaz. \frac{a}{b} sadeleşir ve limit \rightarrow 1 olur."
+            }
+        """.trimIndent()
+
+        val result = AiJsonParser.cleanAndParseJson(
+            rawText = raw,
+            serializer = SimilarQuestionResult.serializer(),
+            fallbackParser = { AiJsonParser.parseSimilarQuestionFallback(it) }
+        )
+
+        assertTrue(result.isSuccess)
+        val q = result.getOrNull()
+        assertNotNull(q)
+
+        // 1. \rightarrow 'ightarrow' olmamalı, \rightarrow korunmalı
+        assertTrue("\\rightarrow korunmalı", q!!.questionText.contains("\\rightarrow"))
+        assertFalse("ightarrow olmamalı", Regex("""(?<!r)ightarrow""").containsMatchIn(q.questionText))
+
+        // 2. \right 'ight' olmamalı, \right korunmalı
+        assertTrue("\\right korunmalı", q.questionText.contains("\\right"))
+        assertFalse("ight] tek başına kalmamalı", q.questionText.contains("0)ight]"))
+
+        // 3. \neq 0 'eq 0' olmamalı, satır başına kaymamalı
+        assertTrue("\\neq 0 korunmalı", q.questionText.contains("\\neq 0"))
+        assertFalse("eq 0 olarak bölünmemeli", q.questionText.contains("\neq 0"))
+
+        // 4. \frac{a}{b} form feed'e kurban gitmemeli
+        assertTrue("\\frac{a}{b} korunmalı", q.questionText.contains("\\frac{a}{b}"))
+        assertTrue("A şıkkında \\frac korunmalı", q.options["A"]!!.contains("\\frac{1}{2}"))
+
+        // 5. \to, \beta, \theta korunmalı
+        assertTrue("\\to korunmalı", q.questionText.contains("\\to"))
+        assertTrue("\\beta korunmalı", q.questionText.contains("\\beta"))
+        assertTrue("\\theta korunmalı", q.questionText.contains("\\theta"))
+    }
+
+    @Test
+    fun `cleanAndParseJson should handle double backslash LaTeX commands cleanly`() {
+        val raw = """
+            {
+              "questionText": "Limit x \\rightarrow 0 iken f(x) \\rightarrow 1, x \\neq 0 ve \\frac{a}{b}",
+              "options": {
+                "A": "\\frac{1}{2}",
+                "B": "x \\neq 0",
+                "C": "\\rightarrow 0",
+                "D": "[(0 / 0)\\right]",
+                "E": "0"
+              },
+              "correctAnswer": "B",
+              "solution": "x \\neq 0 olmalıdır."
+            }
+        """.trimIndent()
+
+        val result = AiJsonParser.cleanAndParseJson(
+            rawText = raw,
+            serializer = SimilarQuestionResult.serializer(),
+            fallbackParser = { AiJsonParser.parseSimilarQuestionFallback(it) }
+        )
+
+        assertTrue(result.isSuccess)
+        val q = result.getOrNull()
+        assertNotNull(q)
+        assertTrue(q!!.questionText.contains("\\rightarrow"))
+        assertTrue(q.questionText.contains("\\neq 0"))
+        assertTrue(q.questionText.contains("\\frac{a}{b}"))
+        assertTrue(q.options["D"]!!.contains("\\right"))
+    }
+
+    @Test
+    fun `normalizeSafeEscapes should never corrupt LaTeX commands starting with r, n, f, t, b`() {
+        val sample = "x \\neq 0 iken f(x) \\rightarrow 1, [(0 / 0)\\right] ve \\frac{a}{b}. \\nu, \\nabla, \\notin, \\neg, \\rho, \\to, \\beta"
+        val normalized = AiJsonParser.normalizeSafeEscapes(sample)
+
+        assertTrue(normalized.contains("\\rightarrow"))
+        assertFalse(Regex("""(?<!r)ightarrow""").containsMatchIn(normalized))
+        assertTrue(normalized.contains("\\right"))
+        assertTrue(normalized.contains("\\neq 0"))
+        assertTrue(normalized.contains("\\frac{a}{b}"))
+        assertTrue(normalized.contains("\\nu"))
+        assertTrue(normalized.contains("\\nabla"))
+        assertTrue(normalized.contains("\\notin"))
+        assertTrue(normalized.contains("\\neg"))
+        assertTrue(normalized.contains("\\rho"))
+        assertTrue(normalized.contains("\\to"))
+        assertTrue(normalized.contains("\\beta"))
+    }
+
+    @Test
+    fun `sanitizeLatexEscapesInJson should properly escape single backslashes and ignore double backslashes`() {
+        val singleEscaped = """{"text": "x \rightarrow 0 ve x \neq 0 ve \frac{1}{2} ve \alpha"}"""
+        val sanitizedSingle = AiJsonParser.sanitizeLatexEscapesInJson(singleEscaped)
+        assertTrue(sanitizedSingle.contains("\\\\rightarrow"))
+        assertTrue(sanitizedSingle.contains("\\\\neq"))
+        assertTrue(sanitizedSingle.contains("\\\\frac"))
+        assertTrue(sanitizedSingle.contains("\\\\alpha"))
+
+        val doubleEscaped = """{"text": "x \\rightarrow 0 ve x \\neq 0 ve \\frac{1}{2} ve \\alpha"}"""
+        val sanitizedDouble = AiJsonParser.sanitizeLatexEscapesInJson(doubleEscaped)
+        assertFalse(sanitizedDouble.contains("\\\\\\rightarrow"))
+        assertFalse(sanitizedDouble.contains("\\\\\\neq"))
+        assertFalse(sanitizedDouble.contains("\\\\\\frac"))
+        assertFalse(sanitizedDouble.contains("\\\\\\alpha"))
+    }
+
+    @Test
+    fun `fallbackParser should safely preserve latex commands`() {
+        val brokenJsonWithLatex = """
+            {
+              "questionText": "x \neq 0 ise limit \rightarrow 1 ve [(0 / 0)\right] vardır.",
+              "A": "\frac{1}{2}",
+              "B": "\frac{2}{3}",
+              "C": "\neq 0",
+              "D": "\rightarrow \infty",
+              "E": "Tanımsız",
+              "correctAnswer": "A",
+              "solution": "x \neq 0 kuralı uygulanır."
+            }
+        """.trimIndent()
+
+        val parsed = AiJsonParser.parseSimilarQuestionFallback(brokenJsonWithLatex)
+        assertNotNull(parsed)
+        assertTrue(parsed!!.questionText.contains("\\neq 0"))
+        assertTrue(parsed.questionText.contains("\\rightarrow"))
+        assertTrue(parsed.questionText.contains("\\right"))
+        assertTrue(parsed.options["A"]!!.contains("\\frac{1}{2}"))
     }
 }

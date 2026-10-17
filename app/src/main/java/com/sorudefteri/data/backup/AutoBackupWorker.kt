@@ -32,15 +32,15 @@ class AutoBackupWorker @AssistedInject constructor(
     companion object {
         const val WORK_NAME = "soru_defterim_auto_backup"
         private const val TAG = "AutoBackupWorker"
-        private const val MAX_SAVED_BACKUPS = 5
+        // Dahili depolama şişmesini önlemek için yalnızca en son 1 tam otomatik yedek saklanır
+        private const val MAX_SAVED_BACKUPS = 1
 
         /**
-         * 24 saatlik periyodik otomatik yedekleme görevini kuyruğa ekler veya günceller.
+         * 24 saatlik periyodik otomatik yerel yedekleme görevini kuyruğa ekler veya günceller.
+         * Yerel depolama (filesDir/backups/) kullanıldığı için ağ bağlantısı gereksizdir ve internetsiz çalışır.
          */
-        fun schedulePeriodic(context: Context, wifiOnly: Boolean = true) {
-            val networkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
+        fun schedulePeriodic(context: Context, wifiOnly: Boolean = false) {
             val constraints = Constraints.Builder()
-                .setRequiredNetworkType(networkType)
                 .setRequiresBatteryNotLow(true)
                 .setRequiresStorageNotLow(true)
                 .build()
@@ -54,7 +54,7 @@ class AutoBackupWorker @AssistedInject constructor(
                 ExistingPeriodicWorkPolicy.UPDATE,
                 workRequest
             )
-            Log.d(TAG, "Otomatik yedekleme görevi planlandı. Wi-Fi zorunlu: $wifiOnly")
+            Log.d(TAG, "Yerel otomatik yedekleme görevi planlandı (ağ kısıtı kaldırıldı).")
         }
 
         /**

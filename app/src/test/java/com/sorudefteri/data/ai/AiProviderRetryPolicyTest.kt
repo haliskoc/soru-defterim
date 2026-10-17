@@ -138,13 +138,14 @@ class AiProviderRetryPolicyTest {
         val rel3 = java.io.File("src/main/java/com/sorudefteri/data/ai/${relativeFromRoot.substringAfterLast("/")}")
         if (rel3.exists()) return rel3.readText()
         // last resort search upward
-        var dir = java.io.File(System.getProperty("user.dir"))
+        var dir: java.io.File? = java.io.File(System.getProperty("user.dir") ?: ".")
         repeat(5) {
-            val cand = java.io.File(dir, relativeFromRoot)
+            val currentDir = dir ?: return@repeat
+            val cand = java.io.File(currentDir, relativeFromRoot)
             if (cand.exists()) return cand.readText()
-            val cand2 = java.io.File(dir, "app/$relativeFromRoot")
+            val cand2 = java.io.File(currentDir, "app/$relativeFromRoot")
             if (cand2.exists()) return cand2.readText()
-            dir = dir.parentFile ?: return@repeat
+            dir = currentDir.parentFile
         }
         throw AssertionError("Source not found: $relativeFromRoot in ${System.getProperty("user.dir")}")
     }
@@ -196,11 +197,11 @@ class AiProviderRetryPolicyTest {
     }
 
     @Test
-    fun appModule_okHttpConfig_retryFalse_callTimeout30() {
+    fun appModule_okHttpConfig_retryTrue_callTimeout120() {
         val appModuleSource = readSource("app/src/main/java/com/sorudefteri/di/AppModule.kt")
-        assertTrue("retryOnConnectionFailure(false) olmalı", appModuleSource.contains("retryOnConnectionFailure(false)"))
-        assertTrue("callTimeout 30 olmalı", appModuleSource.contains("callTimeout(30"))
-        assertFalse("callTimeout 60 kalmamalı", appModuleSource.contains("callTimeout(60"))
+        assertTrue("retryOnConnectionFailure(true) olmalı", appModuleSource.contains("retryOnConnectionFailure(true)"))
+        assertTrue("callTimeout en az 120 olmalı", appModuleSource.contains("callTimeout(240") || appModuleSource.contains("callTimeout(120"))
+        assertTrue("readTimeout en az 90 olmalı", appModuleSource.contains("readTimeout(180") || appModuleSource.contains("readTimeout(90"))
     }
 
     @Test

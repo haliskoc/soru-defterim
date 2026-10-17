@@ -41,11 +41,13 @@ class TestSonucViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(TestSonucUiState())
     val uiState: StateFlow<TestSonucUiState> = _uiState.asStateFlow()
 
+    private var hasProcessedReviewStages = false
+
     init {
         loadResult()
     }
 
-    private fun loadResult() {
+    fun loadResult() {
         val result = testSessionManager.lastResult.value
         val initialSolutions = mutableMapOf<Long, String>()
         result?.questions?.forEach { tq ->
@@ -60,6 +62,21 @@ class TestSonucViewModel @Inject constructor(
                 testResult = result,
                 aiSolutions = initialSolutions
             )
+        }
+
+        if (!hasProcessedReviewStages && result != null) {
+            hasProcessedReviewStages = true
+            viewModelScope.launch {
+                result.questions.forEach { tq ->
+                    when (tq.isCorrect) {
+                        true -> soruRepository.advanceReviewStage(tq.soru.id)
+                        false -> soruRepository.regressReviewStage(tq.soru.id)
+                        null -> {
+                            // Boş bırakılan veya cevap anahtarı olmayan soruların aşaması korunur
+                        }
+                    }
+                }
+            }
         }
     }
 

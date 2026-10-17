@@ -14,8 +14,11 @@ import com.sorudefteri.domain.model.TestQuestion
 import com.sorudefteri.domain.repository.SoruRepository
 import com.sorudefteri.domain.repository.TestSessionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.update
@@ -45,6 +48,10 @@ data class TestOlusturUiState(
     val matchingQuestions: List<Soru> = emptyList(),
     val availableSubjects: List<DersSecimItem> = emptyList(),
     val availableTopics: List<String> = emptyList(),
+    val dueReviewCount: Int = 0,
+    val timeLimitPerQuestionSeconds: Long = 0L, // 0: Süresiz, 75: TYT, 120: AYT
+    val currentStreak: Int = 0,
+    val streakShieldCount: Int = 1,
     val isLoading: Boolean = true,
     val errorMessage: String? = null
 ) {
@@ -68,6 +75,9 @@ class TestOlusturViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(TestOlusturUiState())
     val uiState: StateFlow<TestOlusturUiState> = _uiState.asStateFlow()
 
+    private val _uiEvent = MutableSharedFlow<String>(extraBufferCapacity = 1)
+    val uiEvent: SharedFlow<String> = _uiEvent.asSharedFlow()
+
     private val _currentAlan = MutableStateFlow(Alan.SAYISAL)
 
     init {
@@ -76,6 +86,16 @@ class TestOlusturViewModel @Inject constructor(
                 _currentAlan.value = alan
                 // Alan değiştiğinde UI'yi yeniden hesapla
                 _uiState.update { state -> recomputeUi(state) }
+            }
+        }
+        viewModelScope.launch {
+            ayarlarDataStore.currentStreak.collect { streak ->
+                _uiState.update { it.copy(currentStreak = streak) }
+            }
+        }
+        viewModelScope.launch {
+            ayarlarDataStore.streakShieldCount.collect { shield ->
+                _uiState.update { it.copy(streakShieldCount = shield) }
             }
         }
         loadQuestions()
@@ -181,7 +201,8 @@ class TestOlusturViewModel @Inject constructor(
         return state.copy(
             matchingQuestions = matching,
             availableSubjects = subjectItems,
-            availableTopics = topics.filter { it.isNotBlank() }.sorted()
+            availableTopics = topics.filter { it.isNotBlank() }.sorted(),
+            dueReviewCount = all.count { it.isDueForReview }
         )
     }
 
@@ -278,18 +299,27 @@ class TestOlusturViewModel @Inject constructor(
         }
     }
 
+    fun setTimeLimitPerQuestion(seconds: Long) {
+        _uiState.update { state ->
+            state.copy(timeLimitPerQuestionSeconds = seconds)
+        }
+    }
+
     fun startTest(onSuccess: () -> Unit) {
         val state = _uiState.value
         if (state.matchingQuestions.isEmpty()) return
 
-        val shuffled = state.matchingQuestions.shuffled()
-        val countToTake = if (state.questionCount <= 0 || state.questionCount > shuffled.size) {
-            shuffled.size
+        val dueQuestions = state.matchingQuestions.filter { it.isDueForReview }.shuffled()
+        val otherQuestions = state.matchingQuestions.filterNot { it.isDueForReview }.shuffled()
+        val prioritizedQuestions = dueQuestions + otherQuestions
+
+        val countToTake = if (state.questionCount <= 0 || state.questionCount > prioritizedQuestions.size) {
+            prioritizedQuestions.size
         } else {
             state.questionCount
         }
 
-        val selectedList = shuffled.take(countToTake).map { soru ->
+        val selectedList = prioritizedQuestions.take(countToTake).map { soru ->
             TestQuestion(soru = soru)
         }
 
@@ -299,10 +329,46 @@ class TestOlusturViewModel @Inject constructor(
             selectedTopics = state.selectedTopics,
             selectedMistakeTypes = state.selectedMistakeTypes,
             onlyUnsolved = state.onlyUnsolved,
-            questionCount = countToTake
+            questionCount = countToTake,
+            timeLimitPerQuestionSeconds = state.timeLimitPerQuestionSeconds
         )
 
-        testSessionManager.startSession(selectedList, filtre)
+        testSessionManager.startSession(selectedList, filtre, state.timeLimitPerQuestionSeconds)
         onSuccess()
+    }
+
+    /**
+     * Spaced repetition tekrar vakti gelmiş sorularla doğrudan test oturumu başlatır.
+     * Seçili zaman baskısı modunu korur; liste boşsa bilgi mesajı yayınlar.
+     */
+    fun startDueReviewTest(onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            val dueQuestions = try {
+                soruRepository.getDueReviewSorularList()
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = "Tekrar listesi yüklenemedi: ${e.localizedMessage}") }
+                _uiEvent.tryEmit("Tekrar listesi yüklenemedi.")
+                return@launch
+            }
+            if (dueQuestions.isNotEmpty()) {
+                val testQuestions = dueQuestions.map { TestQuestion(soru = it) }
+                val timeLimit = _uiState.value.timeLimitPerQuestionSeconds
+                val filter = TestFiltre(
+                    examType = null,
+                    selectedSubjects = emptySet(),
+                    selectedTopics = emptySet(),
+                    selectedMistakeTypes = emptySet(),
+                    onlyUnsolved = false,
+                    questionCount = testQuestions.size,
+                    timeLimitPerQuestionSeconds = timeLimit
+                )
+                testSessionManager.startSession(testQuestions, filter, timeLimit)
+                _uiState.update { it.copy(errorMessage = null) }
+                onSuccess()
+            } else {
+                _uiState.update { it.copy(errorMessage = null) }
+                _uiEvent.tryEmit("Şu an tekrar vakti gelmiş soru yok. Filtrelerle normal test oluşturabilirsin.")
+            }
+        }
     }
 }

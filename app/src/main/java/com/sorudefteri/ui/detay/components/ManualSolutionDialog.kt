@@ -22,22 +22,57 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+import android.content.ClipboardManager
+import android.content.Context
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalContext
+
 @Composable
 fun ManualSolutionDialog(
     initialText: String?,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit
 ) {
+    val context = LocalContext.current
     var text by rememberSaveable(initialText) { mutableStateOf(initialText ?: "") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(
-                "Manuel Çözüm Gir",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "Manuel Çözüm Gir",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                FilledTonalButton(
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        val clip = clipboard.primaryClip
+                        if (clip != null && clip.itemCount > 0) {
+                            val pasteText = clip.getItemAt(0).text?.toString() ?: ""
+                            if (pasteText.isNotBlank()) text = pasteText
+                        }
+                    },
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Yapıştır")
+                }
+            }
         },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {

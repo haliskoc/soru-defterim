@@ -140,4 +140,36 @@ class AiPromptManagerTest {
         assertTrue(prompt.contains(oneOffTemplate))
         assertTrue(prompt.contains("Tarih") && prompt.contains("Kurtuluş Savaşı"))
     }
+
+    @Test
+    fun varsayilanPromptlar_katiLatexVeMaddeYiginiKuraliIcerir() {
+        val cozumPrompt = AiPromptManager.PROMPT_COZUM_URETIMI_DEFAULT
+        assertTrue("Çözüm promptu kesir kuralı içermeli", cozumPrompt.contains("\\frac"))
+        assertTrue("Çözüm promptu limit veya latex kuralı içermeli", cozumPrompt.contains("\\sum") || cozumPrompt.contains("\\frac"))
+        assertTrue("Çözüm promptu kimya kuralı içermeli", cozumPrompt.contains("\\ce") || cozumPrompt.contains("\\xrightarrow"))
+
+        val benzerPrompt = AiPromptManager.PROMPT_BENZER_SORU_DEFAULT
+        assertTrue("Benzer soru promptu soru üretmeli", benzerPrompt.contains("questionText"))
+        assertTrue("Benzer soru promptu JSON formatı içermeli", benzerPrompt.contains("options"))
+    }
+
+    @Test
+    fun hariciAiPromptlar_duzgunVeKatiKurallarlaOlusturuluyor() {
+        val solPrompt = ExternalAiPromptHelper.buildExternalSolutionPrompt(
+            ders = "Matematik",
+            konu = "Türev",
+            soruMetni = "Limit x sıfıra giderken...",
+            dogruCevap = "C"
+        )
+        assertTrue("Harici çözüm promptu doğru cevabı içermeli", solPrompt.contains("C"))
+        assertTrue("Harici çözüm promptu soru metnini içermeli", solPrompt.contains("Limit x sıfıra giderken"))
+
+        val simPrompt = ExternalAiPromptHelper.buildExternalSimilarQuestionPrompt(
+            ders = "Fizik",
+            konu = "Elektrik",
+            kaynakSoruMetni = "Ohm kanunu..."
+        )
+        assertTrue("Harici benzer soru promptu dersi içermeli", simPrompt.contains("Fizik"))
+        assertTrue("Harici benzer soru promptu konuyu içermeli", simPrompt.contains("Elektrik"))
+    }
 }

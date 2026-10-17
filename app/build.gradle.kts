@@ -9,6 +9,21 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+// -----------------------------------------------------------------------------
+// DÜŞÜK RAM MODU
+// -----------------------------------------------------------------------------
+// R8 (minifyReleaseWithR8) 8 GB'lık bir makinede, masaüstü ortamı açıkken
+// Gradle daemon'ını OOM killer ile öldürüyordu (tepe ~6.7 GB + yoğun swap,
+// "Gradle build daemon disappeared unexpectedly"). R8 tek başına 2 GB+ üst
+// bellek istiyor; 8 GB'da buna yer yok.
+//
+// `-PlowRam=true` verildiğinde küçültme ve kaynak sıkıştırma kapatılır.
+// Böylece Release APK yine de üretilir (debug flag yok, imzalı, kurulabilir),
+// yalnızca küçültülmemiş olur. `./derle.sh release` bunu varsayılan yapar.
+// Tam R8 küçültmesi isteyenler: `./derle.sh release-full`
+// -----------------------------------------------------------------------------
+val lowRam = (project.findProperty("lowRam") as String?)?.toBoolean() ?: false
+
 android {
     namespace = "com.sorudefteri"
     compileSdk = 35
@@ -42,8 +57,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // Düşük RAM modunda R8 çalıştırılmaz (8 GB'da OOM).Bkz. `lowRam` açıklaması.
+            isMinifyEnabled = !lowRam
+            isShrinkResources = !lowRam
             isDebuggable = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -82,6 +98,13 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+        unitTests.all {
+            it.maxHeapSize = "1024m"
         }
     }
 }
@@ -134,6 +157,9 @@ dependencies {
     // DataStore & Security
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.security.crypto)
+
+    // Glance (App Widget)
+    implementation(libs.androidx.glance.appwidget)
 
     // CameraX
     implementation(libs.androidx.camera.core)

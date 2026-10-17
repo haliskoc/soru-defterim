@@ -37,7 +37,8 @@ open class GroqProvider @Inject constructor(
     private val json: Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
-        encodeDefaults = true
+        encodeDefaults = false
+        explicitNulls = false
         coerceInputValues = true
     }
 ) : CozumProvider {
@@ -45,10 +46,8 @@ open class GroqProvider @Inject constructor(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     companion object {
-        const val FALLBACK_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
+        const val FALLBACK_MODEL = "llama-3.2-11b-vision-preview"
         const val MAX_RETRIES = 3
-        private const val FALLBACK_MODEL_LEGACY_1 = "llama-3.2-11b-vision-preview"
-        private const val FALLBACK_MODEL_LEGACY_2 = "llama-3.2-90b-vision-preview"
     }
 
     /**
@@ -91,8 +90,13 @@ open class GroqProvider @Inject constructor(
                         .map { item -> item.id to item.id }
 
                     if (models.isEmpty()) {
-                        Result.failure(
-                            AiException(AiErrorType.MODEL_UNAVAILABLE, "Kullanılabilir Groq modeli bulunamadı.")
+                        Result.success(
+                            listOf(
+                                "llama-3.2-11b-vision-preview" to "llama-3.2-11b-vision-preview",
+                                "llama-3.2-90b-vision-preview" to "llama-3.2-90b-vision-preview",
+                                "llama-3.3-70b-versatile" to "llama-3.3-70b-versatile",
+                                "llama-3.1-8b-instant" to "llama-3.1-8b-instant"
+                            )
                         )
                     } else {
                         Result.success(models)
@@ -160,8 +164,33 @@ open class GroqProvider @Inject constructor(
             mistakeType = mistakeType,
             customTemplate = customPromptTemplate
         )
-        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
-            .let { if (it == FALLBACK_MODEL_LEGACY_1 || it == FALLBACK_MODEL_LEGACY_2) FALLBACK_MODEL else it }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) FALLBACK_MODEL else rawModel
+        executeGroqWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+    }
+
+    /**
+     * Sokratik sohbet veya serbest promptlar için istek çalıştırır.
+     */
+    open suspend fun chatIste(
+        imageBytes: ByteArray?,
+        prompt: String,
+        modelName: String,
+        apiKey: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı boş olamaz.")
+            )
+        }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) {
+            FALLBACK_MODEL
+        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true)) {
+            FALLBACK_MODEL
+        } else {
+            rawModel
+        }
         executeGroqWithRetry(imageBytes, prompt, effectiveModel, apiKey)
     }
 
@@ -181,8 +210,8 @@ open class GroqProvider @Inject constructor(
         }
 
         val prompt = promptManager.buildOcrTemizlemePrompt(rawOcrText, customPromptTemplate)
-        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
-            .let { if (it == FALLBACK_MODEL_LEGACY_1 || it == FALLBACK_MODEL_LEGACY_2) FALLBACK_MODEL else it }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) FALLBACK_MODEL else rawModel
         executeGroqWithRetry(null, prompt, effectiveModel, apiKey)
     }
 
@@ -205,8 +234,14 @@ open class GroqProvider @Inject constructor(
         }
 
         val prompt = promptManager.buildBenzerSoruPrompt(dersAdi, konu, soruMetni, customPromptTemplate)
-        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
-            .let { if (it == FALLBACK_MODEL_LEGACY_1 || it == FALLBACK_MODEL_LEGACY_2) FALLBACK_MODEL else it }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) {
+            FALLBACK_MODEL
+        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true)) {
+            FALLBACK_MODEL
+        } else {
+            rawModel
+        }
 
         val rawResult = executeGroqWithRetry(imageBytes, prompt, effectiveModel, apiKey)
         rawResult.mapCatching { rawText ->
@@ -246,8 +281,8 @@ open class GroqProvider @Inject constructor(
             sinavTipi = sinavTipi,
             customTemplate = customPromptTemplate
         )
-        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
-            .let { if (it == FALLBACK_MODEL_LEGACY_1 || it == FALLBACK_MODEL_LEGACY_2) FALLBACK_MODEL else it }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) FALLBACK_MODEL else rawModel
 
         val rawResult = executeGroqWithRetry(null, prompt, effectiveModel, apiKey)
         rawResult.mapCatching { rawText ->
@@ -274,8 +309,8 @@ open class GroqProvider @Inject constructor(
             )
         }
 
-        val effectiveModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
-            .let { if (it == FALLBACK_MODEL_LEGACY_1 || it == FALLBACK_MODEL_LEGACY_2) FALLBACK_MODEL else it }
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) FALLBACK_MODEL else rawModel
         val prompt = """
             Görseldeki YKS (TYT veya AYT) sorusunu incele ve JSON formatında şu bilgileri çıkar:
             1. examType: "TYT" veya "AYT"

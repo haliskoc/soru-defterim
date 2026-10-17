@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.filled.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -47,6 +48,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import androidx.compose.material.icons.filled.Sync
+
 @Composable
 fun YedeklemeGuvenlikTab(
     isBackupLoading: Boolean,
@@ -54,14 +60,28 @@ fun YedeklemeGuvenlikTab(
     isBackupError: Boolean,
     isAutoBackupEnabled: Boolean = false,
     isWifiOnly: Boolean = true,
+    driveLastSyncTime: Long = 0L,
+    isDriveSyncing: Boolean = false,
+    driveSyncMessage: String? = null,
+    isDriveSyncError: Boolean = false,
     onExportBackup: (Uri, String?) -> Unit,
     onImportBackup: (Uri, String?) -> Unit,
     onAutoBackupToggle: (Boolean) -> Unit = {},
     onWifiOnlyToggle: (Boolean) -> Unit = {},
+    onSyncDrive: () -> Unit = {},
+    // Dosya yöneticisinden .sdefteri ile açılışta gelen bekleyen dosya
+    pendingImportUri: String? = null,
+    onPendingImportHandled: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var exportPassword by rememberSaveable { mutableStateOf("") }
     var importPassword by rememberSaveable { mutableStateOf("") }
+    var showPendingImportDialog by rememberSaveable { mutableStateOf(false) }
+
+    // Dosyadan açma: onay dialogunu göster (şifre + içe aktar / vazgeç)
+    androidx.compose.runtime.LaunchedEffect(pendingImportUri) {
+        if (pendingImportUri != null) showPendingImportDialog = true
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -138,6 +158,13 @@ fun YedeklemeGuvenlikTab(
 
                     OutlinedButton(
                         onClick = {
+                            // ÖNEMLİ (.sdefteri seçici sorunu): DocumentsUI uzantıları
+                            // anlayamaz; sadece MIME ile filtreler ve bilinmeyen uzantılı
+                            // dosyaların provider raporlu tipi (octet-stream, x-trash vb.)
+                            // cihaza göre değişir (bkz. tickmate #136, SO 64791028).
+                            // Bu yüzden "Tüm dosyalar" (*/*) istenir; geçerli yedek olup
+                            // olmadığı BackupManager.anlasVeriPaketi... içinde manifest
+                            // kontrolüyle doğrulanır, geçersiz dosya uyarıyla reddedilir.
                             importLauncher.launch(arrayOf("*/*"))
                         },
                         enabled = !isBackupLoading,
@@ -235,5 +262,137 @@ fun YedeklemeGuvenlikTab(
                 }
             }
         }
+
+        // 3. Sessiz Google Drive AppData Senkronizasyonu (Faz 5.5)
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CloudDone, contentDescription = "Google Drive", tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Google Drive Bulut Yedeği",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Text(
+                    text = "Soru arşiviniz, çözümleriniz ve görselleriniz Google Drive hesabınızın gizli uygulama alanına (AppData) sessizce senkronize edilir.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                // Son Senkronizasyon Zaman Damgası
+                val lastSyncText = if (driveLastSyncTime > 0L) {
+                    val sdf = SimpleDateFormat("dd MMMM yyyy, HH:mm", Locale("tr"))
+                    "Son Senkronizasyon: ${sdf.format(Date(driveLastSyncTime))}"
+                } else {
+                    "Henüz bulut senkronizasyonu yapılmadı."
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "☁️ $lastSyncText",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Şimdi Senkronize Et Butonu
+                Button(
+                    onClick = onSyncDrive,
+                    enabled = !isDriveSyncing && !isBackupLoading,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    if (isDriveSyncing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Senkronize Ediliyor...")
+                    } else {
+                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Şimdi Senkronize Et")
+                    }
+                }
+
+                driveSyncMessage?.let { msg ->
+                    Text(
+                        text = msg,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isDriveSyncError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
+
+    // Dosyadan açılan .sdefteri için içe aktarma onay dialogu.
+    // Doğruluk uzantıya göre değil, paketteki backup_manifest.json'a göre
+    // BackupManager içinde yapılır; yanlış dosya seçilirse hata mesajı çıkar.
+    if (showPendingImportDialog && pendingImportUri != null) {
+        val pendingUri = Uri.parse(pendingImportUri)
+        val fileName = pendingUri.lastPathSegment?.substringAfterLast('/') ?: "yedek.sdefteri"
+        AlertDialog(
+            onDismissRequest = {
+                showPendingImportDialog = false
+                onPendingImportHandled()
+            },
+            title = { Text("Yedeği İçe Aktar", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("“$fileName” dosyasındaki yedek bu cihaza aktarılacak. Mevcut verileriniz korunur, aynı sorular akıllıca birleştirilir.")
+                    OutlinedTextField(
+                        value = importPassword,
+                        onValueChange = { importPassword = it },
+                        label = { Text("Yedek Parolası (varsa)") },
+                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showPendingImportDialog = false
+                        onImportBackup(pendingUri, importPassword.ifBlank { null })
+                        onPendingImportHandled()
+                    }
+                ) {
+                    Text("İçe Aktar")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(
+                    onClick = {
+                        showPendingImportDialog = false
+                        onPendingImportHandled()
+                    }
+                ) {
+                    Text("Vazgeç")
+                }
+            }
+        )
     }
 }

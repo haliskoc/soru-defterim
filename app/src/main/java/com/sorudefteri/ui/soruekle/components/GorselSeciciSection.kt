@@ -68,6 +68,7 @@ fun GorselSeciciSection(
     onOpenCropper: (Boolean) -> Unit,
     onPerformOcr: () -> Unit,
     onAutoTagWithAi: () -> Unit,
+    onOpenBatchCropper: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var zoomImageUrl by remember { mutableStateOf<String?>(null) }
@@ -231,6 +232,17 @@ fun GorselSeciciSection(
                                 Spacer(modifier = Modifier.width(4.dp))
                                 Text("AI Etiket")
                             }
+                        }
+                    }
+
+                    if (onOpenBatchCropper != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedButton(
+                            onClick = onOpenBatchCropper,
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("✂️ Sayfayı Böl (Çoklu Soru Kırp)", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }

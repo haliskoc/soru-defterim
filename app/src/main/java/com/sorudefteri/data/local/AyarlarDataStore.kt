@@ -7,16 +7,23 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.sorudefteri.data.ai.AiPromptType
 import com.sorudefteri.domain.model.AiProviderType
 import com.sorudefteri.domain.model.Alan
+import com.sorudefteri.ui.ortak.drawing.StylusDoubleTapAction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -26,7 +33,9 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "soru_defteri_ayarlar")
+private val Context.defaultDataStore: DataStore<Preferences> by preferencesDataStore(name = "soru_defteri_ayarlar")
+private val Context.dataStore: DataStore<Preferences>
+    get() = AyarlarDataStore.testDataStore ?: this.defaultDataStore
 
 /**
  * Kullanıcı tercihlerini ve API ayarlarını yöneten DataStore bileşeni.
@@ -40,6 +49,7 @@ class AyarlarDataStore @Inject constructor(
 ) {
 
     companion object {
+        internal var testDataStore: DataStore<Preferences>? = null
         private val KEY_ALAN = stringPreferencesKey("alan")
         private val KEY_AI_PROVIDER = stringPreferencesKey("ai_provider")
         // Legacy plain keys (migration için saklı, artık yazılmıyor)
@@ -69,15 +79,53 @@ class AyarlarDataStore @Inject constructor(
         // Onboarding
         private val KEY_ONBOARDING_SEEN = booleanPreferencesKey("onboarding_seen")
 
+        // Lenovo Stylus Preferences
+        private val KEY_STYLUS_DOUBLE_TAP_ACTION = stringPreferencesKey("stylus_double_tap_action")
+        private val KEY_STYLUS_PALM_REJECTION = booleanPreferencesKey("stylus_palm_rejection")
+        private val KEY_STYLUS_HAPTIC_FEEDBACK = booleanPreferencesKey("stylus_haptic_feedback")
+
         const val DEFAULT_ALAN = "SAYISAL"
         const val DEFAULT_AI_PROVIDER = "GEMINI"
-        const val DEFAULT_GEMINI_MODEL = "gemini-2.5-flash"
-        const val DEFAULT_GROQ_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"
-        const val DEFAULT_NVIDIA_MODEL = "meta/llama-3.1-405b-instruct"
+        const val DEFAULT_GEMINI_MODEL = "gemini-3.7-flash"
+        const val DEFAULT_GROQ_MODEL = "llama-3.2-11b-vision-preview"
+        const val DEFAULT_NVIDIA_MODEL = "meta/llama-3.2-90b-vision-instruct"
         const val DEFAULT_DARK_THEME = 0 // 0: Sistem, 1: Açık, 2: Koyu
         const val DEFAULT_AUTO_BACKUP_ENABLED = false
         const val DEFAULT_WIFI_ONLY_BACKUP = true
         const val DEFAULT_ONBOARDING_SEEN = false
+        val DEFAULT_STYLUS_DOUBLE_TAP_ACTION = StylusDoubleTapAction.PEN_ERASER_TOGGLE.name
+        const val DEFAULT_STYLUS_PALM_REJECTION = true
+        const val DEFAULT_STYLUS_HAPTIC_FEEDBACK = true
+
+        // Faz 4: Gamification, Streak & Badges
+        private val KEY_CURRENT_STREAK = intPreferencesKey("current_streak")
+        private val KEY_LAST_STREAK_DATE = stringPreferencesKey("last_streak_date")
+        private val KEY_STREAK_SHIELD_COUNT = intPreferencesKey("streak_shield_count")
+        private val KEY_LAST_SHIELD_RESET_WEEK = intPreferencesKey("last_shield_reset_week")
+        private val KEY_USER_XP = intPreferencesKey("user_xp")
+        private val KEY_UNLOCKED_BADGES = stringSetPreferencesKey("unlocked_badges")
+        private val KEY_TODAY_ACTIVITY_DATE = stringPreferencesKey("today_activity_date")
+        private val KEY_TODAY_SOLVED_COUNT = intPreferencesKey("today_solved_count")
+        private val KEY_TODAY_ADDED_COUNT = intPreferencesKey("today_added_count")
+        private val KEY_DRIVE_LAST_SYNC_TIME = longPreferencesKey("drive_last_sync_time")
+        private val KEY_EXAM_TARGET_DATE = longPreferencesKey("exam_target_date")
+
+        // Kamera ayarları
+        private val KEY_KAMERA_UZUN_POZLAMA = booleanPreferencesKey("kamera_uzun_pozlama")
+        private val KEY_KAMERA_OTOMATIK_CEKIM = booleanPreferencesKey("kamera_otomatik_cekim")
+
+        const val DEFAULT_CURRENT_STREAK = 0
+        const val DEFAULT_LAST_STREAK_DATE = ""
+        const val DEFAULT_STREAK_SHIELD_COUNT = 1
+        const val DEFAULT_LAST_SHIELD_RESET_WEEK = -1
+        const val DEFAULT_USER_XP = 0
+
+        // Widget & Sınav Geri Sayımı (0 = tarih ayarlanmadı)
+        const val DEFAULT_EXAM_TARGET_DATE = 0L
+
+        // Kamera ayarları varsayılanları
+        const val DEFAULT_KAMERA_UZUN_POZLAMA = false
+        const val DEFAULT_KAMERA_OTOMATIK_CEKIM = false
     }
 
     // TODO: Scope leak - CoroutineScope(SupervisorJob + IO) Application scope'a bağlanmalı, unregisterOnSharedPreferenceChangeListener close'da çağrılmalı, aksi halde memory leak riski
@@ -159,11 +207,23 @@ class AyarlarDataStore @Inject constructor(
                 if (legacyNvidia.isNotBlank()) ds.remove(KEY_NVIDIA_API_KEY_LEGACY)
             }
         }
-        // Groq model migration: eski vision-preview -> yeni scout
+        // Migration of broken/legacy models to valid defaults
+        val currentGeminiModel = prefs[KEY_GEMINI_MODEL]?.trim().orEmpty()
+        if (currentGeminiModel.isBlank() || currentGeminiModel == "gemini-2.5-flash" || currentGeminiModel == "gemini-2.5-pro") {
+            context.dataStore.edit { ds ->
+                ds[KEY_GEMINI_MODEL] = DEFAULT_GEMINI_MODEL
+            }
+        }
         val currentGroqModel = prefs[KEY_GROQ_MODEL]?.trim().orEmpty()
-        if (currentGroqModel == "llama-3.2-11b-vision-preview" || currentGroqModel == "llama-3.2-90b-vision-preview") {
+        if (currentGroqModel.isBlank() || currentGroqModel.contains("llama-4-scout") || currentGroqModel.contains("llama-4-maverick")) {
             context.dataStore.edit { ds ->
                 ds[KEY_GROQ_MODEL] = DEFAULT_GROQ_MODEL
+            }
+        }
+        val currentNvidiaModel = prefs[KEY_NVIDIA_MODEL]?.trim().orEmpty()
+        if (currentNvidiaModel.isBlank() || currentNvidiaModel == "meta/llama-3.1-405b-instruct") {
+            context.dataStore.edit { ds ->
+                ds[KEY_NVIDIA_MODEL] = DEFAULT_NVIDIA_MODEL
             }
         }
     }
@@ -249,6 +309,26 @@ class AyarlarDataStore @Inject constructor(
 
     val isOnboardingSeen: Flow<Boolean> get() = isOnboardingSeenFlow
 
+    // Lenovo Stylus Flows
+    val stylusDoubleTapActionFlow: Flow<StylusDoubleTapAction> = context.dataStore.data.map { preferences ->
+        val raw = preferences[KEY_STYLUS_DOUBLE_TAP_ACTION] ?: DEFAULT_STYLUS_DOUBLE_TAP_ACTION
+        StylusDoubleTapAction.fromString(raw)
+    }
+
+    val stylusDoubleTapAction: Flow<StylusDoubleTapAction> get() = stylusDoubleTapActionFlow
+
+    val stylusPalmRejectionFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_STYLUS_PALM_REJECTION] ?: DEFAULT_STYLUS_PALM_REJECTION
+    }
+
+    val isStylusPalmRejectionEnabled: Flow<Boolean> get() = stylusPalmRejectionFlow
+
+    val stylusHapticFeedbackFlow: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_STYLUS_HAPTIC_FEEDBACK] ?: DEFAULT_STYLUS_HAPTIC_FEEDBACK
+    }
+
+    val isStylusHapticFeedbackEnabled: Flow<Boolean> get() = stylusHapticFeedbackFlow
+
     // Custom Prompts Flows
     val promptSoruUretimiFlow: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[KEY_PROMPT_SORU_URETIMI] ?: ""
@@ -265,6 +345,40 @@ class AyarlarDataStore @Inject constructor(
     val promptBenzerSoruFlow: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[KEY_PROMPT_BENZER_SORU] ?: ""
     }
+
+    // ==========================================
+    // Faz 4: Gamification Flows
+    // ==========================================
+
+    val currentStreak: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[KEY_CURRENT_STREAK] ?: DEFAULT_CURRENT_STREAK
+    }
+    val currentStreakFlow: Flow<Int> get() = currentStreak
+
+    val lastStreakDate: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[KEY_LAST_STREAK_DATE] ?: DEFAULT_LAST_STREAK_DATE
+    }
+    val lastStreakDateFlow: Flow<String> get() = lastStreakDate
+
+    val streakShieldCount: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[KEY_STREAK_SHIELD_COUNT] ?: DEFAULT_STREAK_SHIELD_COUNT
+    }
+    val streakShieldCountFlow: Flow<Int> get() = streakShieldCount
+
+    val lastShieldResetWeek: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[KEY_LAST_SHIELD_RESET_WEEK] ?: DEFAULT_LAST_SHIELD_RESET_WEEK
+    }
+    val lastShieldResetWeekFlow: Flow<Int> get() = lastShieldResetWeek
+
+    val userXp: Flow<Int> = context.dataStore.data.map { preferences ->
+        preferences[KEY_USER_XP] ?: DEFAULT_USER_XP
+    }
+    val userXpFlow: Flow<Int> get() = userXp
+
+    val unlockedBadges: Flow<Set<String>> = context.dataStore.data.map { preferences ->
+        preferences[KEY_UNLOCKED_BADGES] ?: emptySet()
+    }
+    val unlockedBadgesFlow: Flow<Set<String>> get() = unlockedBadges
 
     // ==========================================
     // Custom Prompt Helpers
@@ -374,24 +488,23 @@ class AyarlarDataStore @Inject constructor(
     }
 
     suspend fun setGeminiModel(model: String) {
+        val trimmed = model.trim().ifBlank { DEFAULT_GEMINI_MODEL }
         context.dataStore.edit { preferences ->
-            preferences[KEY_GEMINI_MODEL] = model.trim()
+            preferences[KEY_GEMINI_MODEL] = trimmed
         }
     }
 
     suspend fun setGroqModel(model: String) {
-        // Eski model otomatik migrate
-        val safe = model.trim().let {
-            if (it == "llama-3.2-11b-vision-preview" || it == "llama-3.2-90b-vision-preview") DEFAULT_GROQ_MODEL else it
-        }
+        val trimmed = model.trim().ifBlank { DEFAULT_GROQ_MODEL }
         context.dataStore.edit { preferences ->
-            preferences[KEY_GROQ_MODEL] = safe
+            preferences[KEY_GROQ_MODEL] = trimmed
         }
     }
 
     suspend fun setNvidiaModel(model: String) {
+        val trimmed = model.trim().ifBlank { DEFAULT_NVIDIA_MODEL }
         context.dataStore.edit { preferences ->
-            preferences[KEY_NVIDIA_MODEL] = model.trim()
+            preferences[KEY_NVIDIA_MODEL] = trimmed
         }
     }
 
@@ -418,6 +531,24 @@ class AyarlarDataStore @Inject constructor(
     suspend fun setOnboardingSeen(seen: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[KEY_ONBOARDING_SEEN] = seen
+        }
+    }
+
+    suspend fun setStylusDoubleTapAction(action: StylusDoubleTapAction) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_STYLUS_DOUBLE_TAP_ACTION] = action.name
+        }
+    }
+
+    suspend fun setStylusPalmRejection(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_STYLUS_PALM_REJECTION] = enabled
+        }
+    }
+
+    suspend fun setStylusHapticFeedback(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_STYLUS_HAPTIC_FEEDBACK] = enabled
         }
     }
 
@@ -448,6 +579,215 @@ class AyarlarDataStore @Inject constructor(
     suspend fun getAutoBackupEnabled(): Boolean = autoBackupEnabledFlow.first()
     suspend fun getWifiOnlyBackup(): Boolean = wifiOnlyBackupFlow.first()
     suspend fun getIsOnboardingSeen(): Boolean = isOnboardingSeenFlow.first()
+    suspend fun getStylusDoubleTapAction(): StylusDoubleTapAction = stylusDoubleTapActionFlow.first()
+    suspend fun getStylusPalmRejection(): Boolean = stylusPalmRejectionFlow.first()
+    suspend fun getStylusHapticFeedback(): Boolean = stylusHapticFeedbackFlow.first()
+
+    // ==========================================
+    // Faz 4: Gamification, Streak & XP Methods
+    // ==========================================
+
+    private fun calculateDayDifference(dateStr1: String, dateStr2: String): Int {
+        if (dateStr1.isBlank() || dateStr2.isBlank()) return Int.MAX_VALUE
+        return try {
+            val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+            val d1 = sdf.parse(dateStr1) ?: return Int.MAX_VALUE
+            val d2 = sdf.parse(dateStr2) ?: return Int.MAX_VALUE
+            val cal1 = Calendar.getInstance().apply {
+                time = d1
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val cal2 = Calendar.getInstance().apply {
+                time = d2
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val diffMillis = cal2.timeInMillis - cal1.timeInMillis
+            (diffMillis / (1000L * 60 * 60 * 24)).toInt()
+        } catch (_: Exception) {
+            Int.MAX_VALUE
+        }
+    }
+
+    /**
+     * Günlük aktivite kaydı ve Seri (Streak) mekanizması.
+     * Öğrenci o gün >= 5 soru çözer veya >= 3 soru eklerse:
+     * - Eğer bugün zaten kaydedildiyse: seri korunur.
+     * - Eğer dün kaydedildiyse: seri + 1 artırılır.
+     * - Eğer 1 gün kaçırıldıysa ve kalkan varsa: 1 kalkan tüketilir, seri korunur.
+     * - Eğer kalkansız veya 1 günden fazla kaçırıldıysa: seri 1'e sıfırlanır.
+     *
+     * @return Günlük hedefe ulaşılıp seri sağlandıysa true, aksi halde false.
+     */
+    suspend fun recordDailyActivity(
+        questionsSolvedDelta: Int = 0,
+        questionsAddedDelta: Int = 0,
+        customDate: String? = null
+    ): Boolean {
+        var streakAchieved = false
+        context.dataStore.edit { preferences ->
+            val todayStr = customDate ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+            val currentWeek = try {
+                val cal = Calendar.getInstance()
+                if (customDate != null) {
+                    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                    sdf.parse(customDate)?.let { cal.time = it }
+                }
+                cal.get(Calendar.WEEK_OF_YEAR)
+            } catch (_: Exception) {
+                1
+            }
+
+            val lastResetWeek = preferences[KEY_LAST_SHIELD_RESET_WEEK] ?: DEFAULT_LAST_SHIELD_RESET_WEEK
+            if (lastResetWeek != currentWeek) {
+                preferences[KEY_STREAK_SHIELD_COUNT] = DEFAULT_STREAK_SHIELD_COUNT
+                preferences[KEY_LAST_SHIELD_RESET_WEEK] = currentWeek
+            }
+
+            var shieldCount = preferences[KEY_STREAK_SHIELD_COUNT] ?: DEFAULT_STREAK_SHIELD_COUNT
+            val lastStreakDateStr = preferences[KEY_LAST_STREAK_DATE] ?: DEFAULT_LAST_STREAK_DATE
+            var streak = preferences[KEY_CURRENT_STREAK] ?: DEFAULT_CURRENT_STREAK
+
+            val activityDate = preferences[KEY_TODAY_ACTIVITY_DATE] ?: ""
+            val currentSolved = if (activityDate == todayStr) (preferences[KEY_TODAY_SOLVED_COUNT] ?: 0) else 0
+            val currentAdded = if (activityDate == todayStr) (preferences[KEY_TODAY_ADDED_COUNT] ?: 0) else 0
+
+            val newSolved = currentSolved + questionsSolvedDelta
+            val newAdded = currentAdded + questionsAddedDelta
+
+            preferences[KEY_TODAY_ACTIVITY_DATE] = todayStr
+            preferences[KEY_TODAY_SOLVED_COUNT] = newSolved
+            preferences[KEY_TODAY_ADDED_COUNT] = newAdded
+
+            val goalReached = newSolved >= 5 || newAdded >= 3
+
+            if (goalReached) {
+                streakAchieved = true
+                if (lastStreakDateStr == todayStr) {
+                    // Bugün zaten seri yapılmış, aynı seri korunur
+                } else if (lastStreakDateStr.isBlank()) {
+                    // İlk seri başlangıcı
+                    streak = 1
+                    preferences[KEY_CURRENT_STREAK] = 1
+                    preferences[KEY_LAST_STREAK_DATE] = todayStr
+                } else {
+                    val diffDays = calculateDayDifference(lastStreakDateStr, todayStr)
+                    when {
+                        diffDays <= 0 -> {
+                            // Aynı gün ya da geçmiş gün: seri korunur
+                        }
+                        diffDays == 1 -> {
+                            // Dün kaydedilmiş, ardışık gün: seri + 1 artar
+                            streak += 1
+                            preferences[KEY_CURRENT_STREAK] = streak
+                            preferences[KEY_LAST_STREAK_DATE] = todayStr
+                        }
+                        diffDays == 2 -> {
+                            // 1 gün kaçırılmış (dünden önceki gün son aktivite)
+                            if (shieldCount > 0) {
+                                shieldCount -= 1
+                                preferences[KEY_STREAK_SHIELD_COUNT] = shieldCount
+                                // Seri korunur ve bugünkü aktiviteyle +1 devam eder
+                                streak += 1
+                                preferences[KEY_CURRENT_STREAK] = streak
+                                preferences[KEY_LAST_STREAK_DATE] = todayStr
+                            } else {
+                                // Kalkan yok: seri 1'e sıfırlanır
+                                streak = 1
+                                preferences[KEY_CURRENT_STREAK] = 1
+                                preferences[KEY_LAST_STREAK_DATE] = todayStr
+                            }
+                        }
+                        else -> {
+                            // > 1 gün kaçırılmış: seri 1'e sıfırlanır
+                            streak = 1
+                            preferences[KEY_CURRENT_STREAK] = 1
+                            preferences[KEY_LAST_STREAK_DATE] = todayStr
+                        }
+                    }
+                }
+            }
+        }
+        return streakAchieved
+    }
+
+    suspend fun addXp(amount: Int): Int {
+        var updatedXp = 0
+        context.dataStore.edit { preferences ->
+            val currentXp = preferences[KEY_USER_XP] ?: DEFAULT_USER_XP
+            updatedXp = (currentXp + amount).coerceAtLeast(0)
+            preferences[KEY_USER_XP] = updatedXp
+        }
+        return updatedXp
+    }
+
+    suspend fun unlockBadge(badgeId: String): Boolean {
+        var isNew = false
+        context.dataStore.edit { preferences ->
+            val currentBadges = preferences[KEY_UNLOCKED_BADGES]?.toMutableSet() ?: mutableSetOf()
+            if (!currentBadges.contains(badgeId)) {
+                currentBadges.add(badgeId)
+                preferences[KEY_UNLOCKED_BADGES] = currentBadges
+                isNew = true
+            }
+        }
+        return isNew
+    }
+
+    suspend fun unlockBadges(badgeIds: Set<String>): Set<String> {
+        val newlyUnlocked = mutableSetOf<String>()
+        context.dataStore.edit { preferences ->
+            val currentBadges = preferences[KEY_UNLOCKED_BADGES]?.toMutableSet() ?: mutableSetOf()
+            badgeIds.forEach { id ->
+                if (!currentBadges.contains(id)) {
+                    currentBadges.add(id)
+                    newlyUnlocked.add(id)
+                }
+            }
+            if (newlyUnlocked.isNotEmpty()) {
+                preferences[KEY_UNLOCKED_BADGES] = currentBadges
+            }
+        }
+        return newlyUnlocked
+    }
+
+    suspend fun setStreakShieldCount(count: Int) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_STREAK_SHIELD_COUNT] = count
+        }
+    }
+
+    suspend fun restoreGamificationState(
+        streak: Int,
+        lastStreakDate: String,
+        streakShieldCount: Int = 1,
+        xp: Int = 0,
+        badges: Set<String> = emptySet()
+    ) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_CURRENT_STREAK] = streak
+            preferences[KEY_LAST_STREAK_DATE] = lastStreakDate
+            preferences[KEY_STREAK_SHIELD_COUNT] = streakShieldCount
+            preferences[KEY_USER_XP] = xp
+            if (badges.isNotEmpty()) {
+                val current = preferences[KEY_UNLOCKED_BADGES]?.toMutableSet() ?: mutableSetOf()
+                current.addAll(badges)
+                preferences[KEY_UNLOCKED_BADGES] = current
+            }
+        }
+    }
+
+    suspend fun getCurrentStreak(): Int = currentStreak.first()
+    suspend fun getLastStreakDate(): String = lastStreakDate.first()
+    suspend fun getStreakShieldCount(): Int = streakShieldCount.first()
+    suspend fun getUserXp(): Int = userXp.first()
+    suspend fun getUnlockedBadges(): Set<String> = unlockedBadges.first()
 
     // TODO: activeApiKey cache - her çağrıda 2 Flow first() yapılıyor, in-memory cache + combine ile optimize edilebilir
     suspend fun getActiveApiKey(): String {
@@ -465,4 +805,57 @@ class AyarlarDataStore @Inject constructor(
             AiProviderType.NVIDIA -> getNvidiaModel()
         }
     }
+
+    val driveLastSyncTime: Flow<Long> = context.dataStore.data.map { preferences ->
+        preferences[KEY_DRIVE_LAST_SYNC_TIME] ?: 0L
+    }
+
+    val examTargetDate: Flow<Long> = context.dataStore.data.map { preferences ->
+        preferences[KEY_EXAM_TARGET_DATE] ?: DEFAULT_EXAM_TARGET_DATE
+    }
+
+    // ==========================================
+    // Kamera Ayarları Flows
+    // ==========================================
+
+    /** "Uzun Pozlama": birden fazla karenin akıllıca birleştirilmesi (kamera ayarında anahtar). */
+    val kameraUzunPozlamaAkisi: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_KAMERA_UZUN_POZLAMA] ?: DEFAULT_KAMERA_UZUN_POZLAMA
+    }
+
+    /** "Otomatik Çekim": soru kilitlendiğinde fotoğrafın otomatik çekilmesi (yalnız tekli mod). */
+    val kameraOtomatikCekimAkisi: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_KAMERA_OTOMATIK_CEKIM] ?: DEFAULT_KAMERA_OTOMATIK_CEKIM
+    }
+
+    suspend fun setExamTargetDate(dateMillis: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_EXAM_TARGET_DATE] = dateMillis
+        }
+    }
+
+    suspend fun getExamTargetDate(): Long = examTargetDate.first()
+
+    suspend fun setDriveLastSyncTime(time: Long) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_DRIVE_LAST_SYNC_TIME] = time
+        }
+    }
+
+    suspend fun setKameraUzunPozlama(acik: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_KAMERA_UZUN_POZLAMA] = acik
+        }
+    }
+
+    suspend fun setKameraOtomatikCekim(acik: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_KAMERA_OTOMATIK_CEKIM] = acik
+        }
+    }
+
+    suspend fun getDriveLastSyncTime(): Long = driveLastSyncTime.first()
+
+    suspend fun getKameraUzunPozlama(): Boolean = kameraUzunPozlamaAkisi.first()
+    suspend fun getKameraOtomatikCekim(): Boolean = kameraOtomatikCekimAkisi.first()
 }

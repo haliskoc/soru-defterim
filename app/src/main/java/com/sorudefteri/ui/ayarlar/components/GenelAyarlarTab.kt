@@ -14,9 +14,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BrightnessAuto
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -27,13 +31,20 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.sorudefteri.domain.model.Alan
+import com.sorudefteri.ui.ortak.drawing.StylusDoubleTapAction
 
 @Composable
 fun GenelAyarlarTab(
@@ -42,6 +53,14 @@ fun GenelAyarlarTab(
     onAlanSelected: (Alan) -> Unit,
     onThemeModeSelected: (Int) -> Unit,
     onResetAllDataClick: () -> Unit,
+    examTargetDateMillis: Long = 0L,
+    onExamDateSelected: (Long) -> Unit = {},
+    stylusDoubleTapAction: StylusDoubleTapAction = StylusDoubleTapAction.PEN_ERASER_TOGGLE,
+    isStylusPalmRejectionEnabled: Boolean = true,
+    isStylusHapticFeedbackEnabled: Boolean = true,
+    onStylusDoubleTapActionSelected: (StylusDoubleTapAction) -> Unit = {},
+    onStylusPalmRejectionToggle: (Boolean) -> Unit = {},
+    onStylusHapticFeedbackToggle: (Boolean) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Column(
@@ -106,7 +125,121 @@ fun GenelAyarlarTab(
             }
         }
 
-        // 2. Tema Tercihi
+        // 2. Sınav Geri Sayımı (Ana ekran widget'ı ile senkron)
+        var showExamDatePicker by rememberSaveable { mutableStateOf(false) }
+                val examDateFormatted = if (examTargetDateMillis > 0L) {
+                    val fmt = java.text.SimpleDateFormat("d MMMM yyyy", java.util.Locale("tr"))
+                    // DatePicker UTC tabanlı millis döndürür; yerel saat kaymasını önlemek için GMT
+                    fmt.timeZone = java.util.TimeZone.getTimeZone("GMT")
+                    fmt.format(java.util.Date(examTargetDateMillis))
+                } else null
+
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Event, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Sınav Geri Sayımı",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Text(
+                    text = "Sınav tarihinizi seçin; ana ekran widget'ında ve burada kaç gün kaldığını gösterir.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                val daysLeft = if (examTargetDateMillis > 0L) {
+                    val cal = java.util.Calendar.getInstance().apply {
+                        timeInMillis = System.currentTimeMillis()
+                        set(java.util.Calendar.HOUR_OF_DAY, 0)
+                        set(java.util.Calendar.MINUTE, 0)
+                        set(java.util.Calendar.SECOND, 0)
+                        set(java.util.Calendar.MILLISECOND, 0)
+                    }
+                    val examCal = java.util.Calendar.getInstance().apply {
+                        timeInMillis = examTargetDateMillis
+                        set(java.util.Calendar.HOUR_OF_DAY, 0)
+                        set(java.util.Calendar.MINUTE, 0)
+                        set(java.util.Calendar.SECOND, 0)
+                        set(java.util.Calendar.MILLISECOND, 0)
+                    }
+                    (examCal.timeInMillis - cal.timeInMillis) / (24L * 60L * 60L * 1000L)
+                } else null
+
+                Text(
+                    text = when (val d = if (examTargetDateMillis > 0L) daysLeft else null) {
+                        null -> "Henüz sınav tarihi seçilmedi"
+                        0L -> "Sınav bugün! Bol şans! 🍀"
+                        else ->
+                            if (d > 0L) "$examDateFormatted · Sınava $d gün kaldı 🎯"
+                            else "$examDateFormatted · Sınav geçti, tarihi güncelleyin"
+                    },
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (examTargetDateMillis > 0L) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedButton(
+                        onClick = { showExamDatePicker = true },
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(Icons.Default.Event, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Tarih Seç")
+                    }
+                    if (examTargetDateMillis > 0L) {
+                        OutlinedButton(
+                            onClick = { onExamDateSelected(0L) },
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Text("Sıfırla")
+                        }
+                    }
+                }
+            }
+        }
+
+        if (showExamDatePicker) {
+            val datePickerState = androidx.compose.material3.rememberDatePickerState(
+                initialSelectedDateMillis = if (examTargetDateMillis > 0L) examTargetDateMillis
+                else System.currentTimeMillis()
+            )
+            androidx.compose.material3.DatePickerDialog(
+                onDismissRequest = { showExamDatePicker = false },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = {
+                            datePickerState.selectedDateMillis?.let { millis ->
+                                // DatePicker UTC geceyarısı döndürür; DataStore'a olduğu gibi yazılır.
+                                // Gün hesapları her iki uçta da gün başına normalizasyonla yapılır.
+                                onExamDateSelected(millis)
+                            }
+                            showExamDatePicker = false
+                        }
+                    ) { Text("Tamam") }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(
+                        onClick = { showExamDatePicker = false }
+                    ) { Text("İptal") }
+                }
+            ) {
+                androidx.compose.material3.DatePicker(state = datePickerState)
+            }
+        }
+
+        // 3. Tema Tercihi
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -142,7 +275,148 @@ fun GenelAyarlarTab(
             }
         }
 
-        // 3. Verileri Sıfırla (Tehlikeli Bölge)
+        // 3. Lenovo Stylus & Yoga Tab Ayarları
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(
+                            text = "Lenovo Stylus & Yoga Tab Ayarları",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Lenovo Yoga Tab (TB-710FU) & Lenovo Tab Pen Pro donanım entegrasyonu.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                // Çift Tıklama Eylemi
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Kalem Çift Tıklama Eylemi",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    val actions = StylusDoubleTapAction.entries
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        actions.chunked(2).forEach { rowActions ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                rowActions.forEach { action ->
+                                    val isSelected = stylusDoubleTapAction == action
+                                    if (isSelected) {
+                                        Button(
+                                            onClick = { onStylusDoubleTapActionSelected(action) },
+                                            shape = RoundedCornerShape(10.dp),
+                                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(action.title, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                        }
+                                    } else {
+                                        OutlinedButton(
+                                            onClick = { onStylusDoubleTapActionSelected(action) },
+                                            shape = RoundedCornerShape(10.dp),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(action.title, fontSize = 12.sp)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Donanımsal Avuç İçi Engelleme (Palm Rejection) Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.TouchApp,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Donanımsal Avuç İçi Engelleme (Palm Rejection)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Yalnızca kalemi algılar, elinizin ekrana temasından kaynaklanan yanlış çizimleri engeller.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = isStylusPalmRejectionEnabled,
+                        onCheckedChange = onStylusPalmRejectionToggle
+                    )
+                }
+
+                // Kalem Haptik Titreşimi Switch
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Vibration,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Kalem Haptik Titreşimi (Haptic Tick)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = "Çift tıklama ve araç geçişlerinde anlık tıklama hissi (Haptic Tick) verir.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Switch(
+                        checked = isStylusHapticFeedbackEnabled,
+                        onCheckedChange = onStylusHapticFeedbackToggle
+                    )
+                }
+            }
+        }
+
+        // 4. Verileri Sıfırla (Tehlikeli Bölge)
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.2f)),

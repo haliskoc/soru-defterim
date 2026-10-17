@@ -43,7 +43,10 @@ import com.sorudefteri.ui.ayarlar.components.YedeklemeGuvenlikTab
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AyarlarScreen(
-    viewModel: AyarlarViewModel = hiltViewModel()
+    viewModel: AyarlarViewModel = hiltViewModel(),
+    // Dosya yöneticisinden .sdefteri ile açılışta gelen bekleyen içe aktarma Uri'si
+    pendingImportUri: String? = null,
+    onPendingImportHandled: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -66,6 +69,9 @@ fun AyarlarScreen(
     }
 
     val promptStatus by viewModel.promptStatus.collectAsStateWithLifecycle()
+
+    // Sınav geri sayım tarihi (widget ile senkron) — GenelAyarlarTab'a geçirilir
+    val examTargetDate by viewModel.examTargetDateFlow.collectAsStateWithLifecycle(initialValue = 0L)
     LaunchedEffect(promptStatus) {
         promptStatus.first?.let {
             snackbarHostState.showSnackbar(it)
@@ -73,15 +79,31 @@ fun AyarlarScreen(
         }
     }
 
+    // Dosyadan .sdefteri ile açılış: doğrudan Yedek sekmesine geç
+    LaunchedEffect(pendingImportUri) {
+        if (pendingImportUri != null) selectedTabIndex = 2
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "Ayarlar",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column {
+                        Text(
+                            text = "Ayarlar",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = when (selectedTabIndex) {
+                                1 -> "Adım 2 — AI sağlayıcı & promptlar"
+                                2 -> "Adım 3 — Yedekleme & güvenlik"
+                                else -> "Adım 1 — Genel tercihler"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
@@ -96,7 +118,7 @@ fun AyarlarScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            // 3'lü Tab Seçici
+            // 3'lü Tab Seçici — TELEFON: kısa etiketler (360dp'de taşmıyordu)
             PrimaryTabRow(
                 selectedTabIndex = selectedTabIndex,
                 containerColor = MaterialTheme.colorScheme.surface
@@ -104,19 +126,19 @@ fun AyarlarScreen(
                 Tab(
                     selected = selectedTabIndex == 0,
                     onClick = { selectedTabIndex = 0 },
-                    text = { Text("Genel", fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal) },
+                    text = { Text("1 Genel", fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal, maxLines = 1) },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Genel Ayarlar") }
                 )
                 Tab(
                     selected = selectedTabIndex == 1,
                     onClick = { selectedTabIndex = 1 },
-                    text = { Text("AI & Prompt", fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal) },
+                    text = { Text("2 AI", fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal, maxLines = 1) },
                     icon = { Icon(Icons.Default.AutoAwesome, contentDescription = "AI & Prompt") }
                 )
                 Tab(
                     selected = selectedTabIndex == 2,
                     onClick = { selectedTabIndex = 2 },
-                    text = { Text("Yedek & Güvenlik", fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal) },
+                    text = { Text("3 Yedek", fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal, maxLines = 1) },
                     icon = { Icon(Icons.Default.CloudUpload, contentDescription = "Yedek & Güvenlik") }
                 )
             }
@@ -134,7 +156,15 @@ fun AyarlarScreen(
                         themeMode = uiState.themeMode,
                         onAlanSelected = { viewModel.setAlan(it) },
                         onThemeModeSelected = { viewModel.setThemeMode(it) },
-                        onResetAllDataClick = { showResetConfirmDialog = true }
+                        onResetAllDataClick = { showResetConfirmDialog = true },
+                        examTargetDateMillis = examTargetDate,
+                        onExamDateSelected = { viewModel.setExamTargetDate(it) },
+                        stylusDoubleTapAction = uiState.stylusDoubleTapAction,
+                        isStylusPalmRejectionEnabled = uiState.isStylusPalmRejectionEnabled,
+                        isStylusHapticFeedbackEnabled = uiState.isStylusHapticFeedbackEnabled,
+                        onStylusDoubleTapActionSelected = { viewModel.setStylusDoubleTapAction(it) },
+                        onStylusPalmRejectionToggle = { viewModel.setStylusPalmRejection(it) },
+                        onStylusHapticFeedbackToggle = { viewModel.setStylusHapticFeedback(it) }
                     )
 
                     1 -> {
@@ -182,10 +212,18 @@ fun AyarlarScreen(
                         isBackupError = uiState.isBackupError,
                         isAutoBackupEnabled = uiState.isAutoBackupEnabled,
                         isWifiOnly = uiState.isWifiOnly,
+                        driveLastSyncTime = uiState.driveLastSyncTime,
+                        isDriveSyncing = uiState.isDriveSyncing,
+                        driveSyncMessage = uiState.driveSyncMessage,
+                        isDriveSyncError = uiState.isDriveSyncError,
                         onExportBackup = { uri, pwd -> viewModel.exportBackup(uri, pwd) },
                         onImportBackup = { uri, pwd -> viewModel.importBackup(uri, pwd) },
                         onAutoBackupToggle = { viewModel.setAutoBackupEnabled(it) },
-                        onWifiOnlyToggle = { viewModel.setWifiOnly(it) }
+                        onWifiOnlyToggle = { viewModel.setWifiOnly(it) },
+                        onSyncDrive = { viewModel.syncGoogleDrive() },
+                        // Dosyadan açma: Yedek sekmesinde değilsek sekmeyi aç, onay dialogu tab'da çıkar
+                        pendingImportUri = pendingImportUri,
+                        onPendingImportHandled = onPendingImportHandled
                     )
                 }
             }

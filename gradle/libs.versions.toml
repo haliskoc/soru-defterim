@@ -26,6 +26,7 @@ mockk = "1.13.16"
 turbine = "1.2.0"
 archCore = "2.2.0"
 securityCrypto = "1.1.0-alpha06"
+glance = "1.1.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -95,6 +96,9 @@ kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 
 # Security
 security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
+
+# Glance (App Widget)
+androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
 
 # Testing utilities
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }

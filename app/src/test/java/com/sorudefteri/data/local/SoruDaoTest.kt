@@ -4,6 +4,7 @@ import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.data.local.dao.MistakeCountTuple
 import com.sorudefteri.data.local.dao.SoruDao
 import com.sorudefteri.data.local.dao.SubjectCountTuple
+import com.sorudefteri.data.local.dao.SubjectSolvedCountTuple
 import com.sorudefteri.data.local.entity.SoruEntity
 import com.sorudefteri.data.local.entity.toEntity
 import com.sorudefteri.data.repository.SoruRepositoryImpl
@@ -41,7 +42,7 @@ class SoruDaoTest {
     fun setUp() {
         fakeDao = FakeSoruDao()
         mockGorselDepo = mockk(relaxed = true)
-        repository = SoruRepositoryImpl(fakeDao, mockGorselDepo)
+        repository = SoruRepositoryImpl(fakeDao, mockk(relaxed = true), mockk(relaxed = true), mockGorselDepo)
     }
 
     @Test
@@ -286,6 +287,32 @@ class SoruDaoTest {
     }
 
     @Test
+    fun regressReviewStage_kademeyiSifirlarVeBirGunSonrayaOteliyor() = runTest {
+        val now = System.currentTimeMillis()
+        val soru = Soru(imagePath = "1", examType = "TYT", subjectId = "mat", topic = "Türev", reviewStage = 3)
+        val id = repository.soruEkle(soru)
+
+        // Stage 3 -> 0 (+1 Gün)
+        repository.regressReviewStage(id)
+        val regressed = repository.getSoru(id)!!
+        assertEquals("Hata yapılan soru 0. kademeye gerilemeli", 0, regressed.reviewStage)
+        assertNotNull(regressed.nextReviewDate)
+        assertTrue(regressed.nextReviewDate!! >= now + (86400000L - 5000L))
+    }
+
+    @Test
+    fun regressReviewStageBatch_tumKademeleriSifirlar() = runTest {
+        val s1 = Soru(imagePath = "1", examType = "TYT", subjectId = "mat", topic = "A", reviewStage = 2)
+        val s2 = Soru(imagePath = "2", examType = "TYT", subjectId = "fiz", topic = "B", reviewStage = 4)
+        val id1 = repository.soruEkle(s1)
+        val id2 = repository.soruEkle(s2)
+
+        repository.regressReviewStageBatch(listOf(id1, id2))
+        assertEquals(0, repository.getSoru(id1)!!.reviewStage)
+        assertEquals(0, repository.getSoru(id2)!!.reviewStage)
+    }
+
+    @Test
     fun topluIslemler_batchDeleteBatchSolveBatchFavoriteDogruCalisir() = runTest {
         val s1 = Soru(imagePath = "1", examType = "TYT", subjectId = "mat", topic = "A", isSolved = false, isFavorite = false)
         val s2 = Soru(imagePath = "2", examType = "TYT", subjectId = "fiz", topic = "B", isSolved = false, isFavorite = false)
@@ -340,6 +367,35 @@ class FakeSoruDao : SoruDao {
         emit()
     }
 
+    // ===== Akıllı içe aktarma (dedup/merge) metotları =====
+    override suspend fun getByContentHashes(hashes: List<String>): List<SoruEntity> {
+        val wanted = hashes.toSet()
+        return data.values.filter { it.contentHash in wanted }
+    }
+
+    override suspend fun getFirstByContentHash(hash: String): SoruEntity? {
+        return data.values.firstOrNull { it.contentHash == hash }
+    }
+
+    override suspend fun getRowsWithMissingContentHash(): List<SoruEntity> {
+        return data.values.filter { it.contentHash.isBlank() }
+    }
+
+    override suspend fun updateContentHash(id: Long, hash: String, updatedAt: Long) {
+        data[id]?.let { current ->
+            data[id] = current.copy(contentHash = hash, updatedAt = updatedAt)
+            emit()
+        }
+    }
+
+    override suspend fun updateEntityFull(soru: SoruEntity) {
+        data[soru.id] = soru
+        emit()
+    }
+
+    /** Testlerde toplam satır sayısı için kolay erişim. */
+    suspend fun satirSayisi(): Int = data.size
+
     override suspend fun deleteSoru(soru: SoruEntity) {
         data.remove(soru.id)
         emit()
@@ -386,6 +442,16 @@ class FakeSoruDao : SoruDao {
                         item.subjectId.contains(query, ignoreCase = true) ||
                         (item.questionText?.contains(query, ignoreCase = true) == true) ||
                         (item.ocrMetni?.contains(query, ignoreCase = true) == true)
+            }
+        }
+    }
+
+    override fun searchSorularFts(query: String): Flow<List<SoruEntity>> {
+        val tokens = query.split("\\s+".toRegex()).map { it.replace("*", "").replace("\"", "").trim().lowercase() }.filter { it.isNotBlank() }
+        return flowEmitter.map { list ->
+            list.filter { item ->
+                val text = "${item.topic} ${item.note.orEmpty()} ${item.ocrMetni.orEmpty()} ${item.questionText.orEmpty()} ${item.aiExplanation.orEmpty()}".lowercase()
+                tokens.all { token -> text.contains(token) }
             }
         }
     }
@@ -497,6 +563,18 @@ class FakeSoruDao : SoruDao {
         return data.values.filter { it.nextReviewDate != null && it.nextReviewDate!! <= currentTime }
     }
 
+    override fun getSubjectDistributionWithSolved(): Flow<List<SubjectSolvedCountTuple>> {
+        return flowEmitter.map { list ->
+            list.groupBy { it.subjectId }.map { (subjectId, questions) ->
+                SubjectSolvedCountTuple(
+                    subjectId = subjectId,
+                    count = questions.size,
+                    solvedCount = questions.count { it.isSolved }
+                )
+            }
+        }
+    }
+
     override fun getPagedFilteredSorular(
         query: String?,
         examType: String?,
@@ -504,6 +582,22 @@ class FakeSoruDao : SoruDao {
         mistakeType: String?,
         isSolved: Boolean?,
         isFavorite: Boolean?,
+        onlyDueReview: Boolean?,
+        currentTime: Long,
+        kaynak: String?
+    ): androidx.paging.PagingSource<Int, SoruEntity> {
+        throw UnsupportedOperationException("PagingSource unit test için mock kullanılmalıdır.")
+    }
+
+    override fun getPagedFilteredSorularFts(
+        query: String,
+        examType: String?,
+        subjectId: String?,
+        mistakeType: String?,
+        isSolved: Boolean?,
+        isFavorite: Boolean?,
+        onlyDueReview: Boolean?,
+        currentTime: Long,
         kaynak: String?
     ): androidx.paging.PagingSource<Int, SoruEntity> {
         throw UnsupportedOperationException("PagingSource unit test için mock kullanılmalıdır.")
@@ -545,6 +639,22 @@ class FakeSoruDao : SoruDao {
         emit()
     }
 
+    override suspend fun regressReviewStageAtomik(id: Long, nextReviewDate: Long, now: Long) {
+        val existing = data[id] ?: return
+        data[id] = existing.copy(reviewStage = 0, nextReviewDate = nextReviewDate, lastReviewedAt = now, updatedAt = now)
+        emit()
+    }
+
+    override suspend fun regressReviewStageBatch(ids: List<Long>, nextReviewDate: Long, now: Long) {
+        ids.forEach { id ->
+            val existing = data[id]
+            if (existing != null) {
+                data[id] = existing.copy(reviewStage = 0, nextReviewDate = nextReviewDate, lastReviewedAt = now, updatedAt = now)
+            }
+        }
+        emit()
+    }
+
     override suspend fun updateNoteAtomik(id: Long, note: String?, now: Long) {
         val existing = data[id] ?: return
         data[id] = existing.copy(note = note, updatedAt = now)
@@ -555,5 +665,13 @@ class FakeSoruDao : SoruDao {
         val existing = data[id] ?: return
         data[id] = existing.copy(aiExplanation = explanation, updatedAt = now)
         emit()
+    }
+
+    override suspend fun getSolvedCountByMistakeType(mistakeType: String): Int {
+        return data.values.count { it.mistakeType == mistakeType && it.isSolved }
+    }
+
+    override suspend fun getSolvedGeometriCount(): Int {
+        return data.values.count { it.isSolved && (it.subjectId.contains("geometri", ignoreCase = true) || it.topic.contains("geometri", ignoreCase = true)) }
     }
 }

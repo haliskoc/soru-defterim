@@ -127,12 +127,23 @@ class AiRepositoryTest {
         // Default stub: return fake bytes for any image path so getAiSolution file path tests succeed
         io.mockk.coEvery { mockGorselDepo.getGorselBytes(any()) } returns "fake_image_bytes".toByteArray()
 
+        val promptManager = AiPromptManager(mockAyarlarDataStore)
+        val smartAiRouter = SmartAiRouter(
+            geminiProvider = fakeGeminiProvider,
+            groqProvider = fakeGroqProvider,
+            nvidiaProvider = fakeNvidiaProvider,
+            ayarlarDataStore = mockAyarlarDataStore,
+            gorselDepo = mockGorselDepo,
+            promptManager = promptManager
+        )
+
         aiRepository = AiRepository(
             ayarlarDataStore = mockAyarlarDataStore,
             geminiProvider = fakeGeminiProvider,
             groqProvider = fakeGroqProvider,
             nvidiaProvider = fakeNvidiaProvider,
-            gorselDepo = mockGorselDepo
+            gorselDepo = mockGorselDepo,
+            smartAiRouter = smartAiRouter
         )
     }
 
@@ -156,7 +167,7 @@ class AiRepositoryTest {
 
         coEvery { mockAyarlarDataStore.getAiProvider() } returns AiProviderType.GEMINI
         coEvery { mockAyarlarDataStore.getGeminiApiKey() } returns "gemini_key_123"
-        coEvery { mockAyarlarDataStore.getGeminiModel() } returns "gemini-2.5-flash"
+        coEvery { mockAyarlarDataStore.getGeminiModel() } returns "gemini-2.0-flash"
 
         val result = aiRepository.cozumIste(
             imageBytes = testBytes,
@@ -177,7 +188,7 @@ class AiRepositoryTest {
 
         coEvery { mockAyarlarDataStore.getAiProvider() } returns AiProviderType.GROQ
         coEvery { mockAyarlarDataStore.getGroqApiKey() } returns "gsk_groq_key_456"
-        coEvery { mockAyarlarDataStore.getGroqModel() } returns "meta-llama/llama-4-scout-17b-16e-instruct"
+        coEvery { mockAyarlarDataStore.getGroqModel() } returns "llama-3.2-11b-vision-preview"
 
         val result = aiRepository.cozumIste(
             imageBytes = testBytes,
@@ -210,7 +221,7 @@ class AiRepositoryTest {
 
         coEvery { mockAyarlarDataStore.getAiProvider() } returns AiProviderType.GEMINI
         coEvery { mockAyarlarDataStore.getGeminiApiKey() } returns "gemini_key"
-        coEvery { mockAyarlarDataStore.getGeminiModel() } returns "gemini-2.5-flash"
+        coEvery { mockAyarlarDataStore.getGeminiModel() } returns "gemini-2.0-flash"
 
         val result = aiRepository.detectQuestionMetadata(testBytes)
         assertTrue(result.isSuccess)
@@ -232,7 +243,7 @@ class AiRepositoryTest {
 
         coEvery { mockAyarlarDataStore.getAiProvider() } returns AiProviderType.GROQ
         coEvery { mockAyarlarDataStore.getGroqApiKey() } returns "groq_key"
-        coEvery { mockAyarlarDataStore.getGroqModel() } returns "meta-llama/llama-4-scout-17b-16e-instruct"
+        coEvery { mockAyarlarDataStore.getGroqModel() } returns "llama-3.2-11b-vision-preview"
 
         val result = aiRepository.generateSimilarQuestion(testBytes, "Geometri", "Üçgenler")
         assertTrue(result.isSuccess)
@@ -250,7 +261,7 @@ class AiRepositoryTest {
         // 2. API key mevcut
         coEvery { mockAyarlarDataStore.getGeminiApiKey() } returns "valid_gemini_key"
         fakeGeminiProvider.liveModelsResult = Result.success(
-            listOf("gemini-2.5-flash" to "Gemini 2.5 Flash", "gemini-2.5-pro" to "Gemini 2.5 Pro")
+            listOf("gemini-2.0-flash" to "Gemini 2.0 Flash", "gemini-1.5-pro" to "Gemini 1.5 Pro")
         )
 
         val successResult = aiRepository.fetchLiveModels(AiProviderType.GEMINI)
@@ -312,7 +323,7 @@ class AiRepositoryTest {
         val hugeBytes = ByteArray(5 * 1024 * 1024 + 1) { 0 }
         coEvery { mockAyarlarDataStore.getAiProvider() } returns AiProviderType.GEMINI
         coEvery { mockAyarlarDataStore.getGeminiApiKey() } returns "key"
-        coEvery { mockAyarlarDataStore.getGeminiModel() } returns "gemini-2.5-flash"
+        coEvery { mockAyarlarDataStore.getGeminiModel() } returns "gemini-2.0-flash"
         val result = aiRepository.cozumIste(hugeBytes, "Matematik", "Türev")
         assertTrue(result.isFailure)
         assertTrue(result.exceptionOrNull()?.message?.contains("Görsel boyutu çok büyük") == true)

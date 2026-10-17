@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.local.dao.TestSonucDao
 import com.sorudefteri.data.local.entity.TestSonucEntity
+import com.sorudefteri.domain.manager.BadgeManager
 import com.sorudefteri.domain.model.TestQuestion
 import com.sorudefteri.domain.repository.TestSessionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,7 +31,11 @@ data class TestCozUiState(
     val showExitDialog: Boolean = false,
     val zoomImagePath: String? = null,
     val zoomImageTitle: String? = null,
-    val isFinished: Boolean = false
+    val isFinished: Boolean = false,
+    val targetTimePerQuestion: Long = 0L,
+    val currentQuestionRemainingSeconds: Long = 0L,
+    val isTimeWarning: Boolean = false,
+    val isTimePressure: Boolean = false
 ) {
     val currentQuestion: TestQuestion?
         get() = questions.getOrNull(currentIndex)
@@ -54,7 +59,8 @@ data class TestCozUiState(
 @HiltViewModel
 class TestCozViewModel @Inject constructor(
     private val testSessionManager: TestSessionManager,
-    private val testSonucDao: TestSonucDao
+    private val testSonucDao: TestSonucDao,
+    private val badgeManager: BadgeManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TestCozUiState())
@@ -63,19 +69,33 @@ class TestCozViewModel @Inject constructor(
     private var timerJob: Job? = null
 
     init {
-        initSession()
-        startTimer()
+        refreshSession()
     }
 
-    private fun initSession() {
+    /**
+     * Oturum sorularını ve zamanlayıcıyı aktif TestSessionManager durumundan güvenle yükler.
+     * Ekran her açıldığında veya oturum değiştiğinde çağrılır.
+     */
+    fun refreshSession() {
         val questions = testSessionManager.activeQuestions.value
         val initialAnswers = questions.mapIndexed { index, q -> index to q.userAnswer }.toMap()
+        val limit = testSessionManager.timeLimitPerQuestion.value
         _uiState.update {
             it.copy(
                 questions = questions,
-                userAnswers = initialAnswers
+                userAnswers = initialAnswers,
+                targetTimePerQuestion = limit,
+                currentQuestionRemainingSeconds = limit,
+                isTimePressure = limit > 0L,
+                currentIndex = 0,
+                elapsedSeconds = 0L,
+                questionTimes = emptyMap(),
+                isFinished = false,
+                showFinishDialog = false,
+                showExitDialog = false
             )
         }
+        startTimer()
     }
 
     private fun startTimer() {
@@ -83,16 +103,41 @@ class TestCozViewModel @Inject constructor(
         timerJob = viewModelScope.launch {
             while (isActive) {
                 delay(1000L)
-                _uiState.update { state ->
-                    val newTotal = state.elapsedSeconds + 1
-                    val currentQTime = (state.questionTimes[state.currentIndex] ?: 0L) + 1
-                    val newQTimes = state.questionTimes.toMutableMap().apply {
-                        put(state.currentIndex, currentQTime)
+                val currentState = _uiState.value
+                val newTotal = currentState.elapsedSeconds + 1
+                val currentQTime = (currentState.questionTimes[currentState.currentIndex] ?: 0L) + 1
+                val newQTimes = currentState.questionTimes.toMutableMap().apply {
+                    put(currentState.currentIndex, currentQTime)
+                }
+
+                if (currentState.targetTimePerQuestion > 0) {
+                    val remaining = (currentState.targetTimePerQuestion - currentQTime).coerceAtLeast(0L)
+                    val isWarning = remaining in 1L..15L
+
+                    _uiState.update {
+                        it.copy(
+                            elapsedSeconds = newTotal,
+                            questionTimes = newQTimes,
+                            currentQuestionRemainingSeconds = remaining,
+                            isTimeWarning = isWarning
+                        )
                     }
-                    state.copy(
-                        elapsedSeconds = newTotal,
-                        questionTimes = newQTimes
-                    )
+
+                    if (remaining == 0L) {
+                        // Süre doldu (timeout) -> sonraki soruya geç veya testi bitir
+                        if (currentState.currentIndex < currentState.questions.size - 1) {
+                            nextQuestion()
+                        } else {
+                            setShowFinishDialog(true)
+                        }
+                    }
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            elapsedSeconds = newTotal,
+                            questionTimes = newQTimes
+                        )
+                    }
                 }
             }
         }
@@ -125,15 +170,27 @@ class TestCozViewModel @Inject constructor(
     }
 
     fun goToQuestion(index: Int) {
-        if (index in _uiState.value.questions.indices) {
-            _uiState.update { it.copy(currentIndex = index) }
+        val state = _uiState.value
+        if (index in state.questions.indices) {
+            val spent = state.questionTimes[index] ?: 0L
+            val rem = if (state.targetTimePerQuestion > 0) {
+                (state.targetTimePerQuestion - spent).coerceAtLeast(0L)
+            } else 0L
+            val isWarning = state.targetTimePerQuestion > 0 && rem in 1L..15L
+            _uiState.update {
+                it.copy(
+                    currentIndex = index,
+                    currentQuestionRemainingSeconds = rem,
+                    isTimeWarning = isWarning
+                )
+            }
         }
     }
 
     fun nextQuestion() {
         val state = _uiState.value
         if (state.currentIndex < state.questions.size - 1) {
-            _uiState.update { it.copy(currentIndex = state.currentIndex + 1) }
+            goToQuestion(state.currentIndex + 1)
         } else {
             setShowFinishDialog(true)
         }
@@ -142,7 +199,7 @@ class TestCozViewModel @Inject constructor(
     fun previousQuestion() {
         val state = _uiState.value
         if (state.currentIndex > 0) {
-            _uiState.update { it.copy(currentIndex = state.currentIndex - 1) }
+            goToQuestion(state.currentIndex - 1)
         }
     }
 
@@ -195,6 +252,12 @@ class TestCozViewModel @Inject constructor(
                         examType = filter.examType ?: "TÜMÜ",
                         completedAt = result.completedAt
                     )
+                )
+
+                // Gamification: XP ödülü ve rozet değerlendirmesi
+                badgeManager.onTestCompleted(
+                    result = result,
+                    isTimePressure = state.targetTimePerQuestion > 0
                 )
             } catch (e: Exception) {
                 e.printStackTrace()

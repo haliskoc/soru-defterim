@@ -1,10 +1,12 @@
 package com.sorudefteri.ui.test
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -17,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -27,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.Cancel
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -36,6 +40,7 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.ZoomIn
 import com.sorudefteri.ui.ortak.math.MathMarkdownText
@@ -77,8 +82,20 @@ import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.model.TestQuestion
 import com.sorudefteri.domain.model.TestResult
 import com.sorudefteri.ui.ortak.FullScreenImageViewer
+import com.sorudefteri.ui.istatistik.components.StoryCardGenerator
 import java.io.File
 import java.util.Locale
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import com.sorudefteri.ui.ortak.TeacherShareDialog
+import com.sorudefteri.ui.ortak.TeacherShareHelper
 
 /**
  * Test Sonuç ve Detaylı Analiz Ekranı
@@ -88,21 +105,37 @@ import java.util.Locale
 fun TestSonucScreen(
     onNewTest: () -> Unit,
     onNavigateToLibrary: () -> Unit,
+    onNavigateToStats: () -> Unit = {},
     viewModel: TestSonucViewModel = hiltViewModel(),
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val result = uiState.testResult
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var teacherShareQuestion by remember { mutableStateOf<com.sorudefteri.domain.model.TestQuestion?>(null) }
+
+    // Sistem geri tuşuna basıldığında test sonucunu kapatıp kütüphaneye dön
+    BackHandler {
+        onNavigateToLibrary()
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "Test Sonucu",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column {
+                        Text(
+                            text = "Test Değerlendirmesi",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Tamamlanan Test Sonucu",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 },
                 navigationIcon = {
                     IconButton(onClick = onNavigateToLibrary) {
@@ -120,7 +153,8 @@ fun TestSonucScreen(
         bottomBar = {
             TestSonucBottomBar(
                 onNewTest = onNewTest,
-                onNavigateToLibrary = onNavigateToLibrary
+                onNavigateToLibrary = onNavigateToLibrary,
+                onNavigateToStats = onNavigateToStats
             )
         },
         modifier = modifier.fillMaxSize()
@@ -132,7 +166,26 @@ fun TestSonucScreen(
                     .padding(innerPadding),
                 contentAlignment = Alignment.Center
             ) {
-                Text("Görüntülenecek test sonucu bulunamadı.")
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.padding(24.dp)
+                ) {
+                    Text(
+                        "Görüntülenecek test sonucu bulunamadı.",
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Text(
+                        "Uygulama yeniden başlatılmış olabilir. Sonuçlar İstatistikler sekmesinde güvenle saklanıyor.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(onClick = onNavigateToLibrary) { Text("Kütüphane") }
+                        Button(onClick = onNewTest) { Text("Yeni Test") }
+                        FilledTonalButton(onClick = onNavigateToStats) { Text("İstatistikler") }
+                    }
+                }
             }
         } else {
             LazyColumn(
@@ -145,6 +198,41 @@ fun TestSonucScreen(
                 // 1. Test Tamamlandı Özet Kartı
                 item {
                     TestResultSummaryCard(result = result)
+                }
+
+                // 1.5. Instagram / WhatsApp Story Başarı Kartı 9:16 (Faz 5.4)
+                item {
+                    Button(
+                        onClick = {
+                            coroutineScope.launch {
+                                try {
+                                    val bitmap = withContext(Dispatchers.IO) {
+                                        StoryCardGenerator.generateStoryBitmap(
+                                            context = context,
+                                            currentStreak = 1,
+                                            successRate = result.successRate.toFloat(),
+                                            levelTitle = "Test Fatihi",
+                                            levelNumber = 1,
+                                            totalXp = result.correctCount * 10,
+                                            unlockedBadges = if (result.successRate >= 100) setOf("HATA_GECIRMEZ") else emptySet(),
+                                            studentTarget = "Hedef: Cerrahpaşa Tıp",
+                                            netIncrease = "+${String.format(Locale.getDefault(), "%.2f", result.netCount)} Net"
+                                        )
+                                    }
+                                    StoryCardGenerator.shareToStory(context, bitmap)
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6A1B9A))
+                    ) {
+                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("📱 Hikayede Paylaş (9:16)", fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                 }
 
                 // 2. Doğru Yapılan Soruları Arşivde 'Çözüldü' Yap Butonu
@@ -160,7 +248,25 @@ fun TestSonucScreen(
                     }
                 }
 
-                // 3. Soru Analiz Başlığı
+                // 3. Süre Tuzağı Sorular Kartı (Hedef sürenin 2 katından fazla zaman harcanan sorular)
+                val targetSeconds = if (result.targetTimePerQuestionSeconds > 0) {
+                    result.targetTimePerQuestionSeconds
+                } else {
+                    75L
+                }
+                val slowQuestions = result.questions.mapIndexed { idx, q -> (idx + 1) to q }
+                    .filter { it.second.timeSpentSeconds > 2 * targetSeconds }
+
+                if (slowQuestions.isNotEmpty()) {
+                    item {
+                        SureTuzagiCard(
+                            slowQuestions = slowQuestions,
+                            targetSeconds = targetSeconds
+                        )
+                    }
+                }
+
+                // 4. Soru Analiz Başlığı
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -197,7 +303,8 @@ fun TestSonucScreen(
                         isSolutionExpanded = isSolutionExpanded,
                         onRequestAiSolution = { viewModel.requestAiSolution(testQuestion.soru) },
                         onToggleSolutionExpanded = { viewModel.toggleSolutionExpanded(soruId) },
-                        onZoomImage = { path, title -> viewModel.openZoomImage(path, title) }
+                        onZoomImage = { path, title -> viewModel.openZoomImage(path, title) },
+                        onTeacherShare = { teacherShareQuestion = testQuestion }
                     )
                 }
 
@@ -214,6 +321,26 @@ fun TestSonucScreen(
             imagePath = uiState.zoomImagePath!!,
             title = uiState.zoomImageTitle ?: "Görsel",
             onDismiss = { viewModel.closeZoomImage() }
+        )
+    }
+
+    // Faz 4.6: Hocama Sor (WhatsApp) Diyaloğu
+    teacherShareQuestion?.let { tq ->
+        TeacherShareDialog(
+            soru = tq.soru,
+            studentAnswer = tq.userAnswer,
+            onDismiss = { teacherShareQuestion = null },
+            onSend = { note ->
+                coroutineScope.launch {
+                    TeacherShareHelper.shareToTeacher(
+                        context = context,
+                        soru = tq.soru,
+                        studentAnswer = tq.userAnswer,
+                        customNote = note
+                    )
+                    teacherShareQuestion = null
+                }
+            }
         )
     }
 }
@@ -287,43 +414,56 @@ private fun TestResultSummaryCard(result: TestResult) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 4'lü Metrik Izgarası (Doğru, Yanlış, Boş, Süre)
-            Row(
+            // 4'lü Metrik — TELEFON: 2x2 ızgara (360dp'de 4'lü sığmıyordu)
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Doğru
-                MetricItem(
-                    label = "Doğru",
-                    value = "${result.correctCount}",
-                    color = Color(0xFF4CAF50),
-                    icon = Icons.Default.CheckCircle
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    // Doğru
+                    MetricItem(
+                        label = "Doğru",
+                        value = "${result.correctCount}",
+                        color = Color(0xFF4CAF50),
+                        icon = Icons.Default.CheckCircle,
+                        modifier = Modifier.weight(1f)
+                    )
 
-                // Yanlış
-                MetricItem(
-                    label = "Yanlış",
-                    value = "${result.wrongCount}",
-                    color = Color(0xFFEF5350),
-                    icon = Icons.Default.Cancel
-                )
+                    // Yanlış
+                    MetricItem(
+                        label = "Yanlış",
+                        value = "${result.wrongCount}",
+                        color = Color(0xFFEF5350),
+                        icon = Icons.Default.Cancel,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly
+                ) {
+                    // Boş
+                    MetricItem(
+                        label = "Boş",
+                        value = "${result.emptyCount}",
+                        color = Color(0xFF78909C),
+                        icon = Icons.Outlined.RadioButtonUnchecked,
+                        modifier = Modifier.weight(1f)
+                    )
 
-                // Boş
-                MetricItem(
-                    label = "Boş",
-                    value = "${result.emptyCount}",
-                    color = Color(0xFF78909C),
-                    icon = Icons.Outlined.RadioButtonUnchecked
-                )
-
-                // Süre
-                MetricItem(
-                    label = "Süre",
-                    value = timeStr,
-                    color = MaterialTheme.colorScheme.primary,
-                    icon = Icons.Default.Timer,
-                    subtext = "${avgSecPerQ}s/soru"
-                )
+                    // Süre
+                    MetricItem(
+                        label = "Süre",
+                        value = timeStr,
+                        color = MaterialTheme.colorScheme.primary,
+                        icon = Icons.Default.Timer,
+                        subtext = "${avgSecPerQ}s/soru",
+                        modifier = Modifier.weight(1f)
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -351,9 +491,13 @@ private fun MetricItem(
     value: String,
     color: Color,
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    subtext: String? = null
+    subtext: String? = null,
+    modifier: Modifier = Modifier
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+    ) {
         Icon(
             imageVector = icon,
             contentDescription = null,
@@ -472,7 +616,8 @@ private fun QuestionResultItemCard(
     isSolutionExpanded: Boolean,
     onRequestAiSolution: () -> Unit,
     onToggleSolutionExpanded: () -> Unit,
-    onZoomImage: (path: String, title: String) -> Unit
+    onZoomImage: (path: String, title: String) -> Unit,
+    onTeacherShare: () -> Unit = {}
 ) {
     val soru = testQuestion.soru
     val dersAdi = DersTaksonomisi.getDersAdi(soru.examType, soru.subjectId)
@@ -702,6 +847,27 @@ private fun QuestionResultItemCard(
                 }
             }
 
+            // Faz 4.6: Yanlış veya Boş Sorular İçin "Hocama Sor (WhatsApp)" Butonu
+            if (testQuestion.isCorrect != true) {
+                FilledTonalButton(
+                    onClick = onTeacherShare,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = Color(0xFF25D366).copy(alpha = 0.12f),
+                        contentColor = Color(0xFF1B5E20)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("👨‍🏫", fontSize = 15.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Hocama Sor (WhatsApp)",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+
             // AI Hata Mesajı (varsa)
             if (aiError != null) {
                 Surface(
@@ -785,51 +951,158 @@ private fun QuestionResultItemCard(
 @Composable
 private fun TestSonucBottomBar(
     onNewTest: () -> Unit,
-    onNavigateToLibrary: () -> Unit
+    onNavigateToLibrary: () -> Unit,
+    onNavigateToStats: () -> Unit = {}
 ) {
     Surface(
         shadowElevation = 8.dp,
         color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 10.dp)
         ) {
-            OutlinedButton(
-                onClick = onNavigateToLibrary,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .height(48.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Kütüphaneye Dön")
-            }
+                OutlinedButton(
+                    onClick = onNavigateToLibrary,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Kütüphane")
+                }
 
-            Button(
-                onClick = onNewTest,
+                Button(
+                    onClick = onNewTest,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(52.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Yeni Test", fontWeight = FontWeight.Bold)
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            FilledTonalButton(
+                onClick = onNavigateToStats,
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
-                    .weight(1f)
+                    .fillMaxWidth()
                     .height(48.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Refresh,
+                    imageVector = Icons.Default.BarChart,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp)
                 )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("Yeni Test", fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("İstatistikler & Öneriler", fontWeight = FontWeight.SemiBold)
             }
         }
     }
 }
+
+/**
+ * Süre Tuzağı Sorular Kartı (Zaman Baskısı Modu)
+ */
+@Composable
+private fun SureTuzagiCard(
+    slowQuestions: List<Pair<Int, TestQuestion>>,
+    targetSeconds: Long
+) {
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val containerColor = if (isDark) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.25f)
+    else Color(0xFFFFF3E0)
+    val borderColor = if (isDark) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)
+    else Color(0xFFFFB74D)
+    val titleColor = if (isDark) MaterialTheme.colorScheme.tertiary
+    else Color(0xFFE65100)
+    val bodyColor = if (isDark) MaterialTheme.colorScheme.onSurfaceVariant
+    else Color(0xFF5D4037)
+    val itemTitleColor = if (isDark) MaterialTheme.colorScheme.onSurface
+    else Color(0xFF3E2723)
+    val itemTimeColor = if (isDark) MaterialTheme.colorScheme.error
+    else Color(0xFFD84315)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = containerColor),
+        border = BorderStroke(1.dp, borderColor)
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Timer,
+                    contentDescription = null,
+                    tint = titleColor,
+                    modifier = Modifier.size(24.dp)
+                )
+                Text(
+                    text = "⚠️ Süre Tuzağı Sorular",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = titleColor
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "Bu sorularda hedef sürenin (${targetSeconds}s) 2 katından fazla zaman harcadın. Gerçek sınavda bu tür sorularda takılmayıp turlama taktiği uygulamak netlerini artırır!",
+                style = MaterialTheme.typography.bodySmall,
+                color = bodyColor
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            slowQuestions.forEach { (index, question) ->
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Soru #$index: ${DersTaksonomisi.getDersAdi(question.soru.examType, question.soru.subjectId)}",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = itemTitleColor
+                    )
+                    Text(
+                        text = "${question.timeSpentSeconds} sn (Hedef: ${targetSeconds}s)",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                        color = itemTimeColor
+                    )
+                }
+            }
+        }
+    }
+}
+

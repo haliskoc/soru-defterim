@@ -4,9 +4,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.BarChart
+import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.Quiz
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -71,6 +73,36 @@ object TestCozNav
 @Serializable
 object TestSonucNav
 
+/**
+ * Type-safe navigation destination for Soru Reels (Vertical Feed) screen.
+ */
+@Serializable
+object ReelsNav
+
+/**
+ * Convenience helper namespace for Screen destinations (e.g. Screen.TestCoz.route)
+ */
+object Screen {
+    object TestCoz {
+        val route: Any = TestCozNav
+    }
+    object Test {
+        val route: Any = TestNav
+    }
+    object TestSonuc {
+        val route: Any = TestSonucNav
+    }
+    object Reels {
+        val route: Any = ReelsNav
+    }
+    object Istatistik {
+        val route: Any = IstatistikNav
+    }
+    object Ayarlar {
+        val route: Any = AyarlarNav
+    }
+}
+
 
 /**
  * Type-safe navigation destination for İstatistik (Statistics & Analytics) screen.
@@ -90,19 +122,30 @@ object AyarlarNav
 sealed class BottomNavItem(
     val route: Any,
     val title: String,
+    val shortTitle: String,
     val selectedIcon: ImageVector,
     val unselectedIcon: ImageVector
 ) {
     data object Kutuphane : BottomNavItem(
         route = KutuphaneNav,
         title = "Kütüphane",
+        shortTitle = "Kütüphane",
         selectedIcon = Icons.AutoMirrored.Filled.MenuBook,
         unselectedIcon = Icons.AutoMirrored.Outlined.MenuBook
+    )
+
+    data object Reels : BottomNavItem(
+        route = ReelsNav,
+        title = "Reels",
+        shortTitle = "Reels",
+        selectedIcon = Icons.Filled.PlayCircle,
+        unselectedIcon = Icons.Outlined.PlayCircle
     )
 
     data object Test : BottomNavItem(
         route = TestNav,
         title = "Test Çöz",
+        shortTitle = "Test",
         selectedIcon = Icons.Filled.Quiz,
         unselectedIcon = Icons.Outlined.Quiz
     )
@@ -110,6 +153,7 @@ sealed class BottomNavItem(
     data object Istatistik : BottomNavItem(
         route = IstatistikNav,
         title = "İstatistik",
+        shortTitle = "Analiz",
         selectedIcon = Icons.Filled.BarChart,
         unselectedIcon = Icons.Outlined.BarChart
     )
@@ -117,11 +161,12 @@ sealed class BottomNavItem(
     data object Ayarlar : BottomNavItem(
         route = AyarlarNav,
         title = "Ayarlar",
+        shortTitle = "Ayarlar",
         selectedIcon = Icons.Filled.Settings,
         unselectedIcon = Icons.Outlined.Settings
     )
 
     companion object {
-        val items = listOf(Kutuphane, Test, Istatistik, Ayarlar)
+        val items = listOf(Kutuphane, Reels, Test, Istatistik, Ayarlar)
     }
 }

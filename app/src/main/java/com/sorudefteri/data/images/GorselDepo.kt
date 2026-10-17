@@ -36,9 +36,132 @@ class GorselDepo @Inject constructor(
     }
 
     companion object {
-        private const val MAX_DIMENSION = 1600
-        private const val JPEG_QUALITY = 85
+        const val MAX_DIMENSION = 1600
+        const val THUMBNAIL_SIZE = 360
+        const val WEBP_QUALITY = 75
+        const val JPEG_QUALITY = 75
         private const val MAX_BYTES_BEFORE_COMPRESS = 5 * 1024 * 1024L // 5 MB
+
+        fun compressBitmap(bitmap: Bitmap, out: java.io.OutputStream, quality: Int = WEBP_QUALITY) {
+            val format = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                Bitmap.CompressFormat.WEBP_LOSSY
+            } else {
+                @Suppress("DEPRECATION")
+                Bitmap.CompressFormat.WEBP
+            }
+            bitmap.compress(format, quality, out)
+        }
+
+        /**
+         * Orijinal dosyaya karşılık beklenen thumbnail dosyasını hesaplar.
+         * soru_UUID.webp -> thumb_UUID.webp
+         * cozum_UUID.webp -> thumb_UUID.webp
+         */
+        fun getExpectedThumbnailFile(originalFile: File): File {
+            val name = originalFile.name
+            val parent = originalFile.parentFile ?: File("")
+            val thumbName = when {
+                name.startsWith("soru_") -> "thumb_" + name.removePrefix("soru_").substringBeforeLast(".") + ".webp"
+                name.startsWith("cozum_") -> "thumb_" + name.removePrefix("cozum_").substringBeforeLast(".") + ".webp"
+                else -> "thumb_" + originalFile.nameWithoutExtension + ".webp"
+            }
+            return File(parent, thumbName)
+        }
+
+        /**
+         * Verilen dosya yolu için küçük resim (thumbnail) dosya yolunu döner.
+         * Küçük resim mevcutsa onun yolunu, henüz üretilmemişse originalPath'i döner.
+         */
+        fun getThumbnailPath(originalPath: String?): String? {
+            if (originalPath.isNullOrBlank()) return null
+            if (originalPath.startsWith("http://") || originalPath.startsWith("https://") || originalPath.startsWith("content://")) {
+                return originalPath
+            }
+            val file = File(originalPath)
+            val name = file.name
+            if (name.startsWith("thumb_")) {
+                return originalPath
+            }
+            val parent = file.parentFile ?: return originalPath
+
+            val expected = getExpectedThumbnailFile(file)
+            if (expected.exists() && expected.isFile) {
+                return expected.absolutePath
+            }
+
+            val altFile = File(parent, "thumb_" + file.nameWithoutExtension + ".webp")
+            if (altFile.exists() && altFile.isFile) {
+                return altFile.absolutePath
+            }
+
+            return originalPath
+        }
+    }
+
+    /**
+     * Küçük resim yolunu döner (GorselDepo instance helper).
+     */
+    fun getThumbnailPath(originalPath: String): String? {
+        return Companion.getThumbnailPath(originalPath)
+    }
+
+    /**
+     * Eğer orijinal görselin 360x360 px WebP küçük resmi yoksa anında üretir ve yolunu döner.
+     */
+    fun generateThumbnailIfMissing(originalPath: String): String {
+        if (originalPath.isBlank()) return originalPath
+        val originalFile = File(originalPath)
+        if (!originalFile.exists() || !originalFile.isFile) return originalPath
+
+        val currentThumb = Companion.getThumbnailPath(originalPath)
+        if (currentThumb != null && currentThumb != originalPath && File(currentThumb).exists()) {
+            return currentThumb
+        }
+
+        val targetThumb = getExpectedThumbnailFile(originalFile)
+        if (targetThumb.exists() && targetThumb.isFile) {
+            return targetThumb.absolutePath
+        }
+
+        return try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(originalFile.absolutePath, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return originalPath
+
+            var inSampleSize = 1
+            while ((bounds.outWidth / inSampleSize) > THUMBNAIL_SIZE * 2 || (bounds.outHeight / inSampleSize) > THUMBNAIL_SIZE * 2) {
+                inSampleSize *= 2
+            }
+
+            val decodeOpts = BitmapFactory.Options().apply {
+                this.inSampleSize = inSampleSize
+                inPreferredConfig = Bitmap.Config.RGB_565
+            }
+
+            val bitmap = BitmapFactory.decodeFile(originalFile.absolutePath, decodeOpts) ?: return originalPath
+            val scaled = scaleBitmapIfNeeded(bitmap, THUMBNAIL_SIZE)
+
+            try {
+                FileOutputStream(targetThumb).use { out ->
+                    compressBitmap(scaled, out, WEBP_QUALITY)
+                    out.flush()
+                }
+                targetThumb.absolutePath
+            } finally {
+                if (scaled !== bitmap && !scaled.isRecycled) {
+                    scaled.recycle()
+                }
+                if (!bitmap.isRecycled) {
+                    bitmap.recycle()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            originalPath
+        } catch (oom: OutOfMemoryError) {
+            oom.printStackTrace()
+            originalPath
+        }
     }
 
     /**
@@ -46,7 +169,8 @@ class GorselDepo @Inject constructor(
      * @return Kaydedilen dosyanın mutlak yolu (absolute path)
      */
     suspend fun kaydetSoruGorseli(sourceUri: android.net.Uri): String = withContext(Dispatchers.IO) {
-        val fileName = "soru_${UUID.randomUUID()}.jpg"
+        val uuid = UUID.randomUUID().toString()
+        val fileName = "soru_${uuid}.webp"
         saveUriToFile(sourceUri, fileName)
     }
 
@@ -55,7 +179,8 @@ class GorselDepo @Inject constructor(
      * @return Kaydedilen dosyanın mutlak yolu (absolute path)
      */
     suspend fun kaydetCozumGorseli(sourceUri: android.net.Uri): String = withContext(Dispatchers.IO) {
-        val fileName = "cozum_${UUID.randomUUID()}.jpg"
+        val uuid = UUID.randomUUID().toString()
+        val fileName = "cozum_${uuid}.webp"
         saveUriToFile(sourceUri, fileName)
     }
 
@@ -68,10 +193,12 @@ class GorselDepo @Inject constructor(
         // canonical check: source zaten imagesDir içindeyse doğrudan dön
         try {
             if (sourceFile.exists() && sourceFile.canonicalPath.startsWith(imagesDir.canonicalPath + File.separator)) {
+                generateThumbnailIfMissing(sourceFile.absolutePath)
                 return@withContext sourceFile.absolutePath
             }
         } catch (_: Exception) {
             if (sourceFile.parentFile?.absolutePath == imagesDir.absolutePath && sourceFile.exists()) {
+                generateThumbnailIfMissing(sourceFile.absolutePath)
                 return@withContext sourceFile.absolutePath
             }
         }
@@ -89,25 +216,44 @@ class GorselDepo @Inject constructor(
     fun getImagesDirectory(): File = imagesDir
 
     /**
-     * Kamera vb. kaynaktan gelen Bitmap'i işleyip yerel depolamaya kaydeder.
+     * Kamera vb. kaynaktan gelen Bitmap'i işleyip yerel depolamaya kaydeder ve 360x360 WebP thumbnail oluşturur.
      * @param isSolution true ise "cozum_", false ise "soru_" önekiyle kaydedilir.
      * @return Kaydedilen dosyanın mutlak yolu (absolute path)
      */
     suspend fun kaydetBitmap(bitmap: Bitmap, isSolution: Boolean): String = withContext(Dispatchers.IO) {
         val prefix = if (isSolution) "cozum" else "soru"
-        val fileName = "${prefix}_${UUID.randomUUID()}.jpg"
+        val uuid = UUID.randomUUID().toString()
+        val fileName = "${prefix}_${uuid}.webp"
         val targetFile = File(imagesDir, fileName)
 
         val scaledBitmap = scaleBitmapIfNeeded(bitmap, MAX_DIMENSION)
         try {
             FileOutputStream(targetFile).use { out ->
-                scaledBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                compressBitmap(scaledBitmap, out, WEBP_QUALITY)
                 out.flush()
             }
         } finally {
             if (scaledBitmap != bitmap && !scaledBitmap.isRecycled) {
                 scaledBitmap.recycle()
             }
+        }
+
+        // 360x360 px WebP thumbnail oluştur
+        try {
+            val thumbFile = getExpectedThumbnailFile(targetFile)
+            val thumbBitmap = scaleBitmapIfNeeded(bitmap, THUMBNAIL_SIZE)
+            try {
+                FileOutputStream(thumbFile).use { out ->
+                    compressBitmap(thumbBitmap, out, WEBP_QUALITY)
+                    out.flush()
+                }
+            } finally {
+                if (thumbBitmap !== bitmap && !thumbBitmap.isRecycled) {
+                    thumbBitmap.recycle()
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
         targetFile.absolutePath
@@ -128,7 +274,7 @@ class GorselDepo @Inject constructor(
     }
 
     /**
-     * Belirtilen dosya yolundaki görseli siler.
+     * Belirtilen dosya yolundaki görseli ve varsa ilişkili küçük resmi siler.
      */
     suspend fun gorselSil(path: String?): Boolean = withContext(Dispatchers.IO) {
         if (path.isNullOrBlank()) return@withContext false
@@ -142,6 +288,22 @@ class GorselDepo @Inject constructor(
                 // Güvenlik: imagesDir dışı path istenirse engelle
                 return@withContext false
             }
+
+            // İlişkili thumbnail dosyasını da sil
+            try {
+                val expectedThumb = getExpectedThumbnailFile(file)
+                if (expectedThumb.exists() && expectedThumb.isFile) {
+                    expectedThumb.delete()
+                }
+                val thumbPath = Companion.getThumbnailPath(path)
+                if (thumbPath != null && thumbPath != path) {
+                    val foundThumb = File(thumbPath)
+                    if (foundThumb.exists() && foundThumb.isFile) {
+                        foundThumb.delete()
+                    }
+                }
+            } catch (_: Exception) {}
+
             file.delete()
         } catch (e: Exception) {
             e.printStackTrace()
@@ -213,7 +375,7 @@ class GorselDepo @Inject constructor(
                             if (bmp != null) {
                                 scaled = scaleBitmapIfNeeded(bmp, MAX_DIMENSION)
                                 val baos = ByteArrayOutputStream()
-                                scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, baos)
+                                compressBitmap(scaled, baos, WEBP_QUALITY)
                                 val bytes = baos.toByteArray()
                                 return@withContext bytes
                             }
@@ -226,7 +388,7 @@ class GorselDepo @Inject constructor(
                                 if (bmp != null) {
                                     scaled = scaleBitmapIfNeeded(bmp, MAX_DIMENSION)
                                     val baos = ByteArrayOutputStream()
-                                    scaled.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, baos)
+                                    compressBitmap(scaled, baos, WEBP_QUALITY)
                                     val bytes = baos.toByteArray()
                                     return@withContext bytes
                                 }
@@ -330,10 +492,28 @@ class GorselDepo @Inject constructor(
                 rotatedBitmap
             }
 
-            // 5. JPEG olarak kaydet
+            // 5. WebP olarak kaydet
             FileOutputStream(targetFile).use { out ->
-                finalBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, out)
+                compressBitmap(finalBitmap, out, WEBP_QUALITY)
                 out.flush()
+            }
+
+            // 6. 360x360 px WebP thumbnail oluştur (thumb_UUID.webp)
+            try {
+                val thumbFile = getExpectedThumbnailFile(targetFile)
+                val thumbBitmap = scaleBitmapIfNeeded(finalBitmap, THUMBNAIL_SIZE)
+                try {
+                    FileOutputStream(thumbFile).use { out ->
+                        compressBitmap(thumbBitmap, out, WEBP_QUALITY)
+                        out.flush()
+                    }
+                } finally {
+                    if (thumbBitmap !== finalBitmap && !thumbBitmap.isRecycled) {
+                        try { thumbBitmap.recycle() } catch (_: Exception) {}
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
 
             return targetFile.absolutePath

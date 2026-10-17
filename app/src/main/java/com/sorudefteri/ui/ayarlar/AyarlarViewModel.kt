@@ -10,9 +10,13 @@ import com.sorudefteri.data.backup.BackupManager
 import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.data.local.AyarlarDataStore
 import com.sorudefteri.data.repository.SoruRepository
+import com.sorudefteri.data.backup.GoogleDriveBackupHelper
 import com.sorudefteri.domain.model.AiProviderType
 import com.sorudefteri.domain.model.Alan
 import com.sorudefteri.domain.repository.AiRepository
+import com.sorudefteri.ui.widget.SoruWidgetUpdater
+import kotlinx.coroutines.flow.Flow
+import com.sorudefteri.ui.ortak.drawing.StylusDoubleTapAction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,6 +24,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.onEmpty
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -48,7 +53,14 @@ data class AyarlarUiState(
     val backupMessage: String? = null,
     val isBackupError: Boolean = false,
     val isAutoBackupEnabled: Boolean = false,
-    val isWifiOnly: Boolean = true
+    val isWifiOnly: Boolean = true,
+    val driveLastSyncTime: Long = 0L,
+    val isDriveSyncing: Boolean = false,
+    val driveSyncMessage: String? = null,
+    val isDriveSyncError: Boolean = false,
+    val stylusDoubleTapAction: StylusDoubleTapAction = StylusDoubleTapAction.PEN_ERASER_TOGGLE,
+    val isStylusPalmRejectionEnabled: Boolean = true,
+    val isStylusHapticFeedbackEnabled: Boolean = true
 )
 
 private data class DynamicModelsInfo(
@@ -64,6 +76,19 @@ private data class BackupState(
     val isError: Boolean = false
 )
 
+private data class DriveSyncState(
+    val isSyncing: Boolean = false,
+    val message: String? = null,
+    val isError: Boolean = false
+)
+
+private data class BackupPrefGroup(
+    val isAutoBackupEnabled: Boolean,
+    val isWifiOnly: Boolean,
+    val driveLastSyncTime: Long,
+    val driveSyncState: DriveSyncState
+)
+
 @HiltViewModel
 class AyarlarViewModel @Inject constructor(
     private val ayarlarDataStore: AyarlarDataStore,
@@ -71,12 +96,14 @@ class AyarlarViewModel @Inject constructor(
     private val aiRepository: AiRepository,
     private val backupManager: BackupManager,
     private val gorselDepo: GorselDepo,
-    @ApplicationContext private val appContext: Context
+    @ApplicationContext private val appContext: Context,
+    val googleDriveBackupHelper: GoogleDriveBackupHelper? = null
 ) : ViewModel() {
 
     private val _dynamicModelsState = MutableStateFlow(DynamicModelsInfo())
     private val _modelStatusState = MutableStateFlow<Pair<String?, Boolean>>(null to false)
     private val _backupState = MutableStateFlow(BackupState())
+    private val _driveSyncState = MutableStateFlow(DriveSyncState())
     private val _promptStatusState = MutableStateFlow<Pair<String?, Boolean>>(null to false)
 
     private val preferencesFlow = combine(
@@ -97,8 +124,18 @@ class AyarlarViewModel @Inject constructor(
 
     private val backupPrefsFlow = combine(
         ayarlarDataStore.isAutoBackupEnabled,
-        ayarlarDataStore.isWifiOnlyBackup
-    ) { auto, wifi -> auto to wifi }
+        ayarlarDataStore.isWifiOnlyBackup,
+        ayarlarDataStore.driveLastSyncTime.onEmpty { emit(0L) },
+        _driveSyncState
+    ) { auto, wifi, driveTime, driveSync ->
+        BackupPrefGroup(auto, wifi, driveTime, driveSync)
+    }
+
+    private val stylusPrefsFlow = combine(
+        ayarlarDataStore.stylusDoubleTapActionFlow,
+        ayarlarDataStore.stylusPalmRejectionFlow,
+        ayarlarDataStore.stylusHapticFeedbackFlow
+    ) { action, palm, haptics -> Triple(action, palm, haptics) }
 
     private val baseSecondaryFlow = combine(
         nvidiaCombinedFlow,
@@ -112,8 +149,9 @@ class AyarlarViewModel @Inject constructor(
 
     private val secondaryFlow = combine(
         baseSecondaryFlow,
-        backupPrefsFlow
-    ) { base, prefs ->
+        backupPrefsFlow,
+        stylusPrefsFlow
+    ) { base, prefs, stylus ->
         AyarlarPrefGroup2(
             groqMod = base.groqMod,
             nvidiaKey = base.nvidiaKey,
@@ -122,8 +160,13 @@ class AyarlarViewModel @Inject constructor(
             dynModels = base.dynModels,
             modelStatus = base.modelStatus,
             backup = base.backup,
-            isAutoBackupEnabled = prefs.first,
-            isWifiOnly = prefs.second
+            isAutoBackupEnabled = prefs.isAutoBackupEnabled,
+            isWifiOnly = prefs.isWifiOnly,
+            driveLastSyncTime = prefs.driveLastSyncTime,
+            driveSyncState = prefs.driveSyncState,
+            stylusAction = stylus.first,
+            stylusPalm = stylus.second,
+            stylusHaptics = stylus.third
         )
     }
 
@@ -163,7 +206,14 @@ class AyarlarViewModel @Inject constructor(
             backupMessage = p2.backup.message,
             isBackupError = p2.backup.isError,
             isAutoBackupEnabled = p2.isAutoBackupEnabled,
-            isWifiOnly = p2.isWifiOnly
+            isWifiOnly = p2.isWifiOnly,
+            driveLastSyncTime = p2.driveLastSyncTime,
+            isDriveSyncing = p2.driveSyncState.isSyncing,
+            driveSyncMessage = p2.driveSyncState.message,
+            isDriveSyncError = p2.driveSyncState.isError,
+            stylusDoubleTapAction = p2.stylusAction,
+            isStylusPalmRejectionEnabled = p2.stylusPalm,
+            isStylusHapticFeedbackEnabled = p2.stylusHaptics
         )
     }.stateIn(
         scope = viewModelScope,
@@ -176,6 +226,21 @@ class AyarlarViewModel @Inject constructor(
             ayarlarDataStore.setAlan(alan)
         }
     }
+
+    // ==========================================
+    // Widget & Sınav Geri Sayımı
+    // ==========================================
+
+    val examTargetDateFlow: Flow<Long> = ayarlarDataStore.examTargetDate
+
+    fun setExamTargetDate(dateMillis: Long) {
+        viewModelScope.launch {
+            ayarlarDataStore.setExamTargetDate(dateMillis)
+            // Widget'taki geri sayımı anında güncelle
+            SoruWidgetUpdater.updateAllNow(appContext)
+        }
+    }
+
 
     fun setAiProvider(provider: AiProviderType) {
         viewModelScope.launch {
@@ -248,6 +313,24 @@ class AyarlarViewModel @Inject constructor(
                     AutoBackupWorker.schedulePeriodic(appContext, enabled)
                 }
             } catch (_: Exception) {}
+        }
+    }
+
+    fun setStylusDoubleTapAction(action: StylusDoubleTapAction) {
+        viewModelScope.launch {
+            ayarlarDataStore.setStylusDoubleTapAction(action)
+        }
+    }
+
+    fun setStylusPalmRejection(enabled: Boolean) {
+        viewModelScope.launch {
+            ayarlarDataStore.setStylusPalmRejection(enabled)
+        }
+    }
+
+    fun setStylusHapticFeedback(enabled: Boolean) {
+        viewModelScope.launch {
+            ayarlarDataStore.setStylusHapticFeedback(enabled)
         }
     }
 
@@ -381,9 +464,54 @@ class AyarlarViewModel @Inject constructor(
             _backupState.value = BackupState(isLoading = true, message = "Yedek paketi açılıyor ve görseller aktarılıyor...")
             val result = backupManager.importBackup(sourceUri, password)
             result.onSuccess { count ->
+                // DÜZELTME: Önceden sadece "N soru eklendi" deniyordu. Yedeğin
+                // bir kısmı eksik geldiğinde (görsel bulunamadı, Sokratik Koç /
+                // Benzer Soru eşleşemedi) kullanıcı hiçbir uyarı almıyordu ve
+                // "çözümlerim gelmedi" diye sanıyordu. Artık ayrıntıyı da gösteriyoruz.
+                val ozet = backupManager.sonImportOzeti
+                val mesaj = if (ozet != null && ozet.dedupKullanildi) {
+                    // Akıllı içe aktarma devreye girdi: yeni/güncel/güncellenen dağılımını göster
+                    buildString {
+                        append(if (count > 0) "$count yeni soru eklendi ✓" else "Yeni eklenen soru yok")
+                        if (ozet.guncellenenSoru > 0) {
+                            append("\n🔄 ${ozet.guncellenenSoru} mevcut soru birleştirilerek güncellendi")
+                        }
+                        if (ozet.guncelSoru > 0) {
+                            append("\n✓ ${ozet.guncelSoru} soru arşivinizde zaten günceldi (mükerrer kopya eklenmedi)")
+                        }
+                        if (ozet.mukerrerTest > 0 || ozet.mukerrerDeneme > 0) {
+                            val miktar = ozet.mukerrerTest + ozet.mukerrerDeneme
+                            append("\n✓ $miktar mükerrer test/deneme kaydı atlandı")
+                        }
+                        if (ozet.gorselsizSorular > 0) {
+                            append("\n⚠️ ${ozet.gorselsizSorular} sorunun görseli bulunamadı (metin ve çözümler aktarıldı)")
+                        }
+                        if (ozet.atlananChatMesaji > 0) {
+                            append("\n⚠️ ${ozet.atlananChatMesaji} Sokratik Koç mesajı aktarılamadı")
+                        }
+                        if (ozet.atlananBenzerSoru > 0) {
+                            append("\n⚠️ ${ozet.atlananBenzerSoru} benzer soru aktarılamadı")
+                        }
+                    }
+                } else if (ozet != null && ozet.eksikVar) {
+                    buildString {
+                        append("$count soru eklendi ✓")
+                        if (ozet.gorselsizSorular > 0) {
+                            append("\n⚠️ ${ozet.gorselsizSorular} sorunun görseli bulunamadı (metin ve çözümler aktarıldı)")
+                        }
+                        if (ozet.atlananChatMesaji > 0) {
+                            append("\n⚠️ ${ozet.atlananChatMesaji} Sokratik Koç mesajı aktarılamadı")
+                        }
+                        if (ozet.atlananBenzerSoru > 0) {
+                            append("\n⚠️ ${ozet.atlananBenzerSoru} benzer soru aktarılamadı")
+                        }
+                    }
+                } else {
+                    "$count soru ve görselleri kütüphanenize eklendi ✓"
+                }
                 _backupState.value = BackupState(
                     isLoading = false,
-                    message = "$count soru ve görselleri kütüphanenize eklendi ✓",
+                    message = mesaj,
                     isError = false
                 )
             }.onFailure { e ->
@@ -403,6 +531,40 @@ class AyarlarViewModel @Inject constructor(
     fun clearResetSuccess() {}
 
     fun clearErrorMessage() {}
+
+    fun syncGoogleDrive() {
+        viewModelScope.launch {
+            _driveSyncState.value = DriveSyncState(isSyncing = true, message = "Google Drive AppData senkronizasyonu başlatılıyor...")
+            val helper = googleDriveBackupHelper
+            if (helper == null) {
+                _driveSyncState.value = DriveSyncState(
+                    isSyncing = false,
+                    message = "Google Drive senkronizasyon servisi hazır değil.",
+                    isError = true
+                )
+                return@launch
+            }
+
+            val result = helper.syncToCloud(appContext)
+            result.onSuccess { metadata ->
+                _driveSyncState.value = DriveSyncState(
+                    isSyncing = false,
+                    message = "Google Drive senkronizasyonu başarıyla tamamlandı (${metadata.questionCount} soru) ✓",
+                    isError = false
+                )
+            }.onFailure { e ->
+                _driveSyncState.value = DriveSyncState(
+                    isSyncing = false,
+                    message = "Senkronizasyon hatası: ${e.localizedMessage ?: "Bilinmeyen hata"}",
+                    isError = true
+                )
+            }
+        }
+    }
+
+    fun clearDriveSyncStatus() {
+        _driveSyncState.value = DriveSyncState()
+    }
 
     fun resetAllData(onSuccess: () -> Unit = {}) {
         viewModelScope.launch {
@@ -447,6 +609,11 @@ private data class AyarlarPrefGroup2(
     val modelStatus: Pair<String?, Boolean>,
     val backup: BackupState,
     val isAutoBackupEnabled: Boolean,
-    val isWifiOnly: Boolean
+    val isWifiOnly: Boolean,
+    val driveLastSyncTime: Long,
+    val driveSyncState: DriveSyncState,
+    val stylusAction: StylusDoubleTapAction,
+    val stylusPalm: Boolean,
+    val stylusHaptics: Boolean
 )
 

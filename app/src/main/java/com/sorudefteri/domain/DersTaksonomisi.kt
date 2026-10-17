@@ -177,23 +177,103 @@ object DersTaksonomisi {
         list.associate { it.id.lowercase() to it.ad } + tumDersAdlari
     }
 
+    private val dersAdiCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val normalizedDersAdiCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     /**
-     * Ders kimliğinden ve sınav türünden kullanıcı dostu ders adını döner
+     * Ders kimliğinden ve sınav türünden kullanıcı dostu ders adını döner.
+     * Bellek ve performans için ConcurrentHashMap ile önbelleklenir (0 string allocation).
      */
     fun getDersAdi(examType: String = "TYT", subjectId: String): String {
-        val normalizedSubjectId = subjectId.lowercase().trim()
-        return tumDerslerMap[normalizedSubjectId]
+        val cached = dersAdiCache[subjectId]
+        if (cached != null) return cached
+
+        val trLocale = java.util.Locale("tr", "TR")
+        val normalizedSubjectId = subjectId.lowercase(trLocale).trim()
+        val name = tumDerslerMap[normalizedSubjectId]
             ?: tumDerslerMap[normalizedSubjectId.removePrefix("ayt_").removePrefix("tyt_").removePrefix("lgs_").removePrefix("kpss_")]
             ?: subjectId.replace("ayt_", "AYT ")
                 .replace("tyt_", "TYT ")
                 .replace("lgs_", "LGS ")
                 .replace("kpss_", "KPSS ")
                 .replace('_', ' ')
-                .replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+                .replaceFirstChar { if (it.isLowerCase()) it.titlecase(trLocale) else it.toString() }
+
+        dersAdiCache[subjectId] = name
+        return name
     }
 
     fun getDersAdi(subjectId: String): String = getDersAdi("TYT", subjectId)
 
     fun getDersName(subjectId: String): String = getDersAdi("TYT", subjectId)
+
+    /**
+     * Arama filtrelemelerinde 0 tahsisle (allocation-free) hızlı eşleşme için
+     * ders adının normalize edilmiş halini önbellekten döner.
+     */
+    fun getNormalizedDersAdi(subjectId: String): String {
+        val cached = normalizedDersAdiCache[subjectId]
+        if (cached != null) return cached
+        val dersAdi = getDersAdi(subjectId)
+        val normalized = normalizeTurkish(dersAdi)
+        normalizedDersAdiCache[subjectId] = normalized
+        return normalized
+    }
+
+    /**
+     * Türkçe karakter duyarlı karakter normalizasyonu (ı/i, ğ/g, ş/s, ö/o, ü/u, ç/c).
+     * Karakter bazında çalıştığı için yeni String nesnesi tahsis etmez.
+     */
+    fun Char.toTurkishNormalized(): Char = when (this) {
+        'I', 'ı', 'İ', 'i' -> 'i'
+        'Ş', 'ş' -> 's'
+        'Ğ', 'ğ' -> 'g'
+        'Ü', 'ü' -> 'u'
+        'Ö', 'ö' -> 'o'
+        'Ç', 'ç' -> 'c'
+        else -> this.lowercaseChar()
+    }
+
+    /**
+     * Arama sorgusunu Türkçe karakter toleranslı hale getirir.
+     * Sorgu başına sadece 1 kez çalıştırılır.
+     */
+    fun normalizeTurkish(text: String?): String {
+        if (text.isNullOrBlank()) return ""
+        val sb = java.lang.StringBuilder(text.length)
+        for (i in 0 until text.length) {
+            sb.append(text[i].toTurkishNormalized())
+        }
+        return sb.toString().trim()
+    }
+
+    /**
+     * Hedef metin içinde normalize edilmiş sorguyu sıfır heap tahsisiyle (0-allocation)
+     * ve Türkçe karakter toleransıyla (ı/i, ğ/g, ş/s, ö/o, ü/u, ç/c) arar.
+     * Büyük metinlerde (ocrMetni, aiExplanation) asla .lowercase() String oluşturmaz.
+     */
+    fun containsTurkish(source: CharSequence?, normalizedQuery: String): Boolean {
+        if (source.isNullOrEmpty() || normalizedQuery.isEmpty()) return false
+        val sourceLen = source.length
+        val queryLen = normalizedQuery.length
+        if (queryLen > sourceLen) return false
+
+        val firstTarget = normalizedQuery[0]
+        val maxStart = sourceLen - queryLen
+
+        for (i in 0..maxStart) {
+            if (source[i].toTurkishNormalized() == firstTarget) {
+                var match = true
+                for (j in 1 until queryLen) {
+                    if (source[i + j].toTurkishNormalized() != normalizedQuery[j]) {
+                        match = false
+                        break
+                    }
+                }
+                if (match) return true
+            }
+        }
+        return false
+    }
 }
 

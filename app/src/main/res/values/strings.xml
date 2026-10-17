@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">Soru Defterim</string>
+    <!-- Widget -->
+    <string name="soru_widget_description">Günlük serin, tekrarı gelen soru sayısı ve sınav geri sayımı</string>
     <!-- Navigation -->
     <string name="nav_kutuphane">Kütüphane</string>
     <string name="nav_test">Test Çöz</string>

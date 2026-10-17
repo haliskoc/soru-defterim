@@ -22,6 +22,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
+import androidx.paging.compose.LazyPagingItems
+import androidx.paging.LoadState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +41,7 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
@@ -44,6 +51,7 @@ import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.StarBorder
+import com.sorudefteri.data.export.AnkiExportHelper
 import androidx.compose.material.icons.outlined.CollectionsBookmark
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material3.AlertDialog
@@ -76,6 +84,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -91,6 +100,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -98,12 +108,23 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import com.sorudefteri.data.pdf.PdfDenemeKitapcikGenerator
+import com.sorudefteri.ui.kutuphane.components.PdfExportDialog
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.SortOrder
 import com.sorudefteri.domain.model.Soru
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import com.sorudefteri.ui.ortak.DailyDueRescueCard
 import com.sorudefteri.ui.ortak.EmptyState
 import com.sorudefteri.ui.ortak.FiltreBar
+import com.sorudefteri.ui.ortak.PhoneAramaCubugu
+import com.sorudefteri.ui.ortak.PhoneFiltreDetaySayfasi
+import com.sorudefteri.ui.ortak.PhoneHizliFiltreler
+import com.sorudefteri.ui.ortak.PhoneSecimAltBar
+import com.sorudefteri.ui.ortak.PhoneSoruListeKarti
 import com.sorudefteri.ui.ortak.SoruKarti
+import com.sorudefteri.ui.ortak.StreakBadge
 import com.sorudefteri.ui.theme.AytBadgeColor
 import com.sorudefteri.ui.theme.AytBadgeContainer
 import com.sorudefteri.ui.theme.MistakeBadgeColor
@@ -131,6 +152,7 @@ fun KutuphaneScreen(
     onSoruClick: ((Long) -> Unit)? = null,
     onCameraClick: (() -> Unit)? = null,
     onAddClick: (() -> Unit)? = null,
+    onStartDueTest: () -> Unit = {},
     viewModel: KutuphaneViewModel = hiltViewModel()
 ) {
     val handleSoruClick = onSoruClick ?: onNavigateToSoruDetay
@@ -144,12 +166,19 @@ fun KutuphaneScreen(
     }
 
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val pagedSorular = viewModel.pagedSorular.collectAsLazyPagingItems()
+    val currentStreak by viewModel.currentStreak.collectAsStateWithLifecycle()
+    val streakShieldCount by viewModel.streakShieldCount.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     var showBottomSheet by rememberSaveable { mutableStateOf(false) }
     var sortMenuExpanded by rememberSaveable { mutableStateOf(false) }
+    var overflowMenuExpanded by rememberSaveable { mutableStateOf(false) }
     var showBatchDeleteDialog by rememberSaveable { mutableStateOf(false) }
+    var showPdfExportDialog by rememberSaveable { mutableStateOf(false) }
+    var questionsForPdfExport by remember { mutableStateOf<List<Soru>>(emptyList()) }
     var selectedTabletSoruId by rememberSaveable { mutableStateOf<Long?>(null) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -164,6 +193,12 @@ fun KutuphaneScreen(
             if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
                 viewModel.undoDelete()
             }
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        viewModel.uiEvent.collect { message ->
+            snackbarHostState.showSnackbar(message)
         }
     }
 
@@ -242,32 +277,32 @@ fun KutuphaneScreen(
             } else {
                 TopAppBar(
                     title = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
+                        // TELEFON DOSTU KOMPAKT BAŞLIK: dikey iki satır, taşma yok.
+                        // Tablet'te de aynı kalır (küçük düzeltme: hap yerine alt satır sayaç).
+                        Column {
                             Text(
-                                text = "Soru Defterim",
+                                text = "Kütüphane",
                                 style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1
                             )
                             if (!uiState.isLoading && uiState.totalCount > 0) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
-                                ) {
-                                    Text(
-                                        text = "${uiState.totalCount} Soru • ${uiState.solvedCount} Çözüldü",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                                    )
-                                }
+                                Text(
+                                    text = "${uiState.totalCount} soru • ${uiState.solvedCount} çözüldü" +
+                                        if (uiState.dueReviewCount > 0) " • ${uiState.dueReviewCount} tekrar" else "",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    maxLines = 1
+                                )
                             }
                         }
                     },
                     actions = {
+                        StreakBadge(
+                            streakCount = currentStreak,
+                            shieldCount = streakShieldCount
+                        )
                         // Sıralama Menüsü
                         Box {
                             IconButton(onClick = { sortMenuExpanded = true }) {
@@ -307,6 +342,64 @@ fun KutuphaneScreen(
                                 }
                             }
                         }
+
+                        // Faz 5.3: Daha Fazla Seçenek Menüsü (Anki Deste Dışa Aktar)
+                        Box {
+                            IconButton(onClick = { overflowMenuExpanded = true }) {
+                                Icon(
+                                    imageVector = Icons.Default.MoreVert,
+                                    contentDescription = "Daha Fazla Seçenek"
+                                )
+                            }
+
+                            DropdownMenu(
+                                expanded = overflowMenuExpanded,
+                                onDismissRequest = { overflowMenuExpanded = false }
+                            ) {
+                                DropdownMenuItem(
+                                    text = { Text("📄 Filtrelenen Soruları PDF Yap (${uiState.filteredSorular.size})") },
+                                    onClick = {
+                                        overflowMenuExpanded = false
+                                        if (uiState.filteredSorular.isEmpty()) {
+                                            coroutineScope.launch {
+                                                snackbarHostState.showSnackbar("Dışa aktarılacak soru bulunamadı.")
+                                            }
+                                        } else {
+                                            questionsForPdfExport = uiState.filteredSorular
+                                            showPdfExportDialog = true
+                                        }
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("📇 Anki Deste Dışa Aktar (.csv)") },
+                                    onClick = {
+                                        overflowMenuExpanded = false
+                                        coroutineScope.launch {
+                                            val questionsToExport = uiState.filteredSorular
+                                            if (questionsToExport.isEmpty()) {
+                                                snackbarHostState.showSnackbar("Dışa aktarılacak soru bulunamadı.")
+                                                return@launch
+                                            }
+                                            try {
+                                                val ankiFile = withContext(Dispatchers.IO) {
+                                                    // DÜZELTME: exportQuestionsToAnki (düz CSV)
+                                                    // <img src="soru_X.jpg"> referansı yazıyor
+                                                    // ama görselleri paketin içine koymuyordu;
+                                                    // Anki'ye aktarınca tüm kartlarda kırık
+                                                    // görsel çıkıyordu. Paket (ZIP) sürümü
+                                                    // görselleri de gömüyor.
+                                                    AnkiExportHelper.exportQuestionsToAnkiPackage(context, questionsToExport)
+                                                }
+                                                AnkiExportHelper.shareExportedDeck(context, ankiFile)
+                                                snackbarHostState.showSnackbar("Anki destesi hazırlandı (${questionsToExport.size} soru)")
+                                            } catch (e: Exception) {
+                                                snackbarHostState.showSnackbar("Anki destesi oluşturulamadı: ${e.localizedMessage ?: "Bilinmeyen hata"}")
+                                            }
+                                        }
+                                    }
+                                )
+                            }
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.surface
@@ -316,47 +409,42 @@ fun KutuphaneScreen(
         },
         bottomBar = {
             if (uiState.isSelectionMode && uiState.selectedSoruIds.isNotEmpty()) {
-                Surface(
-                    tonalElevation = 8.dp,
-                    shadowElevation = 8.dp,
-                    color = MaterialTheme.colorScheme.surface
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceEvenly,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Button(
-                            onClick = { viewModel.batchMarkSolvedSelected(true) },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                        ) {
-                            Icon(Icons.Default.Check, contentDescription = "Çözüldü İşaretle", modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Çözüldü")
+                // TELEFON: taşmayan 2 satırlı seçim çubuğu (tablet de kullanır — küçük düzeltme)
+                PhoneSecimAltBar(
+                    seciliSayi = uiState.selectedSoruIds.size,
+                    onCozuldu = { viewModel.batchMarkSolvedSelected(true) },
+                    onYildizla = { viewModel.batchStarSelected(true) },
+                    onPdf = {
+                        val selectedQuestions = uiState.filteredSorular.filter { it.id in uiState.selectedSoruIds }
+                        if (selectedQuestions.isEmpty()) {
+                            coroutineScope.launch {
+                                snackbarHostState.showSnackbar("Lütfen en az bir soru seçin.")
+                            }
+                        } else {
+                            questionsForPdfExport = selectedQuestions
+                            showPdfExportDialog = true
                         }
-                        Button(
-                            onClick = { viewModel.batchStarSelected(true) },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300))
-                        ) {
-                            Icon(Icons.Default.Star, contentDescription = "Yıldızla", modifier = Modifier.size(16.dp), tint = Color.Black)
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Yıldızla", color = Color.Black)
+                    },
+                    onAnki = {
+                        coroutineScope.launch {
+                            val selectedQuestions = uiState.filteredSorular.filter { it.id in uiState.selectedSoruIds }
+                            if (selectedQuestions.isEmpty()) {
+                                snackbarHostState.showSnackbar("Lütfen en az bir soru seçin.")
+                                return@launch
+                            }
+                            try {
+                                val ankiFile = withContext(Dispatchers.IO) {
+                                    AnkiExportHelper.exportQuestionsToAnkiPackage(context, selectedQuestions)
+                                }
+                                AnkiExportHelper.shareExportedDeck(context, ankiFile)
+                                snackbarHostState.showSnackbar("Anki destesi hazırlandı (${selectedQuestions.size} soru)")
+                            } catch (e: Exception) {
+                                snackbarHostState.showSnackbar("Anki destesi oluşturulamadı: ${e.localizedMessage ?: "Bilinmeyen hata"}")
+                            }
                         }
-                        Button(
-                            onClick = { showBatchDeleteDialog = true },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                        ) {
-                            Icon(Icons.Default.Delete, contentDescription = "Sil", modifier = Modifier.size(16.dp))
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Sil")
-                        }
-                    }
-                }
+                    },
+                    onSil = { showBatchDeleteDialog = true }
+                )
             }
         },
         floatingActionButton = {
@@ -387,6 +475,7 @@ fun KutuphaneScreen(
                 ) {
                     QuestionListHeaderAndGrid(
                         uiState = uiState,
+                        pagedSorular = pagedSorular,
                         viewModel = viewModel,
                         onSoruSelected = { id ->
                             if (uiState.isSelectionMode) {
@@ -396,6 +485,7 @@ fun KutuphaneScreen(
                             }
                         },
                         onOpenBottomSheet = { showBottomSheet = true },
+                        onStartDueTest = onStartDueTest,
                         minGridSize = 140.dp
                     )
                 }
@@ -435,26 +525,23 @@ fun KutuphaneScreen(
                 }
             }
         } else {
-            // PHONE STANDART SINGLE-COLUMN LAYOUT
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding)
-            ) {
-                QuestionListHeaderAndGrid(
-                    uiState = uiState,
-                    viewModel = viewModel,
-                    onSoruSelected = { id ->
-                        if (uiState.isSelectionMode) {
-                            viewModel.toggleSelectSoru(id)
-                        } else {
-                            handleSoruClick(id)
-                        }
-                    },
-                    onOpenBottomSheet = { showBottomSheet = true },
-                    minGridSize = 180.dp
-                )
-            }
+            // TELEFON: DİKEY TEK SÜTUN, ADIM ADIM DETAYLI AKIŞ
+            // Adım 1: Ara → Adım 2: Hızlı filtre + detay sayfası → Adım 3: Dikey liste
+            // Tablet ızgarası (SoruKarti + Adaptive grid) aynen korunur, buraya dokunulmaz.
+            PhoneKutuphaneIcerik(
+                uiState = uiState,
+                pagedSorular = pagedSorular,
+                viewModel = viewModel,
+                onSoruSelected = { id ->
+                    if (uiState.isSelectionMode) {
+                        viewModel.toggleSelectSoru(id)
+                    } else {
+                        handleSoruClick(id)
+                    }
+                },
+                onOpenBottomSheet = { showBottomSheet = true },
+                onStartDueTest = onStartDueTest
+            )
         }
 
         // Soru Ekleme Bottom Sheet'i
@@ -468,17 +555,17 @@ fun KutuphaneScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 12.dp)
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
                 ) {
                     Text(
-                        text = "Yeni Soru Ekle",
+                        text = "Adım Adım Soru Ekle",
                         style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "Sorunun fotoğrafını nasıl eklemek istersin?",
+                        text = "1) Fotoğrafı seç → 2) Ders & konuyu işaretle → 3) Kaydet. Önce yöntemi seç:",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -499,7 +586,7 @@ fun KutuphaneScreen(
                     ) {
                         ListItem(
                             headlineContent = {
-                                Text("Fotoğraf Çek", fontWeight = FontWeight.Bold)
+                                Text("Adım 1 — Fotoğraf Çek", fontWeight = FontWeight.Bold)
                             },
                             supportingContent = {
                                 Text("Kamera ile sorunun net fotoğrafını çek")
@@ -508,14 +595,14 @@ fun KutuphaneScreen(
                                 Surface(
                                     shape = CircleShape,
                                     color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(44.dp)
+                                    modifier = Modifier.size(52.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             imageVector = Icons.Default.CameraAlt,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.onPrimary,
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(26.dp)
                                         )
                                     }
                                 }
@@ -542,7 +629,7 @@ fun KutuphaneScreen(
                     ) {
                         ListItem(
                             headlineContent = {
-                                Text("Galeriden Seç", fontWeight = FontWeight.Bold)
+                                Text("Adım 2 — Galeriden Seç", fontWeight = FontWeight.Bold)
                             },
                             supportingContent = {
                                 Text("Cihazındaki mevcut bir görseli yükle")
@@ -551,14 +638,14 @@ fun KutuphaneScreen(
                                 Surface(
                                     shape = CircleShape,
                                     color = MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(44.dp)
+                                    modifier = Modifier.size(52.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             imageVector = Icons.Default.PhotoLibrary,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.onSecondary,
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(26.dp)
                                         )
                                     }
                                 }
@@ -583,7 +670,7 @@ fun KutuphaneScreen(
                     ) {
                         ListItem(
                             headlineContent = {
-                                Text("Form ile Ekle", fontWeight = FontWeight.Bold)
+                                Text("Adım 3 — Form ile Ekle", fontWeight = FontWeight.Bold)
                             },
                             supportingContent = {
                                 Text("Görseli daha sonra eklemek üzere devam et")
@@ -592,14 +679,14 @@ fun KutuphaneScreen(
                                 Surface(
                                     shape = CircleShape,
                                     color = MaterialTheme.colorScheme.tertiary,
-                                    modifier = Modifier.size(44.dp)
+                                    modifier = Modifier.size(52.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             imageVector = Icons.Default.EditNote,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.onTertiary,
-                                            modifier = Modifier.size(24.dp)
+                                            modifier = Modifier.size(26.dp)
                                         )
                                     }
                                 }
@@ -612,23 +699,212 @@ fun KutuphaneScreen(
                 }
             }
         }
+
+        // Çok Detaylı PDF Çıktı Sihirbazı
+        if (showPdfExportDialog && questionsForPdfExport.isNotEmpty()) {
+            PdfExportDialog(
+                sorular = questionsForPdfExport,
+                onDismiss = { showPdfExportDialog = false },
+                onSuccess = {
+                    showPdfExportDialog = false
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar("PDF belgesi başarıyla oluşturuldu (${questionsForPdfExport.size} soru)")
+                    }
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun PhoneKutuphaneIcerik(
+    uiState: KutuphaneUiState,
+    pagedSorular: LazyPagingItems<Soru>,
+    viewModel: KutuphaneViewModel,
+    onSoruSelected: (Long) -> Unit,
+    onOpenBottomSheet: () -> Unit,
+    onStartDueTest: () -> Unit = {}
+) {
+    val focusManager = LocalFocusManager.current
+    var localSearchText by rememberSaveable { mutableStateOf(uiState.searchQuery) }
+    var showFiltreSayfasi by rememberSaveable { mutableStateOf(false) }
+
+    LaunchedEffect(uiState.searchQuery) {
+        if (localSearchText != uiState.searchQuery) localSearchText = uiState.searchQuery
+    }
+
+    val aktifFiltreSayisi =
+        (if (uiState.selectedExamType != null) 1 else 0) +
+            (if (uiState.selectedSubjectId != null) 1 else 0) +
+            (if (uiState.selectedMistakeType != null) 1 else 0) +
+            (if (uiState.selectedPublisher != null) 1 else 0) +
+            (if (uiState.selectedExamName != null) 1 else 0) +
+            (if (uiState.onlyUnsolved) 1 else 0) +
+            (if (uiState.onlyFavorites) 1 else 0) +
+            (if (uiState.onlyDueReview) 1 else 0)
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Adım 1 — Ara (nefes alan, 56dp, sonuç rozetli)
+        PhoneAramaCubugu(
+            value = localSearchText,
+            onValueChange = {
+                localSearchText = it
+                viewModel.onSearchQueryChange(it)
+            },
+            sonucSayisi = pagedSorular.itemCount.takeIf { it > 0 },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
+
+        // Adım 2 — Hızlı filtreler (tek bakışta) + detay sayfası
+        PhoneHizliFiltreler(
+            selectedExamType = uiState.selectedExamType,
+            onExamTypeSelected = { viewModel.onExamTypeSelected(it) },
+            onlyUnsolved = uiState.onlyUnsolved,
+            onOnlyUnsolvedToggle = { viewModel.onOnlyUnsolvedToggle(it) },
+            onlyFavorites = uiState.onlyFavorites,
+            onOnlyFavoritesToggle = { viewModel.onOnlyFavoritesToggle(it) },
+            onlyDueReview = uiState.onlyDueReview,
+            onOnlyDueReviewToggle = { viewModel.onOnlyDueReviewToggle(it) },
+            aktifFiltreSayisi = aktifFiltreSayisi,
+            onTumFiltrelerClick = { showFiltreSayfasi = true },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+        )
+
+        if (showFiltreSayfasi) {
+            PhoneFiltreDetaySayfasi(
+                onDismiss = { showFiltreSayfasi = false },
+                selectedExamType = uiState.selectedExamType,
+                onExamTypeSelected = { viewModel.onExamTypeSelected(it) },
+                selectedSubjectId = uiState.selectedSubjectId,
+                availableSubjects = uiState.availableSubjects,
+                onSubjectSelected = { viewModel.onSubjectSelected(it) },
+                selectedMistakeType = uiState.selectedMistakeType,
+                onMistakeTypeSelected = { viewModel.onMistakeTypeSelected(it) },
+                selectedPublisher = uiState.selectedPublisher,
+                availablePublishers = uiState.availablePublishers,
+                onPublisherSelected = { viewModel.onPublisherSelected(it) },
+                selectedExamName = uiState.selectedExamName,
+                availableExamNames = uiState.availableExamNames,
+                onExamNameSelected = { viewModel.onExamNameSelected(it) },
+                onlyUnsolved = uiState.onlyUnsolved,
+                onOnlyUnsolvedToggle = { viewModel.onOnlyUnsolvedToggle(it) },
+                onlyFavorites = uiState.onlyFavorites,
+                onOnlyFavoritesToggle = { viewModel.onOnlyFavoritesToggle(it) },
+                onlyDueReview = uiState.onlyDueReview,
+                onOnlyDueReviewToggle = { viewModel.onOnlyDueReviewToggle(it) },
+                onResetFilters = {
+                    viewModel.resetFilters()
+                    showFiltreSayfasi = false
+                }
+            )
+        }
+
+        // Adım 3 — Dikey liste (LazyColumn, yatay kompakt kartlar)
+        val isInitialLoading = pagedSorular.loadState.refresh is LoadState.Loading && pagedSorular.itemCount == 0
+        if (uiState.isLoading || isInitialLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator()
+                    Text(
+                        text = "Sorular yükleniyor...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        } else if (pagedSorular.itemCount == 0) {
+            val isFiltering = uiState.searchQuery.isNotBlank() ||
+                uiState.selectedExamType != null ||
+                uiState.selectedSubjectId != null ||
+                uiState.selectedMistakeType != null ||
+                uiState.onlyUnsolved ||
+                uiState.onlyFavorites ||
+                uiState.onlyDueReview
+            if (isFiltering) {
+                EmptyState(
+                    title = "Eşleşen Soru Bulunamadı",
+                    description = "Adım 2'deki filtreleri genişletmeyi veya aramayı sadeleştirmeyi dene.",
+                    icon = Icons.Default.SearchOff,
+                    buttonText = "Filtreleri Temizle",
+                    buttonIcon = Icons.Default.Clear,
+                    onButtonClick = { viewModel.resetFilters() }
+                )
+            } else {
+                EmptyState(
+                    title = "Henüz Soru Eklenmedi",
+                    description = "Adım 1: Aşağıdaki butonla ilk sorunun fotoğrafını çek, Adım 2'de dersini seç, Adım 3'te listede gör.",
+                    icon = Icons.Outlined.CollectionsBookmark,
+                    buttonText = "İlk Sorunu Ekle",
+                    buttonIcon = Icons.Default.Add,
+                    onButtonClick = onOpenBottomSheet
+                )
+            }
+        } else {
+            LazyColumn(
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                if (uiState.dueReviewCount > 0 && !uiState.isSelectionMode) {
+                    item {
+                        DailyDueRescueCard(
+                            dueCount = uiState.dueReviewCount,
+                            onStartClick = { viewModel.startDueReviewTest(onStartDueTest) },
+                            modifier = Modifier.padding(bottom = 2.dp)
+                        )
+                    }
+                }
+                // TELEFON DİKEY LİSTE: paging verisini index anahtarlı tekil item'larla dizer
+                // (LazyListScope.items(count) yerine for+item: derleyici çıkarım sorunu yok)
+                for (index in 0 until pagedSorular.itemCount) {
+                    item(key = pagedSorular[index]?.id ?: index) {
+                        val soru = pagedSorular[index]
+                        if (soru != null) {
+                            PhoneSoruListeKarti(
+                                soru = soru,
+                                onClick = { onSoruSelected(soru.id) },
+                                onLongClick = { viewModel.toggleSelectSoru(soru.id) },
+                                isSelected = uiState.selectedSoruIds.contains(soru.id),
+                                isSelectionMode = uiState.isSelectionMode,
+                                onToggleSolved = { viewModel.toggleSolved(soru) },
+                                onToggleFavorite = { viewModel.toggleFavorite(soru) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun QuestionListHeaderAndGrid(
     uiState: KutuphaneUiState,
+    pagedSorular: LazyPagingItems<Soru>,
     viewModel: KutuphaneViewModel,
     onSoruSelected: (Long) -> Unit,
     onOpenBottomSheet: () -> Unit,
+    onStartDueTest: () -> Unit = {},
     minGridSize: androidx.compose.ui.unit.Dp
 ) {
     val focusManager = LocalFocusManager.current
+    var localSearchText by rememberSaveable { mutableStateOf(uiState.searchQuery) }
+
+    // Dış kaynaklı (ör. resetFilters) arama sıfırlamalarını yerel durumla senkronize et
+    LaunchedEffect(uiState.searchQuery) {
+        if (localSearchText != uiState.searchQuery) {
+            localSearchText = uiState.searchQuery
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
-        // Arama Çubuğu
+        // Arama Çubuğu (Anında tepki veren reaktif yapı)
         OutlinedTextField(
-            value = uiState.searchQuery,
-            onValueChange = { viewModel.onSearchQueryChange(it) },
+            value = localSearchText,
+            onValueChange = { newText ->
+                localSearchText = newText
+                viewModel.onSearchQueryChange(newText)
+            },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 4.dp),
@@ -646,8 +922,11 @@ private fun QuestionListHeaderAndGrid(
                 )
             },
             trailingIcon = {
-                if (uiState.searchQuery.isNotEmpty()) {
-                    IconButton(onClick = { viewModel.onSearchQueryChange("") }) {
+                if (localSearchText.isNotEmpty()) {
+                    IconButton(onClick = {
+                        localSearchText = ""
+                        viewModel.onSearchQueryChange("")
+                    }) {
                         Icon(
                             imageVector = Icons.Default.Clear,
                             contentDescription = "Aramayı Temizle"
@@ -692,14 +971,15 @@ private fun QuestionListHeaderAndGrid(
         )
 
         // İçerik Alanı: Yükleniyor / Boş / Izgara
-        if (uiState.isLoading) {
+        val isInitialLoading = pagedSorular.loadState.refresh is LoadState.Loading && pagedSorular.itemCount == 0
+        if (uiState.isLoading || isInitialLoading) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
                 CircularProgressIndicator()
             }
-        } else if (uiState.filteredSorular.isEmpty()) {
+        } else if (pagedSorular.itemCount == 0) {
             val isFiltering = uiState.searchQuery.isNotBlank() ||
                     uiState.selectedExamType != null ||
                     uiState.selectedSubjectId != null ||
@@ -740,21 +1020,35 @@ private fun QuestionListHeaderAndGrid(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
+                if (uiState.dueReviewCount > 0 && !uiState.isSelectionMode) {
+                    item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+                        DailyDueRescueCard(
+                            dueCount = uiState.dueReviewCount,
+                            onStartClick = {
+                                viewModel.startDueReviewTest(onStartDueTest)
+                            },
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    }
+                }
                 items(
-                    items = uiState.filteredSorular,
-                    key = { it.id }
-                ) { soru ->
-                    SoruKarti(
-                        soru = soru,
-                        onClick = { onSoruSelected(soru.id) },
-                        onLongClick = {
-                            viewModel.toggleSelectSoru(soru.id)
-                        },
-                        isSelected = uiState.selectedSoruIds.contains(soru.id),
-                        isSelectionMode = uiState.isSelectionMode,
-                        onToggleSolved = { viewModel.toggleSolved(soru) },
-                        onToggleFavorite = { viewModel.toggleFavorite(soru) }
-                    )
+                    count = pagedSorular.itemCount,
+                    key = pagedSorular.itemKey { it.id }
+                ) { index ->
+                    val soru = pagedSorular[index]
+                    if (soru != null) {
+                        SoruKarti(
+                            soru = soru,
+                            onClick = { onSoruSelected(soru.id) },
+                            onLongClick = {
+                                viewModel.toggleSelectSoru(soru.id)
+                            },
+                            isSelected = uiState.selectedSoruIds.contains(soru.id),
+                            isSelectionMode = uiState.isSelectionMode,
+                            onToggleSolved = { viewModel.toggleSolved(soru) },
+                            onToggleFavorite = { viewModel.toggleFavorite(soru) }
+                        )
+                    }
                 }
             }
         }

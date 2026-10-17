@@ -20,7 +20,9 @@ import com.sorudefteri.domain.model.Soru
         Index(value = ["isFavorite"]),
         Index(value = ["createdAt"]),
         Index(value = ["nextReviewDate"]),
-        Index(value = ["reviewStage"])
+        Index(value = ["reviewStage"]),
+        // Akıllı içe aktarma (dedup/merge): aynı içerikli sorunun hızlı tespiti için
+        Index(value = ["contentHash"])
     ]
 )
 data class SoruEntity(
@@ -50,8 +52,21 @@ data class SoruEntity(
     val ocrMetni: String? = null,
     val isOcrUsed: Boolean = false,
     val questionText: String? = null,
+    val audioPath: String? = null,
+    val fsrsStability: Double? = null,
+    val fsrsDifficulty: Double? = null,
+    val fsrsReps: Int = 0,
+    val fsrsLapses: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    /**
+     * Akıllı içe aktarma için içerik parmak izi (SHA-256, onaltılık).
+     * Soru metni/OCR metni + ders/konu + kaynak bilgileriyle hesaplanır; görsel
+     * yolu, timestamp'ler ve kullanıcı durumları (favori, tekrar aşaması) dahil
+     * değildir — böylece aynı soru farklı cihaz/yedek sürümlerinde bile tanınır.
+     * Boş string = hesaplanamadı (örn. metinsiz, kaynak bilgisi yoksun soru).
+     */
+    val contentHash: String = ""
 ) {
     /**
      * Entity'yi Domain modeline dönüştürür.
@@ -83,8 +98,14 @@ data class SoruEntity(
             ocrMetni = ocrMetni,
             isOcrUsed = isOcrUsed,
             questionText = questionText,
+            audioPath = audioPath,
+            fsrsStability = fsrsStability,
+            fsrsDifficulty = fsrsDifficulty,
+            fsrsReps = fsrsReps,
+            fsrsLapses = fsrsLapses,
             createdAt = createdAt,
-            updatedAt = updatedAt
+            updatedAt = updatedAt,
+            contentHash = contentHash
         )
     }
 }
@@ -119,8 +140,14 @@ fun Soru.toEntity(): SoruEntity {
         ocrMetni = ocrMetni,
         isOcrUsed = isOcrUsed,
         questionText = questionText,
+        audioPath = audioPath,
+        fsrsStability = fsrsStability,
+        fsrsDifficulty = fsrsDifficulty,
+        fsrsReps = fsrsReps,
+        fsrsLapses = fsrsLapses,
         createdAt = createdAt,
-        updatedAt = updatedAt
+        updatedAt = updatedAt,
+        contentHash = contentHash
     )
 }
 

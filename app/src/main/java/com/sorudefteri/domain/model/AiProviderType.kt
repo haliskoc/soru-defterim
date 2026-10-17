@@ -12,37 +12,40 @@ enum class AiProviderType(
 ) {
     GEMINI(
         displayName = "Google Gemini",
-        defaultModel = "gemini-2.5-flash",
+        defaultModel = "gemini-3.7-flash",
         supportedModels = listOf(
-            "gemini-2.5-flash" to "Gemini 2.5 Flash (En Yeni & Ultra Hızlı)",
-            "gemini-2.0-flash" to "Gemini 2.0 Flash (Kararlı & Hızlı)",
-            "gemini-2.5-pro" to "Gemini 2.5 Pro (İleri Düzey Akıl Yürütme)",
-            "gemini-1.5-flash" to "Gemini 1.5 Flash (Klasik Hızlı)",
-            "gemini-1.5-pro" to "Gemini 1.5 Pro (Klasik Pro)"
+            "gemini-3.7-flash" to "Gemini 3.7 Flash (Önerilen)",
+            "gemini-2.0-flash" to "Gemini 2.0 Flash (Hızlı & Kararlı)",
+            "gemini-1.5-pro" to "Gemini 1.5 Pro (İleri Düzey Akıl Yürütme)",
+            "gemini-1.5-flash" to "Gemini 1.5 Flash (Standart Hızlı)",
+            "gemini-2.0-flash-lite" to "Gemini 2.0 Flash Lite"
         ),
         consoleUrl = "https://aistudio.google.com/app/apikey",
         consoleName = "Google AI Studio"
     ),
     GROQ(
         displayName = "Groq",
-        defaultModel = "meta-llama/llama-4-scout-17b-16e-instruct",
+        defaultModel = "llama-3.2-11b-vision-preview",
         supportedModels = listOf(
-            "meta-llama/llama-4-scout-17b-16e-instruct" to "Llama 4 Scout 17B (Önerilen - Hızlı & Vision)",
-            "meta-llama/llama-4-maverick-17b-128e-instruct" to "Llama 4 Maverick 17B (Gelişmiş Akıl Yürütme)",
-            "llama-3.3-70b-versatile" to "Llama 3.3 70B Versatile (Metin)"
+            "llama-3.2-11b-vision-preview" to "Llama 3.2 11B Vision (Hızlı & Görsel)",
+            "llama-3.2-90b-vision-preview" to "Llama 3.2 90B Vision (Gelişmiş & Görsel)",
+            "llama-3.3-70b-versatile" to "Llama 3.3 70B Versatile (Metin)",
+            "llama-3.1-8b-instant" to "Llama 3.1 8B Instant (Hafif & Hızlı)"
         ),
         consoleUrl = "https://console.groq.com/keys",
         consoleName = "Groq Console"
     ),
     NVIDIA(
         displayName = "NVIDIA Build",
-        defaultModel = "meta/llama-3.1-405b-instruct",
+        defaultModel = "meta/llama-3.2-90b-vision-instruct",
         supportedModels = listOf(
-            "meta/llama-3.1-405b-instruct" to "Llama 3.1 405B Instruct (Önerilen - En Güçlü)",
-            "meta/llama-3.1-70b-instruct" to "Llama 3.1 70B Instruct (Hızlı)",
-            "mistralai/mixtral-8x22b-instruct-v0.1" to "Mixtral 8x22B Instruct",
-            "nvidia/llama-3.1-nemotron-70b-instruct" to "Nemotron 70B Instruct (NVIDIA)",
-            "google/gemma-2-27b-it" to "Gemma 2 27B IT"
+            "meta/llama-3.2-90b-vision-instruct" to "Llama 3.2 90B Vision (Önerilen - En Zeki & Detaylı)",
+            "meta/llama-3.2-11b-vision-instruct" to "Llama 3.2 11B Vision (Hızlı Görsel Çözüm)",
+            "minimaxai/minimax-m3" to "MiniMax M3 (NVIDIA NIM)",
+            "google/gemma-2-27b-it" to "Gemma 2 27B Instruct (Google NIM)",
+            "microsoft/phi-3-vision-128k-instruct" to "Phi-3 Vision 128K (Microsoft)",
+            "meta/llama-3.1-70b-instruct" to "Llama 3.1 70B Instruct (Metin)",
+            "nvidia/llama-3.1-nemotron-70b-instruct" to "Nemotron 70B Instruct (NVIDIA Metin)"
         ),
         consoleUrl = "https://build.nvidia.com/explore/reasoning",
         consoleName = "NVIDIA Build"

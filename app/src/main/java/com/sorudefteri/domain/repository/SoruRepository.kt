@@ -1,9 +1,12 @@
 package com.sorudefteri.domain.repository
 
+import com.sorudefteri.data.local.entity.TestSonucEntity
+import com.sorudefteri.domain.model.BenzerSoru
 import com.sorudefteri.domain.model.DersSoruSayisi
 import com.sorudefteri.domain.model.GunlukAktivite
 import com.sorudefteri.domain.model.HataTipiDagilimi
 import com.sorudefteri.domain.model.IstatistikOzetWrapper
+import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.Soru
 import kotlinx.coroutines.flow.Flow
 
@@ -26,6 +29,8 @@ interface SoruRepository {
     ): Flow<List<Soru>>
 
     fun searchSorular(query: String): Flow<List<Soru>>
+
+    fun searchSorularFts(query: String): Flow<List<Soru>> = searchSorular(query)
 
     fun getSoruById(id: Long): Flow<Soru?>
 
@@ -81,10 +86,19 @@ interface SoruRepository {
     suspend fun toggleFavorite(id: Long, isFavorite: Boolean)
     suspend fun updateReviewStatus(id: Long, stage: Int, nextReviewDate: Long?, lastReviewedAt: Long)
     suspend fun advanceReviewStage(id: Long)
+    suspend fun regressReviewStage(id: Long)
+    suspend fun regressReviewStageBatch(ids: List<Long>)
     suspend fun deleteSorularByIds(ids: List<Long>)
     suspend fun updateSolvedStatusBatch(ids: List<Long>, isSolved: Boolean)
     suspend fun updateFavoriteStatusBatch(ids: List<Long>, isFavorite: Boolean)
     suspend fun insertAllSorular(sorular: List<Soru>): List<Long>
+
+    /**
+     * Akıllı içe aktarma bakımı: içeriği tanımlanabilir ancak içerik parmak izi
+     * (contentHash) henüz yazılmamış eski kayıtları doldurur.
+     * Dönen değer güncellenen kayıt sayısıdır.
+     */
+    suspend fun backfillContentHashes(): Int
     fun getFavoriteSorular(): Flow<List<Soru>>
     fun getDueReviewSorular(): Flow<List<Soru>>
     suspend fun getDueReviewSorularList(currentTime: Long = System.currentTimeMillis()): List<Soru>
@@ -96,6 +110,7 @@ interface SoruRepository {
         mistakeType: String? = null,
         isSolved: Boolean? = null,
         isFavorite: Boolean? = null,
+        onlyDueReview: Boolean? = null,
         kaynak: String? = null
     ): Flow<androidx.paging.PagingData<Soru>>
 
@@ -108,4 +123,21 @@ interface SoruRepository {
     fun getMistakeStats(): Flow<List<HataTipiDagilimi>>
 
     fun getWeeklyActivity(): Flow<List<GunlukAktivite>>
+    fun getAllTestResults(): Flow<List<TestSonucEntity>>
+
+    // Soruya bağlı kalıcı benzer sorular (Question Cloner arşivi)
+    fun getBenzerSorular(soruId: Long): Flow<List<BenzerSoru>>
+    suspend fun saveBenzerSoru(soruId: Long, result: SimilarQuestionResult): Long
+    suspend fun deleteBenzerSoru(id: Long)
+    suspend fun deleteAllBenzerSorular(soruId: Long)
+
+    // Sokratik AI Öğretmen Sohbeti
+    fun getChatMessagesForSoru(soruId: Long): Flow<List<com.sorudefteri.data.local.entity.SoruChatMessageEntity>>
+    suspend fun insertChatMessage(message: com.sorudefteri.data.local.entity.SoruChatMessageEntity): Long
+    suspend fun clearChatMessagesForSoru(soruId: Long)
+
+    // Deneme Sınavı Takibi
+    fun getAllDenemeler(): Flow<List<com.sorudefteri.data.local.entity.DenemeSinaviEntity>>
+    suspend fun insertDeneme(entity: com.sorudefteri.data.local.entity.DenemeSinaviEntity): Long
+    suspend fun deleteDeneme(id: Long)
 }

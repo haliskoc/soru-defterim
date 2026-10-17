@@ -21,15 +21,23 @@ class TestSessionManager @Inject constructor() {
     private val _currentFilter = MutableStateFlow(TestFiltre())
     val currentFilter: StateFlow<TestFiltre> = _currentFilter.asStateFlow()
 
+    private val _timeLimitPerQuestion = MutableStateFlow<Long>(0L)
+    val timeLimitPerQuestion: StateFlow<Long> = _timeLimitPerQuestion.asStateFlow()
+
     private val _lastResult = MutableStateFlow<TestResult?>(null)
     val lastResult: StateFlow<TestResult?> = _lastResult.asStateFlow()
 
     /**
      * Yeni bir test oturumu başlatır
      */
-    fun startSession(questions: List<TestQuestion>, filter: TestFiltre) {
+    fun startSession(
+        questions: List<TestQuestion>,
+        filter: TestFiltre,
+        timeLimitPerQuestion: Long = filter.timeLimitPerQuestionSeconds
+    ) {
         _activeQuestions.value = questions
         _currentFilter.value = filter
+        _timeLimitPerQuestion.value = timeLimitPerQuestion
         _lastResult.value = null
     }
 
@@ -78,7 +86,8 @@ class TestSessionManager @Inject constructor() {
             wrongCount = wrongCount,
             emptyCount = emptyCount,
             totalTimeSeconds = totalTimeSeconds,
-            questions = evaluatedQuestions
+            questions = evaluatedQuestions,
+            targetTimePerQuestionSeconds = _timeLimitPerQuestion.value
         )
 
         _lastResult.value = result
@@ -105,6 +114,7 @@ class TestSessionManager @Inject constructor() {
      */
     fun clear() {
         _activeQuestions.value = emptyList()
+        _timeLimitPerQuestion.value = 0L
         _lastResult.value = null
     }
 }

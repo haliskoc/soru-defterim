@@ -16,7 +16,10 @@ import com.sorudefteri.domain.model.Ders
 import com.sorudefteri.domain.model.HataTipi
 import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.repository.AiRepository
+import com.sorudefteri.domain.manager.BadgeManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -63,7 +66,11 @@ data class SoruEklemeUiState(
     val isCleaningOcr: Boolean = false,
     val ocrStatusMessage: String? = null,
     val isCropperOpen: Boolean = false,
-    val cropTargetIsSolution: Boolean = false
+    val cropTargetIsSolution: Boolean = false,
+    val isBatchCropperOpen: Boolean = false,
+    val pendingBatchImages: List<String> = emptyList(),
+    val totalBatchCount: Int = 0,
+    val currentBatchIndex: Int = 0
 ) {
     val isEditMode: Boolean
         get() = editingSoruId != null
@@ -85,11 +92,15 @@ class SoruEklemeViewModel @Inject constructor(
     private val konuKatalog: KonuKatalog,
     private val ayarlarDataStore: AyarlarDataStore,
     private val aiRepository: AiRepository,
-    private val ocrHelper: OcrHelper
+    private val ocrHelper: OcrHelper,
+    private val badgeManager: BadgeManager? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SoruEklemeUiState())
     val uiState: StateFlow<SoruEklemeUiState> = _uiState.asStateFlow()
+
+    private val sessionCreatedImagePaths = mutableSetOf<String>()
+    internal var cleanupScope: CoroutineScope = CoroutineScope(Dispatchers.IO)
 
     init {
         viewModelScope.launch {
@@ -109,10 +120,25 @@ class SoruEklemeViewModel @Inject constructor(
         }
     }
 
-    override fun onCleared() {
+    public override fun onCleared() {
         super.onCleared()
         // OcrHelper lifecycle: TextRecognizer close
         try { ocrHelper.close() } catch (_: Exception) {}
+
+        if (!_uiState.value.isSaved) {
+            val pathsToDelete = synchronized(sessionCreatedImagePaths) {
+                sessionCreatedImagePaths.toList()
+            }
+            if (pathsToDelete.isNotEmpty()) {
+                cleanupScope.launch {
+                    pathsToDelete.forEach { path ->
+                        try {
+                            gorselDepo.gorselSil(path)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
+        }
     }
 
     /**
@@ -141,9 +167,11 @@ class SoruEklemeViewModel @Inject constructor(
                     val uri = Uri.parse(uriOrPath)
                     gorselDepo.saveImageFromUri(uri, isSolution = false)
                 }
+                synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.add(path) }
                 _uiState.update { it.copy(soruImagePath = path, errorMessage = null) }
             } catch (e: Exception) {
                 if (File(uriOrPath).exists()) {
+                    synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.add(uriOrPath) }
                     _uiState.update { it.copy(soruImagePath = uriOrPath, errorMessage = null) }
                 } else {
                     _uiState.update { it.copy(errorMessage = "Görsel yüklenemedi: ${e.localizedMessage}") }
@@ -167,9 +195,11 @@ class SoruEklemeViewModel @Inject constructor(
                     val uri = Uri.parse(uriOrPath)
                     gorselDepo.saveImageFromUri(uri, isSolution = true)
                 }
+                synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.add(path) }
                 _uiState.update { it.copy(solutionImagePath = path, errorMessage = null) }
             } catch (e: Exception) {
                 if (File(uriOrPath).exists()) {
+                    synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.add(uriOrPath) }
                     _uiState.update { it.copy(solutionImagePath = uriOrPath, errorMessage = null) }
                 } else {
                     _uiState.update { it.copy(errorMessage = "Çözüm görseli yüklenemedi: ${e.localizedMessage}") }
@@ -189,6 +219,7 @@ class SoruEklemeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val path = gorselDepo.saveImageFromUri(uri, isSolution = false)
+                synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.add(path) }
                 _uiState.update { it.copy(soruImagePath = path, errorMessage = null) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(errorMessage = "Görsel kaydedilemedi: ${e.localizedMessage}") }
@@ -202,6 +233,7 @@ class SoruEklemeViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 val path = gorselDepo.saveImageFromUri(uri, isSolution = true)
+                synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.add(path) }
                 _uiState.update { it.copy(solutionImagePath = path, errorMessage = null) }
             } catch (e: Exception) {
                 _uiState.update { it.copy(errorMessage = "Çözüm görseli kaydedilemedi: ${e.localizedMessage}") }
@@ -212,16 +244,19 @@ class SoruEklemeViewModel @Inject constructor(
     }
 
     fun setSoruImagePath(path: String) {
+        synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.add(path) }
         _uiState.update { it.copy(soruImagePath = path, errorMessage = null) }
     }
 
     fun setSolutionImagePath(path: String) {
+        synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.add(path) }
         _uiState.update { it.copy(solutionImagePath = path, errorMessage = null) }
     }
 
     fun removeSoruImage() {
         val currentPath = _uiState.value.soruImagePath
         if (currentPath != null) {
+            synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.remove(currentPath) }
             viewModelScope.launch { gorselDepo.gorselSil(currentPath) }
         }
         _uiState.update { it.copy(soruImagePath = null, extractedText = null) }
@@ -230,6 +265,7 @@ class SoruEklemeViewModel @Inject constructor(
     fun removeSolutionImage() {
         val currentPath = _uiState.value.solutionImagePath
         if (currentPath != null) {
+            synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.remove(currentPath) }
             viewModelScope.launch { gorselDepo.gorselSil(currentPath) }
         }
         _uiState.update { it.copy(solutionImagePath = null) }
@@ -515,6 +551,7 @@ class SoruEklemeViewModel @Inject constructor(
                         gorselDepo.kaydetDosyadan(file, isSolution)
                     } else newPath
                 } catch (_: Exception) { newPath }
+                synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.add(permanentPath) }
                 _uiState.update {
                     if (isSolution) {
                         it.copy(solutionImagePath = permanentPath, isCropperOpen = false, errorMessage = null)
@@ -530,6 +567,71 @@ class SoruEklemeViewModel @Inject constructor(
         }
     }
 
+    fun openBatchCropper() {
+        _uiState.update { it.copy(isBatchCropperOpen = true) }
+    }
+
+    fun closeBatchCropper() {
+        _uiState.update { it.copy(isBatchCropperOpen = false) }
+    }
+
+    fun applyBatchCroppedImages(paths: List<String>) {
+        if (paths.isEmpty()) {
+            closeBatchCropper()
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val permanentPaths = paths.map { p ->
+                    try {
+                        val file = File(p)
+                        if (file.exists() && file.isFile) {
+                            gorselDepo.kaydetDosyadan(file, isSolution = false)
+                        } else p
+                    } catch (_: Exception) { p }
+                }
+                synchronized(sessionCreatedImagePaths) {
+                    sessionCreatedImagePaths.addAll(permanentPaths)
+                }
+                val first = permanentPaths.first()
+                val remaining = permanentPaths.drop(1)
+                _uiState.update {
+                    it.copy(
+                        soruImagePath = first,
+                        pendingBatchImages = remaining,
+                        totalBatchCount = permanentPaths.size,
+                        currentBatchIndex = 1,
+                        isBatchCropperOpen = false,
+                        errorMessage = null
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isBatchCropperOpen = false, errorMessage = "Çoklu kırpma hatası: ${e.localizedMessage}") }
+            }
+        }
+    }
+
+    fun loadNextBatchImage() {
+        val state = _uiState.value
+        val remaining = state.pendingBatchImages
+        if (remaining.isNotEmpty()) {
+            val nextPath = remaining.first()
+            val nextRemaining = remaining.drop(1)
+            _uiState.update {
+                it.copy(
+                    soruImagePath = nextPath,
+                    solutionImagePath = null,
+                    extractedText = null,
+                    correctAnswer = null,
+                    studentAnswer = null,
+                    pendingBatchImages = nextRemaining,
+                    currentBatchIndex = it.currentBatchIndex + 1,
+                    isSaved = false
+                )
+            }
+        }
+    }
+
     /**
      * Kırpma sonrası Bitmap akışı: GorselDepo.kaydetBitmap ile kaydet ve uiState güncelle
      * ImageCropperDialog doğru Uri ile çağrıldıktan sonra bitmap döndüğünde kullanılır.
@@ -539,6 +641,7 @@ class SoruEklemeViewModel @Inject constructor(
             try {
                 val isSolution = _uiState.value.cropTargetIsSolution
                 val newPath = gorselDepo.kaydetBitmap(croppedBitmap, isSolution)
+                synchronized(sessionCreatedImagePaths) { sessionCreatedImagePaths.add(newPath) }
                 _uiState.update {
                     if (isSolution) {
                         it.copy(solutionImagePath = newPath, isCropperOpen = false, errorMessage = null)
@@ -637,9 +740,18 @@ class SoruEklemeViewModel @Inject constructor(
                     updatedAt = System.currentTimeMillis()
                 )
                 if (state.editingSoruId != null) {
+                    if (existingSoru != null) {
+                        if (existingSoru.imagePath != imagePath) {
+                            gorselDepo.gorselSil(existingSoru.imagePath)
+                        }
+                        if (!existingSoru.solutionImagePath.isNullOrBlank() && existingSoru.solutionImagePath != state.solutionImagePath) {
+                            gorselDepo.gorselSil(existingSoru.solutionImagePath)
+                        }
+                    }
                     soruRepository.updateSoru(soru)
                 } else {
                     soruRepository.soruEkle(soru)
+                    badgeManager?.onQuestionAdded()
                 }
                 _uiState.update { it.copy(isSaving = false, isSaved = true) }
                 onSuccess()

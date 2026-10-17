@@ -7,15 +7,20 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.ai.AiRepository
 import com.sorudefteri.data.images.GorselDepo
+import com.sorudefteri.data.local.entity.SoruChatMessageEntity
 import com.sorudefteri.data.ocr.OcrHelper
 import com.sorudefteri.data.worker.AiSolutionRetryWorker
 import com.sorudefteri.domain.model.AiErrorType
 import com.sorudefteri.domain.model.AiException
+import com.sorudefteri.domain.model.BenzerSoru
 import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.Soru
+import com.sorudefteri.domain.model.toBenzerSoru
 import com.sorudefteri.domain.repository.SoruRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,6 +28,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import javax.inject.Inject
 
@@ -51,12 +57,28 @@ data class SoruDetayUiState(
     val showSimilarQuestionDialog: Boolean = false,
     val userSelectedSimilarOption: String? = null,
     val isSimilarAnswerRevealed: Boolean = false,
+    // Soruya bağlı kalıcı benzer soru arşivi
+    val savedSimilarQuestions: List<BenzerSoru> = emptyList(),
+    // Kayıtlı benzer soruların DB'den okunup okunmadığı. false iken "boş durum"
+    // kartı gösterilmez, yükleniyor kartı gösterilir (içerik zıplamasını önler).
+    val isSavedSimilarLoaded: Boolean = false,
+    val isSavingSimilar: Boolean = false,
+    val similarSaveMessage: String? = null,
     // Koşullu OCR & AI İletim Alanları
     val isOcrLoading: Boolean = false,
     val extractedOcrText: String? = null,
     val sendImageToAi: Boolean = true,
     val isCleaningOcr: Boolean = false,
-    val ocrMessage: String? = null
+    val ocrMessage: String? = null,
+    // Harici AI Chatbot Paylaşım & Manuel Benzer Soru State
+    val showExternalAiShareDialog: Boolean = false,
+    val externalAiShareMode: com.sorudefteri.ui.detay.components.ExternalAiMode = com.sorudefteri.ui.detay.components.ExternalAiMode.SOLUTION,
+    val showManualSimilarQuestionDialog: Boolean = false,
+    // Sokratik AI Chatbot
+    val chatMessages: List<SoruChatMessageEntity> = emptyList(),
+    val isChatSending: Boolean = false,
+    val chatError: String? = null,
+    val showChatBottomSheet: Boolean = false
 )
 
 @HiltViewModel
@@ -79,6 +101,8 @@ class SoruDetayViewModel @Inject constructor(
     init {
         loadSoru()
         listenCameraCapture()
+        loadSavedSimilarQuestions()
+        loadChatMessages()
     }
 
     private fun listenCameraCapture() {
@@ -407,6 +431,221 @@ class SoruDetayViewModel @Inject constructor(
         _uiState.update { it.copy(showManualSolutionDialog = show) }
     }
 
+    fun setShowExternalAiShareDialog(show: Boolean, mode: com.sorudefteri.ui.detay.components.ExternalAiMode = com.sorudefteri.ui.detay.components.ExternalAiMode.SOLUTION) {
+        _uiState.update {
+            it.copy(
+                showExternalAiShareDialog = show,
+                externalAiShareMode = mode
+            )
+        }
+    }
+
+    fun setShowManualSimilarQuestionDialog(show: Boolean) {
+        _uiState.update { it.copy(showManualSimilarQuestionDialog = show) }
+    }
+
+    /**
+     * Manuel yapıştırılan benzer soruyu önce ekrana yükler, ardından soruya bağlı
+     * olarak Room veritabanına kalıcı kaydeder. Kayıt başarısız olsa bile ekran
+     * içeriği korunur ve kullanıcı bilgilendirilir.
+     */
+    fun saveManualSimilarQuestion(result: com.sorudefteri.domain.model.SimilarQuestionResult) {
+        if (soruId <= 0L) {
+            _uiState.update {
+                it.copy(
+                    similarQuestion = result,
+                    similarQuestionError = null,
+                    showManualSimilarQuestionDialog = false,
+                    userSelectedSimilarOption = null,
+                    isSimilarAnswerRevealed = false,
+                    similarSaveMessage = "Önizleme yüklendi (soru kaydı bulunamadı)."
+                )
+            }
+            return
+        }
+        _uiState.update {
+            it.copy(
+                similarQuestion = result,
+                similarQuestionError = null,
+                showManualSimilarQuestionDialog = false,
+                userSelectedSimilarOption = null,
+                isSimilarAnswerRevealed = false,
+                isSavingSimilar = true,
+                similarSaveMessage = null
+            )
+        }
+        viewModelScope.launch {
+            try {
+                soruRepository.saveBenzerSoru(soruId, result)
+                _uiState.update {
+                    it.copy(
+                        isSavingSimilar = false,
+                        similarSaveMessage = "Benzer soru bu soruya kaydedildi ✓"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSavingSimilar = false,
+                        similarSaveMessage = "Önizleme hazır, ancak kalıcı kayıt başarısız: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Ekrandaki aktif benzer soruyu soruya bağlı arşive kaydeder (tekrar kaydet).
+     */
+    fun persistCurrentSimilarQuestion() {
+        val current = _uiState.value.similarQuestion ?: return
+        if (soruId <= 0L || _uiState.value.isSavingSimilar) return
+        _uiState.update { it.copy(isSavingSimilar = true, similarSaveMessage = null) }
+        viewModelScope.launch {
+            try {
+                soruRepository.saveBenzerSoru(soruId, current)
+                _uiState.update {
+                    it.copy(
+                        isSavingSimilar = false,
+                        similarSaveMessage = "Benzer soru bu soruya kaydedildi ✓"
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSavingSimilar = false,
+                        similarSaveMessage = "Kayıt başarısız: ${e.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Kayıtlı benzer soruyu kütüphaneye bağımsız soru olarak kopyalar.
+     * Görseli olmayan metin sorular için ebeveyn görseli paylaşılır.
+     */
+    fun saveSimilarToLibrary(benzer: BenzerSoru, onSaved: (Long) -> Unit = {}) {
+        val parent = _uiState.value.soru ?: return
+        viewModelScope.launch {
+            try {
+                val optionsText = benzer.options.toSortedMap().entries
+                    .joinToString("\n") { (k, v) -> "$k) $v" }
+                val noteBuilder = StringBuilder()
+                noteBuilder.append("📌 Kaynak soru #${parent.id} benzeri (otomatik kopya)\n\n")
+                if (optionsText.isNotBlank()) {
+                    noteBuilder.append(optionsText).append("\n\n")
+                }
+                parent.note?.takeIf { it.isNotBlank() }?.let {
+                    noteBuilder.append("Kaynak notu: $it")
+                }
+                val newSoru = parent.copy(
+                    id = 0L,
+                    questionText = benzer.questionText.ifBlank { null },
+                    ocrMetni = benzer.questionText.ifBlank { parent.ocrMetni },
+                    correctAnswer = benzer.correctAnswer.ifBlank { null },
+                    aiExplanation = benzer.solution.ifBlank { null },
+                    note = noteBuilder.toString().trim().ifBlank { null },
+                    isSolved = false,
+                    solvedAt = null,
+                    isFavorite = false,
+                    reviewStage = 0,
+                    nextReviewDate = null,
+                    lastReviewedAt = null,
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis()
+                )
+                val newId = soruRepository.soruEkle(newSoru)
+                _uiState.update {
+                    it.copy(similarSaveMessage = "Kütüphaneye kaydedildi ✓ (Soru #$newId)")
+                }
+                onSaved(newId)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(similarSaveMessage = "Kütüphaneye kayıt başarısız: ${e.localizedMessage}")
+                }
+            }
+        }
+    }
+
+    /** Ekrandaki aktif benzer soruyu kütüphaneye kaydeder. */
+    fun saveCurrentSimilarToLibrary(onSaved: (Long) -> Unit = {}) {
+        val current = _uiState.value.similarQuestion ?: return
+        saveSimilarToLibrary(current.toBenzerSoru(soruId), onSaved)
+    }
+
+    fun deleteSavedSimilarQuestion(id: Long) {
+        viewModelScope.launch {
+            try {
+                soruRepository.deleteBenzerSoru(id)
+                _uiState.update { current ->
+                    val remaining = current.savedSimilarQuestions.filter { it.id != id }
+                    val isCurrentDeleted = current.savedSimilarQuestions.find { it.id == id }?.questionText == current.similarQuestion?.questionText
+                    val newSimilar = if (isCurrentDeleted) {
+                        remaining.firstOrNull()?.toSimilarResult()
+                    } else {
+                        current.similarQuestion
+                    }
+                    current.copy(
+                        savedSimilarQuestions = remaining,
+                        similarQuestion = newSimilar,
+                        similarSaveMessage = "Kayıtlı benzer soru silindi."
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(similarSaveMessage = "Silme başarısız: ${e.localizedMessage}")
+                }
+            }
+        }
+    }
+
+    fun openSavedSimilarQuestion(benzer: BenzerSoru) {
+        _uiState.update {
+            it.copy(
+                similarQuestion = benzer.toSimilarResult(),
+                similarQuestionError = null,
+                userSelectedSimilarOption = null,
+                isSimilarAnswerRevealed = false,
+                similarSaveMessage = null
+            )
+        }
+    }
+
+    fun clearSimilarSaveMessage() {
+        _uiState.update { it.copy(similarSaveMessage = null) }
+    }
+
+    private fun loadSavedSimilarQuestions() {
+        if (soruId <= 0L) return
+        viewModelScope.launch {
+            soruRepository.getBenzerSorular(soruId)
+                .catch {
+                    // Akış hatasında sessiz geç (ekran içeriği etkilenmesin)
+                }
+                .collectLatest { list ->
+                    _uiState.update { state ->
+                        // Soru detayına girildiğinde daha önce kaydedilmiş benzer soru varsa
+                        // en son kaydedilen benzer soru otomatik olarak ekrana yüklensin.
+                        val latestSimilar = if (state.similarQuestion == null && list.isNotEmpty()) {
+                            list.first().toSimilarResult()
+                        } else {
+                            state.similarQuestion
+                        }
+                        state.copy(
+                            savedSimilarQuestions = list,
+                            similarQuestion = latestSimilar,
+                            // DÜZELTME: Benzer Soru sekmesine girildiğinde ilk karede
+                            // "boş durum" kartı çiziliyor, bir DB turu sonra kayıtlı soru
+                            // gelince TÜM SEKME İÇERİĞİ yer değiştiriyordu. Bu bayrak,
+                            // "yok" ile "henüz yüklenmedi" ayrımını yapar.
+                            isSavedSimilarLoaded = true
+                        )
+                    }
+                }
+        }
+    }
+
     fun onaylaCozumu(extractedAnswer: String? = null) {
         val currentSoru = _uiState.value.soru ?: return
         viewModelScope.launch {
@@ -522,8 +761,27 @@ class SoruDetayViewModel @Inject constructor(
                     it.copy(
                         isGeneratingSimilar = false,
                         similarQuestion = similar,
-                        similarQuestionError = null
+                        similarQuestionError = null,
+                        isSavingSimilar = true,
+                        similarSaveMessage = null
                     )
+                }
+                // AI çıktısını da soruya bağlı arşive kalıcı yaz
+                try {
+                    soruRepository.saveBenzerSoru(currentSoru.id, similar)
+                    _uiState.update {
+                        it.copy(
+                            isSavingSimilar = false,
+                            similarSaveMessage = "Benzer soru bu soruya kaydedildi ✓"
+                        )
+                    }
+                } catch (e: Exception) {
+                    _uiState.update {
+                        it.copy(
+                            isSavingSimilar = false,
+                            similarSaveMessage = "Önizleme hazır, ancak kalıcı kayıt başarısız: ${e.localizedMessage}"
+                        )
+                    }
                 }
             }.onFailure { throwable ->
                 _uiState.update {
@@ -548,11 +806,116 @@ class SoruDetayViewModel @Inject constructor(
         _uiState.update {
             it.copy(
                 showSimilarQuestionDialog = false,
-                similarQuestion = null,
                 similarQuestionError = null,
                 userSelectedSimilarOption = null,
                 isSimilarAnswerRevealed = false
             )
+        }
+    }
+
+    private fun loadChatMessages() {
+        viewModelScope.launch {
+            soruRepository.getChatMessagesForSoru(soruId)
+                .catch { e -> _uiState.update { it.copy(chatError = e.localizedMessage) } }
+                .collect { messages ->
+                    _uiState.update { it.copy(chatMessages = messages) }
+                }
+        }
+    }
+
+    fun sendChatMessage(userText: String) {
+        val currentSoru = _uiState.value.soru ?: return
+        val text = userText.trim()
+        if (text.isBlank()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isChatSending = true, chatError = null) }
+
+            // 1. Öğrenci mesajını kaydet
+            val userMsg = SoruChatMessageEntity(
+                soruId = currentSoru.id,
+                sender = "USER",
+                messageText = text,
+                timestamp = System.currentTimeMillis()
+            )
+            soruRepository.insertChatMessage(userMsg)
+
+            // 2. AI Koçundan yanıt iste
+            val currentHistory = _uiState.value.chatMessages
+            val result = aiRepository.sendSoruChatMessage(
+                soru = currentSoru,
+                chatHistory = currentHistory,
+                userMessage = text,
+                sendImage = _uiState.value.sendImageToAi
+            )
+
+            result.onSuccess { aiReply ->
+                val aiMsg = SoruChatMessageEntity(
+                    soruId = currentSoru.id,
+                    sender = "AI",
+                    messageText = aiReply,
+                    timestamp = System.currentTimeMillis()
+                )
+                soruRepository.insertChatMessage(aiMsg)
+                _uiState.update { it.copy(isChatSending = false) }
+            }.onFailure { throwable ->
+                _uiState.update {
+                    it.copy(
+                        isChatSending = false,
+                        chatError = "AI yanıt veremedi: ${throwable.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearChatHistory() {
+        viewModelScope.launch {
+            soruRepository.clearChatMessagesForSoru(soruId)
+        }
+    }
+
+    fun toggleChatBottomSheet(show: Boolean) {
+        _uiState.update { it.copy(showChatBottomSheet = show) }
+    }
+
+    /**
+     * Kaydedilen ses dosyasının yolunu veritabanına yazar.
+     *
+     * [NonCancellable] + [Dispatchers.IO] kullanılıyor çünkü kullanıcı kaydettikten
+     * hemen sonra geri tuşuna basarsa viewModelScope iptal olur ve yazma işlemi
+     * tamamlanmadan soru kalıcı olarak "ses kaydı yok" kalırdı. Bu, kullanıcının
+     * "kaydettim ama girdiğimde gidiyor" şikâyetinin ikinci nedeniydi.
+     */
+    fun saveAudioMemo(audioPath: String) {
+        val currentSoru = _uiState.value.soru ?: return
+        val updated = currentSoru.copy(audioPath = audioPath)
+        _uiState.update { it.copy(soru = updated) }
+        viewModelScope.launch {
+            withContext(NonCancellable + Dispatchers.IO) {
+                soruRepository.soruGuncelle(updated)
+            }
+        }
+    }
+
+    fun deleteAudioMemo() {
+        val currentSoru = _uiState.value.soru ?: return
+        val oldPath = currentSoru.audioPath
+        val updated = currentSoru.copy(audioPath = null)
+        _uiState.update { it.copy(soru = updated) }
+        viewModelScope.launch {
+            // Önce veritabanını temizle, sonra dosyayı sil. Yazma iptal olursa
+            // dosya kalıcı kalsın; user tekrar denediğinde yeniden silinir.
+            withContext(NonCancellable + Dispatchers.IO) {
+                soruRepository.soruGuncelle(updated)
+                if (!oldPath.isNullOrBlank()) {
+                    try {
+                        val f = File(oldPath)
+                        if (f.exists()) f.delete()
+                        else File(appContext.filesDir, oldPath).delete()
+                    } catch (_: Exception) {}
+                }
+            }
         }
     }
 

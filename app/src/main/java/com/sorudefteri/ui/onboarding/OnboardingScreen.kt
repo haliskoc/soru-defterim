@@ -194,11 +194,21 @@ fun OnboardingScreen(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Page Indicator Dots
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                // Page Indicator Dots — TELEFON: adım sayılı (Adım 2/5)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
+                    Text(
+                        text = "Adım ${pagerState.currentPage + 1} / $totalPages",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                     repeat(totalPages) { index ->
                         val isSelected = pagerState.currentPage == index
                         val width by animateDpAsState(
@@ -216,6 +226,7 @@ fun OnboardingScreen(
                                 .clip(CircleShape)
                                 .background(color)
                         )
+                    }
                     }
                 }
 

@@ -30,6 +30,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,8 +55,11 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sorudefteri.ui.soruekle.components.BatchCropDialog
 import com.sorudefteri.ui.soruekle.components.CevapSeciciSection
 import com.sorudefteri.ui.soruekle.components.CozumNotSection
 import com.sorudefteri.ui.soruekle.components.GorselSeciciSection
@@ -64,6 +68,7 @@ import com.sorudefteri.ui.soruekle.components.KaynakBilgisiSection
 import com.sorudefteri.ui.soruekle.components.OcrResultPreviewSection
 import com.sorudefteri.ui.soruekle.components.SoruEklemeTopBar
 import com.sorudefteri.ui.soruekle.components.SoruMetadataSection
+import com.sorudefteri.ui.ortak.PhoneAdimKarti
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -167,9 +172,48 @@ fun SoruEklemeScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
+            if (uiState.totalBatchCount > 1) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "📦 Çoklu Çekim: Soru ${uiState.currentBatchIndex} / ${uiState.totalBatchCount}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                        if (uiState.pendingBatchImages.isNotEmpty()) {
+                            Button(
+                                onClick = { viewModel.loadNextBatchImage() },
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            ) {
+                                Text("Sıradakine Geç", fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
             // GorselSeciciSection artık launcher içermez; parent'ten gelen onSoruGalleryClick vs kullanır
             // Crop flow: ImageCropperDialog doğru Uri/path ile çağrılır, kırpma sonrası ViewModel'e bitmap iletilir
-            GorselSeciciSection(
+            // TELEFON: Adım 1 — Görsel (dikey akışın girişi)
+            PhoneAdimKarti(
+                adim = 1,
+                baslik = "Soru Görseli",
+                aciklama = "Önce sorunun fotoğrafını çek veya galeriden seç. Netlik önemli.",
+                tamamlandi = !uiState.soruImagePath.isNullOrBlank()
+            ) {
+                GorselSeciciSection(
                 soruImagePath = uiState.soruImagePath,
                 solutionImagePath = uiState.solutionImagePath,
                 isAutoTagging = uiState.isAutoTagging,
@@ -189,11 +233,20 @@ fun SoruEklemeScreen(
                 onDeleteSoruImage = { viewModel.removeSoruImage() },
                 onDeleteSolutionImage = { viewModel.removeSolutionImage() },
                 onOpenCropper = { isSol -> viewModel.openCropper(isSol) },
+                onOpenBatchCropper = { viewModel.openBatchCropper() },
                 onPerformOcr = { viewModel.extractTextFromQuestionImage() },
                 onAutoTagWithAi = { viewModel.autoTagWithAi() }
-            )
+                )
+            }
 
-            OcrResultPreviewSection(
+            // TELEFON: Adım 2 — Metin & OCR
+            PhoneAdimKarti(
+                adim = 2,
+                baslik = "Soru Metni (OCR)",
+                aciklama = "Görseldeki yazıyı kontrol et, gerekirse AI ile temizle.",
+                tamamlandi = !uiState.extractedText.isNullOrBlank()
+            ) {
+                OcrResultPreviewSection(
                 extractedText = uiState.extractedText,
                 sendImageToAi = uiState.sendImageToAi,
                 isOcrExtracting = uiState.isOcrExtracting,
@@ -204,8 +257,16 @@ fun SoruEklemeScreen(
                 onCleanWithAiClick = { viewModel.cleanOcrWithAi() },
                 onClearOcrClick = { viewModel.updateExtractedText("") }
             )
+            }
 
-            SoruMetadataSection(
+            // TELEFON: Adım 3 — Ders & Konu
+            PhoneAdimKarti(
+                adim = 3,
+                baslik = "Ders & Konu",
+                aciklama = "Sınav türünü, dersi ve konuyu işaretle.",
+                tamamlandi = uiState.subjectId != null && uiState.topic.isNotBlank()
+            ) {
+                SoruMetadataSection(
                 examType = uiState.examType,
                 subjectId = uiState.subjectId,
                 topic = uiState.topic,
@@ -222,8 +283,15 @@ fun SoruEklemeScreen(
                 onMistakeTypeChanged = { viewModel.setMistakeType(it) },
                 onOpenCatalogClick = { viewModel.openTopicCatalog(true) }
             )
+            }
 
-            KaynakBilgisiSection(
+            // TELEFON: Adım 4 — Kaynak
+            PhoneAdimKarti(
+                adim = 4,
+                baslik = "Kaynak Bilgisi",
+                aciklama = "Yayın, deneme, yıl ve soru no (opsiyonel ama önerilir)."
+            ) {
+                KaynakBilgisiSection(
                 kaynakYayin = uiState.kaynakYayin,
                 kaynakDeneme = uiState.kaynakDeneme,
                 kaynakYil = uiState.kaynakYil,
@@ -233,18 +301,34 @@ fun SoruEklemeScreen(
                 onYilChanged = { viewModel.setKaynakYil(it) },
                 onSoruNoChanged = { viewModel.setKaynakSoruNo(it) }
             )
+            }
 
-            CevapSeciciSection(
+            // TELEFON: Adım 5 — Cevaplar
+            PhoneAdimKarti(
+                adim = 5,
+                baslik = "Cevaplar",
+                aciklama = "Doğru cevabı ve kendi verdiğin cevabı işaretle.",
+                tamamlandi = !uiState.correctAnswer.isNullOrBlank()
+            ) {
+                CevapSeciciSection(
                 correctAnswer = uiState.correctAnswer,
                 studentAnswer = uiState.studentAnswer,
                 onCorrectAnswerSelected = { viewModel.setCorrectAnswer(it) },
                 onStudentAnswerSelected = { viewModel.setStudentAnswer(it) }
             )
+            }
 
-            CozumNotSection(
+            // TELEFON: Adım 6 — Not & Kaydet
+            PhoneAdimKarti(
+                adim = 6,
+                baslik = "Çözüm Notu",
+                aciklama = "Son adım: notunu ekle, üstteki Kaydet ile bitir."
+            ) {
+                CozumNotSection(
                 note = uiState.note,
                 onNoteChanged = { viewModel.setNote(it) }
             )
+            }
 
             Spacer(modifier = Modifier.height(24.dp))
         }
@@ -260,6 +344,18 @@ fun SoruEklemeScreen(
                 onCropped = { bitmap: android.graphics.Bitmap ->
                     // Kırpma sonrası uiState güncellensin: ViewModel flow düzeltildi
                     viewModel.onCropComplete(bitmap)
+                }
+            )
+        }
+    }
+
+    if (uiState.isBatchCropperOpen) {
+        uiState.soruImagePath?.let { path ->
+            BatchCropDialog(
+                imagePath = path,
+                onDismiss = { viewModel.closeBatchCropper() },
+                onBatchCropped = { croppedPaths ->
+                    viewModel.applyBatchCroppedImages(croppedPaths)
                 }
             )
         }

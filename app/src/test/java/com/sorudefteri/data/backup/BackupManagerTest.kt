@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import com.sorudefteri.data.images.GorselDepo
+import com.sorudefteri.data.local.entity.toEntity
 import com.sorudefteri.domain.model.HataTipi
 import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.repository.SoruRepository
@@ -362,5 +363,131 @@ class BackupManagerTest {
         every { mockContentResolver.openInputStream(mockUri) } answers { FileInputStream(maliciousZipFile) }
         val result = backupManager.importBackup(mockUri, password = null)
         assertTrue("Absolute path traversal engellenmeli", result.isFailure)
+    }
+
+    // =====================================================================
+    // AKILLI İÇE AKTARMA (dedup/merge) TESTLERİ
+    // =====================================================================
+
+    /** Gerçek yazma davranışına sahip sahte DAO + dedup DAO'nun bağlı olduğu BackupManager. */
+    private fun dedupYoneticiVeDaoAyari(): Pair<BackupManager, com.sorudefteri.data.local.FakeSoruDao> {
+        val fakeDao = com.sorudefteri.data.local.FakeSoruDao()
+        coEvery { mockSoruRepository.getAllSorular() } returns flowOf(emptyList())
+        coEvery { mockGorselDepo.kaydetDosyadan(any(), any()) } returns "/fake/path.jpg"
+        // insertAllSorular -> fakeDao'ya gerçek yazma (contentHash dahil korunur)
+        coEvery { mockSoruRepository.insertAllSorular(any()) } coAnswers {
+            val gelenListe = firstArg<List<Soru>>()
+            gelenListe.map { soru -> fakeDao.insertSoru(soru.copy(id = 0).toEntity()) }
+        }
+        val dedupManager = BackupManager(
+            context = mockContext,
+            soruRepository = mockSoruRepository,
+            gorselDepo = mockGorselDepo,
+            json = json,
+            soruDedupDao = fakeDao
+        )
+        return dedupManager to fakeDao
+    }
+
+    /** İki soruluk düz (şifresiz) yedek ZIP'i hazırlar. */
+    private fun ikiSoruluManifestYaz(
+        tempSuffix: String,
+        soru2Readjust: (BackupSoruItem) -> BackupSoruItem = { it }
+    ): Uri {
+        val soru1 = BackupSoruItem(
+            originalId = 1L,
+            examType = "TYT",
+            subjectId = "matematik",
+            topic = "Türev",
+            questionText = "2x + 3 = 11 denkleminin çözümü kaçtır?"
+        )
+        val soru2 = soru2Readjust(
+            BackupSoruItem(
+                originalId = 2L,
+                examType = "TYT",
+                subjectId = "fizik",
+                topic = "Hareket",
+                questionText = "Sabit hızlı harekette 5 saniyede 100 m yol kaç metre hızla alınır?"
+            )
+        )
+        val manifest = BackupManifest(
+            questionCount = 2,
+            sorular = listOf(soru1, soru2)
+        )
+        val zipFile = tempFolder.newFile("akilli_ice_aktarma_$tempSuffix.zip")
+        ZipOutputStream(FileOutputStream(zipFile)).use { zos ->
+            zos.putNextEntry(ZipEntry("backup_manifest.json"))
+            zos.write(json.encodeToString(manifest).toByteArray(Charsets.UTF_8))
+            zos.closeEntry()
+        }
+        val mockUri = mockk<Uri>()
+        every { mockContentResolver.openInputStream(mockUri) } answers { FileInputStream(zipFile) }
+        return mockUri
+    }
+
+    @Test
+    fun akilliIceAktarma_ikinciAktarimdaMukerrerSorularEklenmezGuncelSayilir() = runTest {
+        val (dedupManager, fakeDao) = dedupYoneticiVeDaoAyari()
+        val uri = ikiSoruluManifestYaz("birinci")
+
+        // 1. AKTARIM: iki soru da yeni
+        val birinci = dedupManager.importBackup(uri, password = null)
+        assertTrue("İlk aktarımda 2 soru eklenmeli", birinci.isSuccess)
+        assertEquals(2, birinci.getOrDefault(-1))
+        assertEquals(2, fakeDao.satirSayisi())
+
+        val ozet1 = dedupManager.sonImportOzeti
+        assertNotNull(ozet1)
+        assertEquals(2, ozet1?.soruSayisi)
+        assertEquals(0, ozet1?.guncelSoru)
+        assertEquals(0, ozet1?.guncellenenSoru)
+
+        // 2. AKTARIM: aynı içerik tekrar gelir → hiçbiri tekrar eklenmemeli
+        val ikinci = dedupManager.importBackup(ikiSoruluManifestYaz("ikinci"), password = null)
+        assertTrue("İkinci aktarım başarılı olmalı", ikinci.isSuccess)
+        assertEquals(0, ikinci.getOrDefault(-1))
+        assertEquals("Mükerrer sorular için yeni satır eklenmemeli", 2, fakeDao.satirSayisi())
+
+        val ozet2 = dedupManager.sonImportOzeti
+        assertNotNull(ozet2)
+        assertEquals(0, ozet2?.soruSayisi)
+        assertEquals("İki soru da zaten güncel sayılmalı", 2, ozet2?.guncelSoru)
+        assertEquals(0, ozet2?.guncellenenSoru)
+    }
+
+    @Test
+    fun akilliIceAktarma_ayniSorununZenginlesmisKopyasi_mevcutKaydiGunceller() = runTest {
+        val (dedupManager, fakeDao) = dedupYoneticiVeDaoAyari()
+        val birinciUri = ikiSoruluManifestYaz("zengin_birinci")
+        assertTrue(dedupManager.importBackup(birinciUri, password = null).isSuccess)
+
+        // Aynı içerik (aynı hash), ama not eklenmiş kopya → mevcut kayıt güncellenmeli
+        val zenginUri = ikiSoruluManifestYaz("zengin_ikinci") { soru ->
+            soru.copy(note = "sınav öncesi tekrar et")
+        }
+        val ikinciSonuc = dedupManager.importBackup(zenginUri, password = null)
+        assertTrue("İkinci aktarım başarılı olmalı", ikinciSonuc.isSuccess)
+        assertEquals(0, ikinciSonuc.getOrDefault(-1))
+        assertEquals("Yeni satır eklenmemeli, id korunmalı", 2, fakeDao.satirSayisi())
+
+        val ozet = dedupManager.sonImportOzeti
+        assertEquals(1, ozet?.guncellenenSoru)
+        assertEquals(1, ozet?.guncelSoru)
+
+        // Not gerçekten mevcut kayda yazılmış olmalı
+        val notluSoruHash = com.sorudefteri.data.local.SoruIcerikHash.hesapla(
+            examType = "TYT",
+            subjectId = "fizik",
+            topic = "Hareket",
+            questionText = "Sabit hızlı harekette 5 saniyede 100 m yol kaç metre hızla alınır?",
+            ocrMetni = null,
+            kaynakYayin = null,
+            kaynakDeneme = null,
+            kaynakYil = null,
+            kaynakSoruNo = null
+        )
+        val guncellenenSoru = fakeDao.getByContentHashes(listOf(notluSoruHash)).firstOrNull()
+        assertNotNull("Merge edilen soru bulunmalı", guncellenenSoru)
+        assertEquals("sınav öncesi tekrar et", guncellenenSoru?.note)
     }
 }

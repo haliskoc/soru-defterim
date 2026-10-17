@@ -43,54 +43,8 @@ object AppModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(@ApplicationContext context: Context): OkHttpClient {
-        // 10 MB HTTP cache — özellikle GET /models için offline fallback
-        // NOT: offlineCache + forceCacheOnOffline çakışması: ikisi de Cache-Control manipüle ediyor.
-        // Sıra önemli: forceCacheOnOffline önce, offlineCache sonra uygulanırsa offline durumda
-        // maxAge(1 gün) ile FORCE_CACHE çakışabilir. İdeal: tek bir interceptor içinde online/offline mantığı birleştirilmeli
-        // veya CacheControl.FORCE_CACHE sadece offline ve GET /models dışındaki istekler için sınırlandırılmalı.
-        // Cache boyutu 10 MB; büyük model listeleri için yeterli, ancak CoIL ve diğer HTTP call'larla paylaşılıyor - ileride ayrı cache notu eklenebilir.
         val cacheSize = 10L * 1024 * 1024 // 10 MB
         val cache = Cache(File(context.cacheDir, "http_cache"), cacheSize)
-
-        // Offline cache interceptor: GET /models isteklerini 7 gün cache'le, çevrimdışıyken cache'den servis et
-        val offlineCacheInterceptor = Interceptor { chain ->
-            var request = chain.request()
-            // listModels GET istekleri için cache-Control ekle
-            if (request.method == "GET" && request.url.toString().contains("/models")) {
-                request = request.newBuilder()
-                    .cacheControl(CacheControl.Builder().maxAge(1, TimeUnit.DAYS).build())
-                    .build()
-            }
-            val response = chain.proceed(request)
-            // Sunucu cache header göndermese bile 1 saat client-side cache
-            if (request.method == "GET" && request.url.toString().contains("/models")) {
-                response.newBuilder()
-                    .header("Cache-Control", "public, max-age=3600")
-                    .removeHeader("Pragma")
-                    .build()
-            } else {
-                response
-            }
-        }
-
-        val forceCacheOnOfflineInterceptor = Interceptor { chain ->
-            var request = chain.request()
-            // İnternet yoksa cache'den oku (max-stale 7 gün)
-            try {
-                val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
-                val network = cm.activeNetwork
-                val caps = cm.getNetworkCapabilities(network)
-                val isOnline = caps != null && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                if (!isOnline && request.method == "GET") {
-                    request = request.newBuilder()
-                        .cacheControl(CacheControl.FORCE_CACHE)
-                        .build()
-                }
-            } catch (_: Exception) {
-                // ConnectivityManager hatasında normal devam
-            }
-            chain.proceed(request)
-        }
 
         // P0-1: Sadece DEBUG'da log, release'de NONE; ayrıca key redaction
         val redactingLogger = HttpLoggingInterceptor.Logger { message ->
@@ -130,15 +84,13 @@ object AppModule {
 
         return OkHttpClient.Builder()
             .cache(cache)
-            .addInterceptor(forceCacheOnOfflineInterceptor)
             .addInterceptor(apiKeyQuerySanitizer)
-            .addInterceptor(offlineCacheInterceptor)
             .addInterceptor(loggingInterceptor)
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .writeTimeout(30, TimeUnit.SECONDS)
-            .callTimeout(30, TimeUnit.SECONDS)
-            .retryOnConnectionFailure(false)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(180, TimeUnit.SECONDS)
+            .writeTimeout(90, TimeUnit.SECONDS)
+            .callTimeout(240, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
             .build()
     }
 }

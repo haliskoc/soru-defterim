@@ -40,6 +40,9 @@ class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Conf
     @Inject
     lateinit var ayarlarDataStore: AyarlarDataStore
 
+    @Inject
+    lateinit var soruRepository: com.sorudefteri.data.repository.SoruRepository
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override val workManagerConfiguration: Configuration
@@ -51,6 +54,8 @@ class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Conf
         super.onCreate()
         // Her gün saat 19:00'da tetiklenecek Aralıklı Tekrar bildirimini zamanla
         ReminderScheduler.scheduleDailyReminder(this)
+        // Her gün saat 21:00'de tetiklenecek Seri Koruma (Streak) bildirimini zamanla
+        ReminderScheduler.scheduleStreakReminder(this)
         // Otomatik yerel yedek - sadece ayar açıksa schedule et, yoksa iptal et
         appScope.launch {
             try {
@@ -63,6 +68,16 @@ class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Conf
                 }
             } catch (_: Exception) {
                 // varsayılan: kapalıysa planlama yapma
+            }
+        }
+        // Akıllı içe aktarma (dedup/merge) bakımı: contentHash kolonu sonradan
+        // eklendiği için eski kayıtların parmak izleri boş kalabilir. Tek seferlik
+        // olarak tüm boş kayıtların hash'i hesaplanır ve yazılır.
+        appScope.launch {
+            try {
+                soruRepository.backfillContentHashes()
+            } catch (_: Exception) {
+                // bakım başarısız olsa bile uygulama çalışmaya devam eder
             }
         }
     }

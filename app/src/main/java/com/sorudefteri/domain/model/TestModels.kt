@@ -9,6 +9,7 @@ package com.sorudefteri.domain.model
  * @property selectedMistakeTypes Seçilen hata tipleri
  * @property onlyUnsolved Sadece çözülmemiş soruları dahil et
  * @property questionCount Testteki hedeflenen soru sayısı (örn: 5, 10, 15, 20, 0: Tümü)
+ * @property timeLimitPerQuestionSeconds Soru başına tanınan süre limiti (0 = Süresiz, 75 = TYT, 120 = AYT)
  */
 data class TestFiltre(
     val examType: String? = null,
@@ -16,8 +17,26 @@ data class TestFiltre(
     val selectedTopics: Set<String> = emptySet(),
     val selectedMistakeTypes: Set<HataTipi> = emptySet(),
     val onlyUnsolved: Boolean = false,
-    val questionCount: Int = 10
+    val questionCount: Int = 10,
+    val timeLimitPerQuestionSeconds: Long = 0L
 )
+
+/**
+ * TYT / AYT Zaman Baskısı Modu (Speed Run)
+ */
+enum class ZamanBaskisiModu(val displayName: String, val secondsPerQuestion: Long) {
+    NORMAL("Normal (Süresiz)", 0L),
+    TYT("TYT (75 sn / soru)", 75L),
+    AYT("AYT (120 sn / soru)", 120L);
+
+    companion object {
+        fun fromSeconds(seconds: Long): ZamanBaskisiModu = when (seconds) {
+            75L -> TYT
+            120L -> AYT
+            else -> NORMAL
+        }
+    }
+}
 
 /**
  * Test oturumunda yer alan tekil soru ve kullanıcının cevap bilgisi
@@ -44,6 +63,7 @@ data class TestQuestion(
  * @property totalTimeSeconds Test boyunca harcanan toplam süre (saniye cinsinden)
  * @property questions Testteki tüm sorular ve cevap durumu
  * @property completedAt Testin tamamlanma zaman damgası (milisaniye)
+ * @property targetTimePerQuestionSeconds Soru başına hedef süre (0 = Sınırsız, 75 = TYT, 120 = AYT)
  */
 data class TestResult(
     val totalQuestions: Int,
@@ -52,7 +72,8 @@ data class TestResult(
     val emptyCount: Int,
     val totalTimeSeconds: Long,
     val questions: List<TestQuestion>,
-    val completedAt: Long = System.currentTimeMillis()
+    val completedAt: Long = System.currentTimeMillis(),
+    val targetTimePerQuestionSeconds: Long = 0L
 ) {
     /**
      * Yüzde cinsinden başarı oranı (örn: 80)

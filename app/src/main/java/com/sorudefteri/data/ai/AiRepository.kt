@@ -29,7 +29,8 @@ class AiRepository @Inject constructor(
     private val geminiProvider: GeminiProvider,
     private val groqProvider: GroqProvider,
     private val nvidiaProvider: NvidiaProvider,
-    private val gorselDepo: GorselDepo
+    private val gorselDepo: GorselDepo,
+    private val smartAiRouter: SmartAiRouter
 ) : AiRepositoryInterface {
 
     companion object {
@@ -310,41 +311,53 @@ class AiRepository @Inject constructor(
         if (imageBytes != null && imageBytes.size > MAX_IMAGE_BYTES) {
             return Result.failure(AiException(AiErrorType.UNKNOWN, "Görsel boyutu çok büyük (${imageBytes.size/1024}KB)."))
         }
-        val providerType = ayarlarDataStore.getAiProvider()
-        val cred = resolveCredentials(providerType).getOrElse { return Result.failure(it) }
 
-        return when (providerType) {
-            AiProviderType.GEMINI -> geminiProvider.cozumIsteDetayli(
-                imageBytes = imageBytes,
-                dersAdi = dersAdi,
-                konu = konu,
-                correctAnswer = correctAnswer,
-                mistakeType = mistakeType,
-                soruMetni = soruMetni,
-                modelName = cred.model,
-                apiKey = cred.apiKey
-            )
-            AiProviderType.GROQ -> groqProvider.cozumIsteDetayli(
-                imageBytes = imageBytes,
-                dersAdi = dersAdi,
-                konu = konu,
-                correctAnswer = correctAnswer,
-                mistakeType = mistakeType,
-                soruMetni = soruMetni,
-                modelName = cred.model,
-                apiKey = cred.apiKey
-            )
-            AiProviderType.NVIDIA -> nvidiaProvider.cozumIsteDetayli(
-                imageBytes = imageBytes,
-                dersAdi = dersAdi,
-                konu = konu,
-                correctAnswer = correctAnswer,
-                mistakeType = mistakeType,
-                soruMetni = soruMetni,
-                modelName = cred.model,
-                apiKey = cred.apiKey
-            )
+        return smartAiRouter.routeSolution(
+            imageBytes = imageBytes,
+            dersAdi = dersAdi,
+            konu = konu,
+            correctAnswer = correctAnswer,
+            mistakeType = mistakeType,
+            soruMetni = soruMetni
+        )
+    }
+
+    /**
+     * Sokratik AI Koç chatbot'una soru bağlamı ile birlikte mesaj iletir.
+     */
+    override suspend fun sendSoruChatMessage(
+        soru: Soru,
+        chatHistory: List<com.sorudefteri.data.local.entity.SoruChatMessageEntity>,
+        userMessage: String,
+        sendImage: Boolean
+    ): Result<String> {
+        if (userMessage.isBlank()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Mesaj metni boş olamaz."))
         }
+
+        val dersAdi = DersTaksonomisi.getDersAdi(soru.examType, soru.subjectId)
+
+        val imageBytes: ByteArray? = if (sendImage && soru.imagePath.isNotBlank()) {
+            try {
+                withContext(Dispatchers.IO) {
+                    gorselDepo.getGorselBytes(soru.imagePath)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+        } else null
+
+        return smartAiRouter.routeChat(
+            imageBytes = imageBytes,
+            dersAdi = dersAdi,
+            konu = soru.topic,
+            correctAnswer = soru.correctAnswer,
+            soruMetni = soru.ocrMetni ?: soru.questionText,
+            chatHistory = chatHistory,
+            userMessage = userMessage.trim()
+        )
     }
 
     /**
@@ -423,4 +436,40 @@ class AiRepository @Inject constructor(
             soruMetni = null
         )
     }
+
+    override suspend fun generateDiagnosticReport(analysisContext: String): Result<String> {
+        val prompt = """
+Sen Türkiye YKS/LGS sınavlarına öğrenci hazırlayan uzman bir yapay zeka rehberlik danışmanı ve derece koçusun.
+Aşağıda öğrencinin çözdüğü testler, biriktirdiği sorular, ders/konu dağılımı ve yaptığı hata türleri yer almaktadır:
+
+$analysisContext
+
+Lütfen öğrencinin bu verilerini pedagojik ve analitik olarak derinlemesine incele ve aşağıdaki 4 bölümden oluşan kapsamlı bir "Kök Neden ve Teşhis Raporu" oluştur:
+
+### 🩺 1. Kök Neden Hata Teşhisi (Root-Cause Analysis)
+- Hataların arkasındaki bilişsel temel: Bilgi/kavram eksikliği mi, dikkat ve odak dağılması mı, yoksa zaman baskısı/stres mi ağır basıyor? Somut oranlar ve nedenleriyle analiz et.
+
+### ⚠️ 2. Kritik Tehlike & Alarm Bölgeleri
+- En çok fire verilen dersler ve konular. Acil müdahale edilmezse net artışını bloke edecek kritik eksikler.
+
+### 🎯 3. 7 Günlük Kişiye Özel Eylem Reçetesi
+- Bu hafta öğrencinin adım adım uygulaması gereken hedefli çalışma programı ve soru çözme stratejisi.
+
+### 💡 4. Taktiksel & Zihinsel Tavsiyeler
+- Turlama taktiği, şık eleme, süre yönetimi ve sınav anı odaklanma tüyoları.
+
+Yanıtını profesyonel, samimi, öğrenciyi motive edici ve KaTeX / Markdown formatında hazırla.
+""".trimIndent()
+
+        return smartAiRouter.routeSolution(
+            imageBytes = null,
+            dersAdi = "Rehberlik ve Teşhis",
+            konu = "Kök Neden Analizi",
+            correctAnswer = null,
+            mistakeType = null,
+            soruMetni = prompt
+        )
+    }
 }
+
+

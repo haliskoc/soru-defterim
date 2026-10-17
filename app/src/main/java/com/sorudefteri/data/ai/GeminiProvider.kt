@@ -37,7 +37,8 @@ open class GeminiProvider @Inject constructor(
     private val json: Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
-        encodeDefaults = true
+        encodeDefaults = false
+        explicitNulls = false
         coerceInputValues = true
     }
 ) : CozumProvider {
@@ -45,7 +46,7 @@ open class GeminiProvider @Inject constructor(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     companion object {
-        const val FALLBACK_MODEL = "gemini-2.5-flash" // use AiProviderType.GEMINI.defaultModel centrally
+        const val FALLBACK_MODEL = "gemini-3.7-flash" // use AiProviderType.GEMINI.defaultModel centrally
         const val MAX_RETRIES = 3
     }
 
@@ -60,7 +61,7 @@ open class GeminiProvider @Inject constructor(
         }
 
         try {
-            val url = "https://generativelanguage.googleapis.com/v1/models"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models"
             val httpRequest = Request.Builder()
                 .url(url)
                 .addHeader("x-goog-api-key", apiKey)
@@ -99,9 +100,11 @@ open class GeminiProvider @Inject constructor(
                 if (supportedModels.isEmpty()) {
                     Result.success(
                         listOf(
-                            "gemini-2.5-flash" to "Gemini 2.5 Flash (gemini-2.5-flash)",
-                            "gemini-2.5-pro" to "Gemini 2.5 Pro (gemini-2.5-pro)",
-                            "gemini-2.0-flash" to "Gemini 2.0 Flash (gemini-2.0-flash)"
+                            "gemini-3.7-flash" to "Gemini 3.7 Flash (gemini-3.7-flash)",
+                            "gemini-2.0-flash" to "Gemini 2.0 Flash (gemini-2.0-flash)",
+                            "gemini-1.5-pro" to "Gemini 1.5 Pro (gemini-1.5-pro)",
+                            "gemini-1.5-flash" to "Gemini 1.5 Flash (gemini-1.5-flash)",
+                            "gemini-2.0-flash-lite" to "Gemini 2.0 Flash-Lite (gemini-2.0-flash-lite)"
                         )
                     )
                 } else {
@@ -111,6 +114,11 @@ open class GeminiProvider @Inject constructor(
         } catch (e: Exception) {
             Result.failure(mapToAiException(e))
         }
+    }
+
+    private fun sanitizeModel(modelName: String): String {
+        val clean = modelName.removePrefix("models/").trim()
+        return clean.ifBlank { FALLBACK_MODEL }
     }
 
     /**
@@ -123,18 +131,17 @@ open class GeminiProvider @Inject constructor(
         correctAnswer: String?,
         modelName: String,
         apiKey: String
-    ): Result<String> {
-        return cozumIsteDetayli(
-            imageBytes = imageBytes,
-            dersAdi = dersAdi,
-            konu = konu,
-            correctAnswer = correctAnswer,
-            mistakeType = null,
-            soruMetni = null,
-            modelName = modelName,
-            apiKey = apiKey
-        )
-    }
+    ): Result<String> = cozumIsteDetayli(
+        imageBytes = imageBytes,
+        dersAdi = dersAdi,
+        konu = konu,
+        correctAnswer = correctAnswer,
+        mistakeType = null,
+        soruMetni = null,
+        modelName = modelName,
+        apiKey = apiKey,
+        customPromptTemplate = null
+    )
 
     /**
      * Görsel ve/veya metin tabanlı (Koşullu OCR destekli) detaylı çözüm üretme.
@@ -154,7 +161,7 @@ open class GeminiProvider @Inject constructor(
             return@withContext Result.failure(
                 AiException(
                     AiErrorType.INVALID_API_KEY,
-                    "Google Gemini API Anahtarı bulunamadı. Lütfen Ayarlar sayfasından API anahtarınızı girin."
+                    "Gemini API anahtarı boş olamaz. Lütfen Ayarlar sayfasından anahtarınızı girin."
                 )
             )
         }
@@ -168,7 +175,25 @@ open class GeminiProvider @Inject constructor(
             customTemplate = customPromptTemplate
         )
 
-        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = sanitizeModel(modelName)
+        executeGenerateContentWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+    }
+
+    /**
+     * Sokratik sohbet veya serbest promptlar için istek çalıştırır.
+     */
+    open suspend fun chatIste(
+        imageBytes: ByteArray?,
+        prompt: String,
+        modelName: String,
+        apiKey: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı boş olamaz.")
+            )
+        }
+        val effectiveModel = sanitizeModel(modelName)
         executeGenerateContentWithRetry(imageBytes, prompt, effectiveModel, apiKey)
     }
 
@@ -188,7 +213,7 @@ open class GeminiProvider @Inject constructor(
         }
 
         val prompt = promptManager.buildOcrTemizlemePrompt(rawOcrText, customPromptTemplate)
-        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = sanitizeModel(modelName)
         // OCR temizleme sadece metin tabanlıdır, görsel göndermeye gerek yoktur
         executeGenerateContentWithRetry(null, prompt, effectiveModel, apiKey)
     }
@@ -212,7 +237,7 @@ open class GeminiProvider @Inject constructor(
         }
 
         val prompt = promptManager.buildBenzerSoruPrompt(dersAdi, konu, soruMetni, customPromptTemplate)
-        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = sanitizeModel(modelName)
 
         val rawResult = executeGenerateContentWithRetry(imageBytes, prompt, effectiveModel, apiKey)
         rawResult.mapCatching { rawText ->
@@ -252,7 +277,7 @@ open class GeminiProvider @Inject constructor(
             sinavTipi = sinavTipi,
             customTemplate = customPromptTemplate
         )
-        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = sanitizeModel(modelName)
 
         val rawResult = executeGenerateContentWithRetry(null, prompt, effectiveModel, apiKey)
         rawResult.mapCatching { rawText ->
@@ -290,7 +315,7 @@ open class GeminiProvider @Inject constructor(
             {"examType": "TYT", "subjectId": "matematik", "topic": "Fonksiyonlar", "correctAnswer": "C"}
         """.trimIndent()
 
-        val effectiveModel = modelName.removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = sanitizeModel(modelName)
         val rawResult = executeGenerateContentWithRetry(imageBytes, prompt, effectiveModel, apiKey)
         if (rawResult.isSuccess) {
             val rawText = rawResult.getOrNull().orEmpty()
@@ -410,8 +435,8 @@ open class GeminiProvider @Inject constructor(
         )
 
         val requestJson = json.encodeToString(GeminiRequest.serializer(), requestBody)
-        val cleanModel = modelName.removePrefix("models/").trim()
-        val url = "https://generativelanguage.googleapis.com/v1/models/$cleanModel:generateContent"
+        val cleanModel = sanitizeModel(modelName)
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/$cleanModel:generateContent"
 
         return Request.Builder()
             .url(url)

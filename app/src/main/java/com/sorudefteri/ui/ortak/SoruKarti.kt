@@ -61,6 +61,7 @@ import coil3.compose.AsyncImage
 import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
+import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.HataTipi
 import com.sorudefteri.domain.model.Soru
@@ -92,6 +93,7 @@ fun SoruKarti(
     isSelected: Boolean = false,
     isSelectionMode: Boolean = false,
     onLongClick: (() -> Unit)? = null,
+    gorselDepo: GorselDepo? = null,
     modifier: Modifier = Modifier
 ) {
     val isTyt = soru.examType.equals("TYT", ignoreCase = true)
@@ -118,18 +120,24 @@ fun SoruKarti(
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
-            // Görsel Thumbnail Alanı
+            // Görsel Thumbnail Alanı (360x360 WebP motoru ile 144Hz akıcı kaydırma)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .aspectRatio(16f / 10f)
                     .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                val imageModel = remember(soru.imagePath) {
-                    if (soru.imagePath.startsWith("http") || soru.imagePath.startsWith("content://")) {
-                        soru.imagePath
+                val displayPath = remember(soru.imagePath, gorselDepo) {
+                    gorselDepo?.getThumbnailPath(soru.imagePath)
+                        ?: GorselDepo.getThumbnailPath(soru.imagePath)
+                        ?: soru.imagePath
+                }
+
+                val imageModel = remember(displayPath) {
+                    if (displayPath.startsWith("http") || displayPath.startsWith("content://")) {
+                        displayPath
                     } else {
-                        File(soru.imagePath)
+                        File(displayPath)
                     }
                 }
 

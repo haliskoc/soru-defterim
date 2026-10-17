@@ -32,8 +32,15 @@ data class Soru(
     val ocrMetni: String? = null,
     val isOcrUsed: Boolean = false,
     val questionText: String? = null,
+    val audioPath: String? = null,
+    val fsrsStability: Double? = null,
+    val fsrsDifficulty: Double? = null,
+    val fsrsReps: Int = 0,
+    val fsrsLapses: Int = 0,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    /** İçerik parmak izi (akıllı içe aktarma/dedup için) — boş = hesaplanamadı. */
+    val contentHash: String = ""
 ) {
     /**
      * Sorunun tekrar zamanının gelip gelmediğini kontrol eder.

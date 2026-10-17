@@ -80,4 +80,19 @@ interface AiRepository {
      * Sağlayıcıdan canlı güncel modelleri çeker.
      */
     suspend fun fetchLiveModels(provider: AiProviderType): Result<List<Pair<String, String>>>
+
+    /**
+     * Sokratik AI Koç chatbot'una öğrenci mesajı iletir ve yanıt alır.
+     */
+    suspend fun sendSoruChatMessage(
+        soru: Soru,
+        chatHistory: List<com.sorudefteri.data.local.entity.SoruChatMessageEntity>,
+        userMessage: String,
+        sendImage: Boolean = true
+    ): Result<String>
+
+    /**
+     * Öğrencinin soru defteri istatistikleri ve hataları üzerinden kök neden (root-cause) teşhis raporu üretir.
+     */
+    suspend fun generateDiagnosticReport(analysisContext: String): Result<String> = Result.success("")
 }
