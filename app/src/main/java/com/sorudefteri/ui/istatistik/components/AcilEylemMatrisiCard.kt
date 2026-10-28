@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -85,6 +86,9 @@ fun AcilEylemMatrisiCard(
     }
 
     var expandedQuadrant by remember { mutableStateOf<ActionQuadrant?>(null) }
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val urgentAccentColor = if (isDark) Color(0xFFEF9A9A) else Color(0xFFD32F2F)
+    val safeAccentColor = if (isDark) Color(0xFF81C784) else Color(0xFF2E7D32)
 
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -155,7 +159,7 @@ fun AcilEylemMatrisiCard(
                                 text = "Sınavı Kazandıracak Acil Konular",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFFD32F2F)
+                                color = urgentAccentColor
                             )
                         }
                         Text(
@@ -195,7 +199,7 @@ fun AcilEylemMatrisiCard(
                                 text = "Tebrikler! Acil Müdahale Konun Yok",
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF2E7D32)
+                                color = safeAccentColor
                             )
                             Text(
                                 text = "Yüksek soru ağırlığına sahip konularda netlerin güvende.",
@@ -315,6 +319,8 @@ private fun UrgentTopicRow(
     item: QuadrantTopicItem,
     onStartTest: () -> Unit
 ) {
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+    val errorTextColor = if (isDark) Color(0xFFEF9A9A) else Color(0xFFD32F2F)
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
@@ -374,7 +380,7 @@ private fun UrgentTopicRow(
                         Text(
                             text = "${item.errorCount} Hata",
                             style = MaterialTheme.typography.bodySmall,
-                            color = Color(0xFFD32F2F),
+                            color = errorTextColor,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -560,7 +566,7 @@ private fun ExpandedQuadrantDetail(
                             colors = ButtonDefaults.buttonColors(containerColor = badgeColor),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                         ) {
-                            Text("Test", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            Text("Test", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
                 }

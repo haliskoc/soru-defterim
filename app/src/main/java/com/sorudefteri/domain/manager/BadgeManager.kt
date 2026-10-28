@@ -52,8 +52,9 @@ class BadgeManager @Inject constructor(
      * Soru ekleme ödülü (+10 XP) ve günlük aktivite kaydı.
      */
     suspend fun onQuestionAdded(): Int {
-        val newXp = ayarlarDataStore.addXp(10)
-        ayarlarDataStore.recordDailyActivity(questionsAddedDelta = 1)
+        // PERF: addXp + recordDailyActivity iki ayrı DataStore edit()'iydi
+        // (dosya yeniden yazımı + fsync ×2). Tek edit'te birleştirildi.
+        val newXp = ayarlarDataStore.addXpAndRecordActivity(xpDelta = 10, questionsAddedDelta = 1)
         evaluateBadges()
         return newXp
     }
@@ -67,32 +68,41 @@ class BadgeManager @Inject constructor(
         hourOfDay: Int = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     ): Int {
         var totalXpGained = 25
-        ayarlarDataStore.addXp(25)
-        ayarlarDataStore.recordDailyActivity(questionsSolvedDelta = result.questions.size)
+        // PERF: Temel +25 XP ve rozet XP'leri tek edit'te toplanır;
+        // günlük aktivite aynı edit'e gömülür (önceden 3-7 ardışık edit).
+        val bonusBadges = mutableListOf<String>()
+        var bonusXp = 0
 
         // HIZ_CANAVARI: Zaman baskısı modunda testi bitir
-        if (isTimePressure && result.totalQuestions > 0) {
-            if (ayarlarDataStore.unlockBadge(Badge.HIZ_CANAVARI.id)) {
-                ayarlarDataStore.addXp(Badge.HIZ_CANAVARI.xpReward)
-                totalXpGained += Badge.HIZ_CANAVARI.xpReward
-            }
+        if (isTimePressure && result.totalQuestions > 0 && !ayarlarDataStore.hasBadgeCached(Badge.HIZ_CANAVARI.id)) {
+            bonusBadges.add(Badge.HIZ_CANAVARI.id)
+            bonusXp += Badge.HIZ_CANAVARI.xpReward
+            totalXpGained += Badge.HIZ_CANAVARI.xpReward
         }
 
         // HATA_GECIRMEZ: Bir testte %100 başarı sağla
-        if (result.totalQuestions > 0 && result.correctCount == result.totalQuestions) {
-            if (ayarlarDataStore.unlockBadge(Badge.HATA_GECIRMEZ.id)) {
-                ayarlarDataStore.addXp(Badge.HATA_GECIRMEZ.xpReward)
-                totalXpGained += Badge.HATA_GECIRMEZ.xpReward
-            }
+        if (result.totalQuestions > 0 && result.correctCount == result.totalQuestions &&
+            !ayarlarDataStore.hasBadgeCached(Badge.HATA_GECIRMEZ.id)
+        ) {
+            bonusBadges.add(Badge.HATA_GECIRMEZ.id)
+            bonusXp += Badge.HATA_GECIRMEZ.xpReward
+            totalXpGained += Badge.HATA_GECIRMEZ.xpReward
         }
 
         // GECE_KUSU: 23:00 - 05:00 arasında soru çöz
-        if ((hourOfDay >= 23 || hourOfDay < 5) && result.totalQuestions > 0) {
-            if (ayarlarDataStore.unlockBadge(Badge.GECE_KUSU.id)) {
-                ayarlarDataStore.addXp(Badge.GECE_KUSU.xpReward)
-                totalXpGained += Badge.GECE_KUSU.xpReward
-            }
+        if ((hourOfDay >= 23 || hourOfDay < 5) && result.totalQuestions > 0 &&
+            !ayarlarDataStore.hasBadgeCached(Badge.GECE_KUSU.id)
+        ) {
+            bonusBadges.add(Badge.GECE_KUSU.id)
+            bonusXp += Badge.GECE_KUSU.xpReward
+            totalXpGained += Badge.GECE_KUSU.xpReward
         }
+
+        ayarlarDataStore.addXpAndRecordActivity(
+            xpDelta = 25 + bonusXp,
+            questionsSolvedDelta = result.questions.size,
+            bonusBadges = bonusBadges.toSet()
+        )
 
         evaluateBadges()
         return totalXpGained
@@ -109,6 +119,10 @@ class BadgeManager @Inject constructor(
 
     /**
      * Rozet şartlarını veritabanı ve ayarlara göre değerlendirip yeni rozetlerin kilidini açar.
+     *
+     * PERF: Kilitli olmayan rozetler için COUNT sorguları yalnızca ilgili
+     * rozet kilitsizken çalışır (önbellekli rozet seti ilk okumada alınır,
+     * her rozet için ayrı getUnlockedBadges() okuması yok).
      */
     suspend fun evaluateBadges(): Set<String> {
         val currentBadges = ayarlarDataStore.getUnlockedBadges().toMutableSet()

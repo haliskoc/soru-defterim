@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -60,6 +61,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -82,11 +84,14 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import coil3.imageLoader
+import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.ReelsItem
 import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.ui.ortak.ShareHelper
-import com.sorudefteri.ui.ortak.math.MathMarkdownText
+import com.sorudefteri.ui.ortak.math.CombinedMathMarkdownText
 import com.sorudefteri.ui.ortak.math.SmartMathContent
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -172,11 +177,43 @@ fun SoruReelsScreen(
 
     val pagerState = rememberPagerState(pageCount = { uiState.items.size })
 
+    // PERF: Sonraki sayfanın görselini önden ısıt (kaydırmanın ortasında decode başlamasın).
+    LaunchedEffect(pagerState.settledPage, uiState.items.size) {
+        val next = pagerState.settledPage + 1
+        if (next < uiState.items.size) {
+            val nextItem = uiState.items.getOrNull(next)
+            if (nextItem is ReelsItem.SoruItem) {
+                val yol = nextItem.soru.imagePath
+                if (yol.isNotBlank()) {
+                    try {
+                        val f = File(yol)
+                        if (f.exists() && f.length() > 0) {
+                            context.imageLoader.enqueue(
+                                ImageRequest.Builder(context)
+                                    .data(f)
+                                    .size(1080, 1350)
+                                    .memoryCacheKey("reels_${nextItem.soru.id}_high")
+                                    .build()
+                            )
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
         VerticalPager(
             state = pagerState,
+            key = { index -> uiState.items.getOrNull(index)?.id ?: index },
+            // PERF: Komşu sayfa bestelensin; kademeli görsel + prefetch ile
+            // kaydırma ortasında decode başlamaz.
+            beyondViewportPageCount = 1,
             modifier = Modifier.fillMaxSize()
         ) { page ->
+            val isSettledPage = remember(pagerState, page) {
+                derivedStateOf { pagerState.settledPage == page }
+            }.value
             when (val item = uiState.items[page]) {
                 is ReelsItem.SoruItem -> {
                     SoruReelsPage(
@@ -199,7 +236,8 @@ fun SoruReelsScreen(
                                 note = item.soru.note,
                                 aiSolution = item.soru.aiExplanation
                             )
-                        }
+                        },
+                        isSettledPage = isSettledPage
                     )
                 }
                 is ReelsItem.FlashcardItem -> {
@@ -268,7 +306,9 @@ private fun SoruReelsPage(
     onOpenComments: () -> Unit,
     onShuffle: () -> Unit,
     onDetailClick: () -> Unit,
-    onShare: () -> Unit
+    onShare: () -> Unit,
+    // PERF: Sayfa settled + durgunsa tam çözünürlük, kaydırırken düşük.
+    isSettledPage: Boolean = true
 ) {
     var showBurstHeart by remember { mutableStateOf(false) }
     val heartScale = remember { Animatable(0f) }
@@ -309,12 +349,27 @@ private fun SoruReelsPage(
         val imageFile = remember(soru.imagePath) { File(soru.imagePath) }
         val gorselVar = remember(imageFile) { imageFile.exists() && imageFile.length() > 0 }
         if (gorselVar) {
+            // PERF: Kaydırırken düşük çözünürlük (540px), sayfa durunca tam
+            // (1080×1350). Bellek anahtarı katmana göre ayrılır; prefetch
+            // (yukarıda) high katmanını önden ısıtır.
+            val targetW = if (isSettledPage) 1080 else 540
+            val targetH = if (isSettledPage) 1350 else 675
+            val cacheKey = remember(soru.id, isSettledPage) {
+                "reels_${soru.id}_${if (isSettledPage) "high" else "low"}"
+            }
             AsyncImage(
-                model = imageFile,
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(imageFile)
+                    .size(targetW, targetH)
+                    .memoryCacheKey(cacheKey)
+                    .crossfade(!isSettledPage)
+                    .build(),
                 contentDescription = "Soru",
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
+                    .widthIn(max = 560.dp)
                     .fillMaxSize()
+                    .align(Alignment.Center)
                     .padding(REELS_ICERIK_PADDING)
             )
         } else {
@@ -334,7 +389,9 @@ private fun SoruReelsPage(
                 Card(
                     shape = RoundedCornerShape(18.dp),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .widthIn(max = 560.dp)
+                        .fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(20.dp)) {
                         Text(
@@ -469,11 +526,14 @@ private fun SoruReelsPage(
                     )
                 )
                 .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Şıklar (A, B, C, D, E)
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .widthIn(max = 560.dp)
+                    .fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -520,7 +580,9 @@ private fun SoruReelsPage(
 
             // Detay & İpucu Alt Bandı — TELEFON: dikey iki satır (taşma yok)
             Column(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .widthIn(max = 560.dp)
+                    .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
@@ -569,6 +631,7 @@ private fun FlashcardReelsPage(
     ) {
         Column(
             modifier = Modifier
+                .widthIn(max = 560.dp)
                 .fillMaxWidth()
                 .padding(horizontal = 24.dp, vertical = 32.dp)
                 // DÜZELTME: Flashcard içeriği ekran yüksekliğini aşarsa
@@ -824,9 +887,9 @@ private fun ReelsSolutionBottomSheet(
                 Spacer(modifier = Modifier.height(14.dp))
             }
 
-            // AI Çözümü
+            // AI Çözümü (PERF: tek WebView'de birleştirilmiş kartlar)
             if (!soru.aiExplanation.isNullOrBlank()) {
-                MathMarkdownText(
+                CombinedMathMarkdownText(
                     text = soru.aiExplanation,
                     modifier = Modifier.fillMaxWidth(),
                     fontSizeSp = 14f
@@ -839,8 +902,7 @@ private fun ReelsSolutionBottomSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(100.dp))
-            Spacer(modifier = Modifier.navigationBarsPadding().height(32.dp))
+            Spacer(modifier = Modifier.navigationBarsPadding().height(24.dp))
         }
     }
 }

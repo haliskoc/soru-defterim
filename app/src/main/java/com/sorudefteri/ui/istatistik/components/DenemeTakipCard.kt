@@ -1,12 +1,14 @@
 package com.sorudefteri.ui.istatistik.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,26 +21,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedCard
-import androidx.compose.material3.SuggestionChip
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -61,7 +63,11 @@ fun DenemeTakipCard(
     allDenemeler: List<DenemeSinaviEntity>,
     onAddDeneme: () -> Unit,
     onDeleteDeneme: (Long) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    denemeSoruCounts: Map<Long, Int> = emptyMap(),
+    onDenemeClick: (Long) -> Unit = {},
+    onScanOptical: () -> Unit = {},
+    onAddQuestionForDeneme: (DenemeSinaviEntity) -> Unit = {}
 ) {
     val json = remember { Json { ignoreUnknownKeys = true } }
 
@@ -76,7 +82,7 @@ fun DenemeTakipCard(
                 .fillMaxWidth()
                 .padding(18.dp)
         ) {
-            // Başlık ve Ekle Butonu
+            // Başlık, Optik Oku ve Deneme Ekle Butonları
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -84,7 +90,8 @@ fun DenemeTakipCard(
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
                     Surface(
                         shape = CircleShape,
@@ -103,7 +110,7 @@ fun DenemeTakipCard(
 
                     Column {
                         Text(
-                            text = "Deneme Sınavı Net Gelişimi",
+                            text = "Deneme Sınavı Karneleri",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -115,15 +122,27 @@ fun DenemeTakipCard(
                     }
                 }
 
-                Button(
-                    onClick = onAddDeneme,
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Deneme Ekle", fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilledTonalButton(
+                        onClick = onScanOptical,
+                        shape = RoundedCornerShape(10.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Optik Oku", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+
+                    Button(
+                        onClick = onAddDeneme,
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Deneme Ekle", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
             }
 
@@ -149,7 +168,7 @@ fun DenemeTakipCard(
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Girdiğin TYT, AYT veya LGS denemelerini kaydederek net artış eğrini ve ders bazlı ilerlemeni buradan takip edebilirsin.",
+                            text = "Girdiğin TYT, AYT veya LGS denemelerini kaydederek ya da optik form okutarak net artış eğrini ve denemeye özel yanlış sorularını buradan yönetebilirsin.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -164,15 +183,15 @@ fun DenemeTakipCard(
                         denemeler = sortedDenemeler.takeLast(10),
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(160.dp)
-                            .padding(vertical = 8.dp)
+                            .height(155.dp)
+                            .padding(vertical = 6.dp)
                     )
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
                 // 2) Son Eklenen Denemeler Listesi
                 Text(
-                    text = "Son Deneme Sonuçları",
+                    text = "Kayıtlı Deneme Sınavları (Detay için karta dokunun)",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -183,7 +202,7 @@ fun DenemeTakipCard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    allDenemeler.take(5).forEach { deneme ->
+                    allDenemeler.take(8).forEach { deneme ->
                         val dersList = remember(deneme.dersNetleriJson) {
                             try {
                                 json.decodeFromString<List<DenemeDersNeti>>(deneme.dersNetleriJson)
@@ -197,10 +216,21 @@ fun DenemeTakipCard(
                             sdf.format(Date(deneme.tarih))
                         }
 
+                        val soruCount = denemeSoruCounts[deneme.id] ?: 0
+
                         Card(
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
-                            modifier = Modifier.fillMaxWidth()
+                            shape = RoundedCornerShape(14.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                            ),
+                            border = BorderStroke(
+                                1.dp,
+                                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+                            ),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { onDenemeClick(deneme.id) }
                         ) {
                             Column(modifier = Modifier.padding(14.dp)) {
                                 Row(
@@ -211,7 +241,7 @@ fun DenemeTakipCard(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             Surface(
                                                 color = MaterialTheme.colorScheme.primaryContainer,
@@ -225,14 +255,37 @@ fun DenemeTakipCard(
                                                     color = MaterialTheme.colorScheme.onPrimaryContainer
                                                 )
                                             }
+                                            if (deneme.yayinEvi.isNotBlank()) {
+                                                Surface(
+                                                    color = MaterialTheme.colorScheme.secondaryContainer,
+                                                    shape = RoundedCornerShape(6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = deneme.yayinEvi,
+                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                                    )
+                                                }
+                                            }
                                             Text(
                                                 text = deneme.baslik,
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }
+                                        Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = dateStr,
+                                            text = buildString {
+                                                append(dateStr)
+                                                if (deneme.toplamDogru > 0 || deneme.toplamYanlis > 0) {
+                                                    append(" • ${deneme.toplamDogru}D ${deneme.toplamYanlis}Y ${deneme.toplamBos}B")
+                                                }
+                                                if (soruCount > 0) {
+                                                    append(" • 📌 $soruCount Yanlış Soru Eklendi")
+                                                }
+                                            },
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -280,7 +333,10 @@ fun DenemeTakipCard(
                                             Surface(
                                                 color = MaterialTheme.colorScheme.surface,
                                                 shape = RoundedCornerShape(6.dp),
-                                                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                                                border = BorderStroke(
+                                                    1.dp,
+                                                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                                                )
                                             ) {
                                                 Text(
                                                     text = "${ders.dersAdi}: ${ders.net}",
@@ -301,6 +357,35 @@ fun DenemeTakipCard(
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f)
                                     )
                                 }
+
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    OutlinedButton(
+                                        onClick = { onAddQuestionForDeneme(deneme) },
+                                        shape = RoundedCornerShape(8.dp),
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Text("+ Yanlış Soru Ekle", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+
+                                    TextButton(
+                                        onClick = { onDenemeClick(deneme.id) },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "Detay & Analiz →",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -319,7 +404,6 @@ private fun NetProgressionChart(
     modifier: Modifier = Modifier
 ) {
     val primaryColor = MaterialTheme.colorScheme.tertiary
-    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
 
     val nets = remember(denemeler) { denemeler.map { it.toplamNet.toFloat() } }
     val minNet = remember(nets) { (nets.minOrNull() ?: 0f).coerceAtLeast(0f) }
@@ -328,10 +412,10 @@ private fun NetProgressionChart(
     Canvas(modifier = modifier) {
         val width = size.width
         val height = size.height
-        val paddingLeft = 36f
-        val paddingRight = 24f
-        val paddingTop = 20f
-        val paddingBottom = 24f
+        val paddingLeft = 36.dp.toPx()
+        val paddingRight = 24.dp.toPx()
+        val paddingTop = 20.dp.toPx()
+        val paddingBottom = 24.dp.toPx()
 
         val plotWidth = width - paddingLeft - paddingRight
         val plotHeight = height - paddingTop - paddingBottom

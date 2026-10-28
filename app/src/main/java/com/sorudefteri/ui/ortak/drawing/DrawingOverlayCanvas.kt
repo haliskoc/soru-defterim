@@ -78,6 +78,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.pointerInteropFilter
@@ -95,8 +96,11 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.util.UUID
@@ -134,6 +138,9 @@ data class DrawingStroke(
     val averagePressure: Float = 0.5f,
     val averageTilt: Float = 0f
 ) {
+    @Transient
+    val cachedPath: Path by lazy { toPath() }
+
     fun toPath(): Path {
         val path = Path()
         if (points.isEmpty()) return path
@@ -167,6 +174,8 @@ data class QuestionDrawingData(
  * context.filesDir/scratchpads/soru_{soruId}.json dosyasına asenkron yazar.
  */
 object ScratchpadStorageHelper {
+    private val mutex = Mutex()
+
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
@@ -178,21 +187,28 @@ object ScratchpadStorageHelper {
         soruId: Long,
         strokes: List<DrawingStroke>
     ): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val dir = File(context.filesDir, "scratchpads")
-            if (!dir.exists()) dir.mkdirs()
-            val file = File(dir, "soru_${soruId}.json")
-            val data = QuestionDrawingData(
-                soruId = soruId,
-                strokes = strokes,
-                lastModified = System.currentTimeMillis()
-            )
-            val text = json.encodeToString(QuestionDrawingData.serializer(), data)
-            file.writeText(text)
-            true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
+        mutex.withLock {
+            try {
+                val dir = File(context.filesDir, "scratchpads")
+                if (!dir.exists()) dir.mkdirs()
+                val file = File(dir, "soru_${soruId}.json")
+                val tmpFile = File(dir, "soru_${soruId}.json.tmp")
+                val data = QuestionDrawingData(
+                    soruId = soruId,
+                    strokes = strokes,
+                    lastModified = System.currentTimeMillis()
+                )
+                val text = json.encodeToString(QuestionDrawingData.serializer(), data)
+                tmpFile.writeText(text)
+                if (!tmpFile.renameTo(file)) {
+                    tmpFile.copyTo(file, overwrite = true)
+                    tmpFile.delete()
+                }
+                true
+            } catch (e: Exception) {
+                e.printStackTrace()
+                false
+            }
         }
     }
 
@@ -200,15 +216,17 @@ object ScratchpadStorageHelper {
         context: Context,
         soruId: Long
     ): List<DrawingStroke> = withContext(Dispatchers.IO) {
-        try {
-            val file = File(context.filesDir, "scratchpads/soru_${soruId}.json")
-            if (!file.exists()) return@withContext emptyList()
-            val text = file.readText()
-            val data = json.decodeFromString(QuestionDrawingData.serializer(), text)
-            data.strokes
-        } catch (e: Exception) {
-            e.printStackTrace()
-            emptyList()
+        mutex.withLock {
+            try {
+                val file = File(context.filesDir, "scratchpads/soru_${soruId}.json")
+                if (!file.exists()) return@withLock emptyList()
+                val text = file.readText()
+                val data = json.decodeFromString(QuestionDrawingData.serializer(), text)
+                data.strokes
+            } catch (e: Exception) {
+                e.printStackTrace()
+                emptyList()
+            }
         }
     }
 
@@ -216,11 +234,13 @@ object ScratchpadStorageHelper {
         context: Context,
         soruId: Long
     ): Boolean = withContext(Dispatchers.IO) {
-        try {
-            val file = File(context.filesDir, "scratchpads/soru_${soruId}.json")
-            if (file.exists()) file.delete() else true
-        } catch (e: Exception) {
-            false
+        mutex.withLock {
+            try {
+                val file = File(context.filesDir, "scratchpads/soru_${soruId}.json")
+                if (file.exists()) file.delete() else true
+            } catch (e: Exception) {
+                false
+            }
         }
     }
 }
@@ -372,6 +392,8 @@ fun DrawingOverlayCanvas(
     }
 
     // Ekran üzerinde çizim ve kontroller
+    val isDarkCanvas = MaterialTheme.colorScheme.surface.luminance() < 0.5f
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -388,17 +410,30 @@ fun DrawingOverlayCanvas(
                                 val pointerCount = motionEvent.pointerCount
                                 val actionMasked = motionEvent.actionMasked
 
-                                // İki parmakla yakınlaştırma veya kaydırma yapılıyorsa sisteme bırak
-                                if (pointerCount >= 2 && effectivePalmRejection) {
+                                val stylusPointerIndex = (0 until pointerCount).firstOrNull { idx ->
+                                    stylusController.isStylusToolType(motionEvent.getToolType(idx))
+                                }
+
+                                // İki parmakla yakınlaştırma veya kaydırma yapılıyorsa (ve ekranda stylus yoksa) sisteme bırak
+                                if (pointerCount >= 2 && effectivePalmRejection && stylusPointerIndex == null) {
                                     return@pointerInteropFilter false
                                 }
 
-                                val pointerIndex = motionEvent.actionIndex.coerceIn(0, pointerCount - 1)
+                                val pointerIndex = stylusPointerIndex ?: motionEvent.actionIndex.coerceIn(0, pointerCount - 1)
                                 val toolType = motionEvent.getToolType(pointerIndex)
                                 val isStylus = stylusController.isStylusToolType(toolType)
 
                                 // Palm Rejection: Kalem değilse ve avuç içi engelleme açıksa yut
                                 if (effectivePalmRejection && !isStylus) {
+                                    return@pointerInteropFilter true
+                                }
+
+                                // Çoklu dokunuşta aksiyon kalem olmayan parmağa aitse (avuç içi değmesi/kalkması) yut ve çizimi bozma
+                                val actionIndex = motionEvent.actionIndex.coerceIn(0, pointerCount - 1)
+                                if ((actionMasked == MotionEvent.ACTION_POINTER_DOWN || actionMasked == MotionEvent.ACTION_POINTER_UP) &&
+                                    effectivePalmRejection &&
+                                    !stylusController.isStylusToolType(motionEvent.getToolType(actionIndex))
+                                ) {
                                     return@pointerInteropFilter true
                                 }
 
@@ -505,8 +540,13 @@ fun DrawingOverlayCanvas(
             ) {
                 // 1. Kaydedilmiş Çizgileri Çiz
                 strokes.forEach { stroke ->
-                    val path = stroke.toPath()
-                    val strokeColor = Color(stroke.colorArgb)
+                    val path = stroke.cachedPath
+                    val rawColor = Color(stroke.colorArgb)
+                    val strokeColor = if (isDarkCanvas && (stroke.colorArgb and 0x00FFFFFFL) == 0x00212121L) {
+                        Color(0xFFF5F5F5).copy(alpha = rawColor.alpha)
+                    } else {
+                        rawColor
+                    }
                     when (stroke.toolType) {
                         DrawingToolType.ERASER -> {
                             drawPath(
@@ -547,6 +587,11 @@ fun DrawingOverlayCanvas(
 
                 // 2. Anlık Çizilmekte Olan Vuruşu Çiz
                 activeStrokePath?.let { path ->
+                    val effectiveActiveColor = if (isDarkCanvas && (activeStrokeColor.toArgb().toLong() and 0x00FFFFFFL) == 0x00212121L) {
+                        Color(0xFFF5F5F5).copy(alpha = activeStrokeColor.alpha)
+                    } else {
+                        activeStrokeColor
+                    }
                     when (currentTool) {
                         DrawingToolType.ERASER -> {
                             drawPath(
@@ -563,7 +608,7 @@ fun DrawingOverlayCanvas(
                         DrawingToolType.HIGHLIGHTER -> {
                             drawPath(
                                 path = path,
-                                color = activeStrokeColor.copy(alpha = 0.35f),
+                                color = effectiveActiveColor.copy(alpha = 0.35f),
                                 style = Stroke(
                                     width = activeStrokeWidth * 2.8f,
                                     cap = StrokeCap.Square,
@@ -574,7 +619,7 @@ fun DrawingOverlayCanvas(
                         DrawingToolType.PEN -> {
                             drawPath(
                                 path = path,
-                                color = activeStrokeColor,
+                                color = effectiveActiveColor,
                                 style = Stroke(
                                     width = activeStrokeWidth,
                                     cap = StrokeCap.Round,
@@ -639,7 +684,7 @@ fun DrawingOverlayCanvas(
                                                 text = "${strokes.size}",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onPrimary,
-                                                fontSize = 10.sp
+                                                fontSize = 11.sp
                                             )
                                         }
                                     }

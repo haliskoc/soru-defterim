@@ -1,5 +1,10 @@
 package com.sorudefteri.ui.ortak
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.RectF
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,6 +27,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AutoFixHigh
 import androidx.compose.material.icons.filled.Brush
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -38,24 +44,38 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
+import kotlin.math.min
 
 enum class DrawingTool {
     PEN, HIGHLIGHTER, ERASER
@@ -77,12 +97,18 @@ data class DrawPath(
 fun DrawingCanvasDialog(
     imagePath: String,
     title: String = "Soru Üzerinde Çizim & Karalama",
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onSave: ((String) -> Unit)? = null
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val surfaceColor = MaterialTheme.colorScheme.surface
     val paths = remember { mutableStateListOf<DrawPath>() }
     var currentTool by remember { mutableStateOf(DrawingTool.PEN) }
     var selectedColor by remember { mutableStateOf(Color(0xFFE53935)) }
     var strokeWidth by remember { mutableFloatStateOf(6f) }
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    var isSaving by remember { mutableStateOf(false) }
 
     val colors = listOf(
         Color(0xFFE53935),
@@ -97,6 +123,88 @@ fun DrawingCanvasDialog(
 
     // Path tabanlı çizim: O(n) liste copy yerine Path.lineTo ile O(1)
     var currentPath by remember { mutableStateOf<Path?>(null) }
+
+    fun saveDrawing() {
+        if (isSaving) return
+        if (onSave == null) {
+            onDismiss()
+            return
+        }
+        isSaving = true
+        val snapshotPaths = paths.toList()
+        val width = canvasSize.width.takeIf { it > 0 } ?: 1080
+        val height = canvasSize.height.takeIf { it > 0 } ?: 1440
+        val bgColorInt = surfaceColor.toArgb()
+
+        coroutineScope.launch {
+            val savedPath = withContext(Dispatchers.IO) {
+                try {
+                    val resultBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    val baseCanvas = android.graphics.Canvas(resultBitmap)
+                    baseCanvas.drawColor(bgColorInt)
+
+                    if (imagePath.isNotBlank()) {
+                        val imgFile = File(imagePath)
+                        if (imgFile.exists()) {
+                            val baseBmp = BitmapFactory.decodeFile(imgFile.absolutePath)
+                            if (baseBmp != null) {
+                                val scale = min(
+                                    width.toFloat() / baseBmp.width.toFloat(),
+                                    height.toFloat() / baseBmp.height.toFloat()
+                                )
+                                val dstW = baseBmp.width * scale
+                                val dstH = baseBmp.height * scale
+                                val left = (width - dstW) / 2f
+                                val top = (height - dstH) / 2f
+                                val dstRect = RectF(left, top, left + dstW, top + dstH)
+                                baseCanvas.drawBitmap(baseBmp, null, dstRect, null)
+                                baseBmp.recycle()
+                            }
+                        }
+                    }
+
+                    val strokeBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    val strokeCanvas = android.graphics.Canvas(strokeBitmap)
+                    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                        style = android.graphics.Paint.Style.STROKE
+                        strokeCap = android.graphics.Paint.Cap.ROUND
+                        strokeJoin = android.graphics.Paint.Join.ROUND
+                    }
+
+                    snapshotPaths.forEach { dp ->
+                        paint.strokeWidth = dp.strokeWidth
+                        if (dp.isEraser) {
+                            paint.color = android.graphics.Color.TRANSPARENT
+                            paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+                        } else {
+                            paint.color = dp.color.toArgb()
+                            paint.xfermode = null
+                        }
+                        strokeCanvas.drawPath(dp.path.asAndroidPath(), paint)
+                    }
+
+                    baseCanvas.drawBitmap(strokeBitmap, 0f, 0f, null)
+                    strokeBitmap.recycle()
+
+                    val outDir = File(context.filesDir, "drawings").apply { mkdirs() }
+                    val outFile = File(outDir, "drawing_${System.currentTimeMillis()}.png")
+                    FileOutputStream(outFile).use { fos ->
+                        resultBitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
+                    }
+                    resultBitmap.recycle()
+                    outFile.absolutePath
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    null
+                }
+            }
+            isSaving = false
+            if (savedPath != null) {
+                onSave.invoke(savedPath)
+            }
+            onDismiss()
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -119,16 +227,20 @@ fun DrawingCanvasDialog(
                     .padding(bottom = 90.dp, top = 60.dp),
                 contentAlignment = Alignment.Center
             ) {
-                AsyncImage(
-                    model = imageModel,
-                    contentDescription = title,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.fillMaxSize()
-                )
+                if (imagePath.isNotBlank()) {
+                    AsyncImage(
+                        model = imageModel,
+                        contentDescription = title,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
 
                 Canvas(
                     modifier = Modifier
                         .fillMaxSize()
+                        .onSizeChanged { canvasSize = it }
+                        .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
                         .pointerInput(currentTool, selectedColor, strokeWidth) {
                             detectDragGestures(
                                 onDragStart = { offset ->
@@ -178,7 +290,8 @@ fun DrawingCanvasDialog(
                         if (drawPath.isEraser) {
                             drawPath(
                                 path = drawPath.path,
-                                color = Color(0xFF121212),
+                                color = Color.Transparent,
+                                blendMode = BlendMode.Clear,
                                 style = Stroke(
                                     width = drawPath.strokeWidth,
                                     cap = StrokeCap.Round,
@@ -201,25 +314,38 @@ fun DrawingCanvasDialog(
                     // Anlık çizilen çizgiyi göster
                     currentPath?.let { activePath ->
                         if (!activePath.isEmpty) {
-                            val previewColor = when (currentTool) {
-                                DrawingTool.HIGHLIGHTER -> selectedColor.copy(alpha = 0.35f)
-                                DrawingTool.ERASER -> Color.White.copy(alpha = 0.5f)
-                                DrawingTool.PEN -> selectedColor
-                            }
                             val previewWidth = when (currentTool) {
                                 DrawingTool.HIGHLIGHTER -> strokeWidth * 3f
                                 DrawingTool.ERASER -> strokeWidth * 4f
                                 DrawingTool.PEN -> strokeWidth
                             }
-                            drawPath(
-                                path = activePath,
-                                color = previewColor,
-                                style = Stroke(
-                                    width = previewWidth,
-                                    cap = StrokeCap.Round,
-                                    join = StrokeJoin.Round
+                            if (currentTool == DrawingTool.ERASER) {
+                                drawPath(
+                                    path = activePath,
+                                    color = Color.Transparent,
+                                    blendMode = BlendMode.Clear,
+                                    style = Stroke(
+                                        width = previewWidth,
+                                        cap = StrokeCap.Round,
+                                        join = StrokeJoin.Round
+                                    )
                                 )
-                            )
+                            } else {
+                                val previewColor = when (currentTool) {
+                                    DrawingTool.HIGHLIGHTER -> selectedColor.copy(alpha = 0.35f)
+                                    DrawingTool.ERASER -> surfaceColor
+                                    DrawingTool.PEN -> selectedColor
+                                }
+                                drawPath(
+                                    path = activePath,
+                                    color = previewColor,
+                                    style = Stroke(
+                                        width = previewWidth,
+                                        cap = StrokeCap.Round,
+                                        join = StrokeJoin.Round
+                                    )
+                                )
+                            }
                         }
                     }
                 }
@@ -230,11 +356,14 @@ fun DrawingCanvasDialog(
                     .fillMaxWidth()
                     .align(Alignment.TopCenter)
                     .background(Color.Black.copy(alpha = 0.85f))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Icon(
                         imageVector = Icons.Default.Edit,
                         contentDescription = null,
@@ -246,11 +375,13 @@ fun DrawingCanvasDialog(
                         text = title,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
 
-                Row {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     IconButton(
                         onClick = { if (paths.isNotEmpty()) paths.removeAt(paths.size - 1) },
                         enabled = paths.isNotEmpty()
@@ -271,6 +402,19 @@ fun DrawingCanvasDialog(
                             contentDescription = "Temizle",
                             tint = if (paths.isNotEmpty()) Color.White else Color.Gray
                         )
+                    }
+
+                    if (onSave != null) {
+                        IconButton(
+                            onClick = { saveDrawing() },
+                            enabled = !isSaving && paths.isNotEmpty()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Kaydet",
+                                tint = if (paths.isNotEmpty()) Color(0xFF66BB6A) else Color.Gray
+                            )
+                        }
                     }
 
                     IconButton(onClick = onDismiss) {

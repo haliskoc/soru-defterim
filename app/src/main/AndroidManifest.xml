@@ -7,6 +7,22 @@
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Yakın-cihaz eşleşme (Nearby Connections): BLE keşif + Wi-Fi aktarım -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:maxSdkVersion="30" android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:maxSdkVersion="30" android:name="android.permission.BLUETOOTH_ADMIN" />
+    <uses-permission android:maxSdkVersion="32" android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:maxSdkVersion="32" android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -148,6 +164,12 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- ML Kit OCR modeli kurulumda insin: ilk açılışta çevrimdışı da çalışsın,
+             inmeden yapılan isteklerin sessiz boş dönmesi ("hiç çalışmıyor") bitsin. -->
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="ocr" />
 
         <!-- Disable default WorkManager Initializer so Hilt Configuration.Provider is used -->
         <provider

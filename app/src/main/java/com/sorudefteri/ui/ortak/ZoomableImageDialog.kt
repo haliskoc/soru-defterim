@@ -121,6 +121,8 @@ fun ZoomableImageDialog(
                 AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(imageModel)
+                        // PERF: FullScreenImageViewer ile aynı katman (5× zoom bulanıklığı).
+                        .size(2160)
                         .crossfade(true)
                         .build(),
                     contentDescription = title ?: "Büyütülmüş Görsel",

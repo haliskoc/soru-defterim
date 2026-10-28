@@ -10,6 +10,7 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -91,8 +92,17 @@ object SoruWidgetUpdater {
     }
 
     fun updateAllNowAsync(context: Context) {
-        CoroutineScope(Dispatchers.IO).launch {
+        SoruWidgetScope.scope.launch {
             updateAllNow(context.applicationContext)
         }
     }
+}
+
+/**
+ * PERF: Widget güncellemeleri için paylaşılan uygulama-ömürlü scope.
+ * Önceden her çağrıda `CoroutineScope(Dispatchers.IO).launch` ile çıplak
+ * scope açılıyordu (yapısal eşzamanlılık ihlali + iptal edilemez işler).
+ */
+private object SoruWidgetScope {
+    val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 }

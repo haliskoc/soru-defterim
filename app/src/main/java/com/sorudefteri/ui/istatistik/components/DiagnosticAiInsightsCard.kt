@@ -49,7 +49,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.sorudefteri.ui.ortak.math.MathMarkdownText
+import com.sorudefteri.ui.ortak.math.CombinedMathMarkdownText
 
 @Composable
 fun DiagnosticAiInsightsCard(
@@ -237,7 +237,7 @@ fun DiagnosticAiInsightsCard(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    MathMarkdownText(
+                    CombinedMathMarkdownText(
                         text = report,
                         fontSizeSp = 14.5f
                     )

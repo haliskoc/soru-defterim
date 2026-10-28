@@ -10,9 +10,6 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import com.sorudefteri.domain.reels.ReelsAkisAlgoritmasi
@@ -31,56 +28,40 @@ data class ReelsUiState(
 
 @HiltViewModel
 class ReelsViewModel @Inject constructor(
-    private val soruRepository: SoruRepository
+    private val soruRepository: SoruRepository,
+    private val defaultDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReelsUiState())
     val uiState: StateFlow<ReelsUiState> = _uiState.asStateFlow()
 
     private var allRawQuestions: List<Soru> = emptyList()
-    private var isFeedInitialized = false
 
     init {
-        observeQuestions()
+        loadFeedOnce()
     }
 
-    private fun observeQuestions() {
-        soruRepository.getAllSorular()
-            .onEach { questions ->
+    /**
+     * PERF: Tam-tablo Flow dinlenmez; tablo bir kez okunur, feed bir kez
+     * kurulur. Favori/cevap yazışları yalnızca lokal state'i günceller —
+     * her DB yazışında tüm feed'in baştan map'lenmesi biter.
+     * Yeni sorular için [refreshFeed] (örn. pull-to-refresh) çağrılır.
+     */
+    private fun loadFeedOnce() {
+        viewModelScope.launch(defaultDispatcher) {
+            try {
+                val questions = soruRepository.getAllSorularOnce()
                 allRawQuestions = questions
-                if (!isFeedInitialized) {
-                    if (questions.isNotEmpty()) {
-                        buildFeed(questions)
-                        isFeedInitialized = true
-                    } else {
-                        // Eğer henüz soru yoksa hap bilgi kartlarını yükle
-                        buildFeed(emptyList())
-                        isFeedInitialized = true
-                    }
-                } else {
-                    // Feed zaten kurulu: Sıralamayı ASLA bozma! Sadece soruların güncel verilerini güncelle.
-                    val questionsMap = questions.associateBy { it.id }
-                    val updatedFavs = questions.filter { it.isFavorite }.map { it.id }.toSet()
-                    val updatedItems = _uiState.value.items.map { item ->
-                        if (item is ReelsItem.SoruItem) {
-                            val freshSoru = questionsMap[item.soru.id] ?: item.soru
-                            ReelsItem.SoruItem(freshSoru)
-                        } else {
-                            item
-                        }
-                    }
-                    _uiState.update {
-                        it.copy(
-                            items = updatedItems,
-                            favoritedQuestionIds = updatedFavs
-                        )
-                    }
-                }
-            }
-            .catch {
+                buildFeedInternal(questions)
+            } catch (_: Exception) {
                 _uiState.update { it.copy(isLoading = false) }
             }
-            .launchIn(viewModelScope)
+        }
+    }
+
+    /** Yeni eklenen soruları akışa almak için açık yenileme. */
+    fun refreshFeed() {
+        loadFeedOnce()
     }
 
     /**
@@ -96,8 +77,16 @@ class ReelsViewModel @Inject constructor(
      */
     fun buildFeed(questions: List<Soru> = allRawQuestions, tohum: Long = ReelsAkisAlgoritmasi.gunTohumu(System.currentTimeMillis())) {
         _uiState.update { it.copy(isLoading = true) }
-        isFeedInitialized = true
 
+        viewModelScope.launch(defaultDispatcher) {
+            buildFeedInternal(questions, tohum)
+        }
+    }
+
+    private suspend fun buildFeedInternal(
+        questions: List<Soru>,
+        tohum: Long = ReelsAkisAlgoritmasi.gunTohumu(System.currentTimeMillis())
+    ) {
         val prioritizedQuestions = ReelsAkisAlgoritmasi.akisKuras(
             sorular = questions,
             anZaman = System.currentTimeMillis(),

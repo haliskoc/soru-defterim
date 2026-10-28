@@ -3,7 +3,6 @@ package com.sorudefteri.ui.detay.components
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,12 +44,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sorudefteri.domain.model.BenzerSoru
 import com.sorudefteri.domain.model.SimilarQuestionResult
-import com.sorudefteri.ui.ortak.math.MathMarkdownText
+import com.sorudefteri.ui.ortak.math.CombinedMathMarkdownText
+import com.sorudefteri.ui.ortak.math.formatMathText
 
 @Composable
 fun BenzerSorularTab(
@@ -226,9 +227,9 @@ fun BenzerSorularTab(
                     Spacer(modifier = Modifier.height(14.dp))
 
                     // Soru Metni
-                    MathMarkdownText(
+                    CombinedMathMarkdownText(
                         text = similarQuestion.questionText,
-                        textColor = if (isSystemInDarkTheme()) Color.White else MaterialTheme.colorScheme.onSurface,
+                        textColor = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.fillMaxWidth()
                     )
 
@@ -237,30 +238,30 @@ fun BenzerSorularTab(
                     // Şıklar
                     val optionKeys = listOf("A", "B", "C", "D", "E")
                     val optionsMap = similarQuestion.options
+                    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         optionKeys.forEach { key ->
-                            val text = optionsMap[key] ?: return@forEach
+                            val optionText = optionsMap[key] ?: return@forEach
                             val isSelected = userSelectedOption == key
                             val isCorrect = key == similarQuestion.correctAnswer
-                            val isDark = isSystemInDarkTheme()
 
                             val containerColor = when {
                                 isAnswerRevealed && isCorrect -> if (isDark) Color(0xFF1B5E20).copy(alpha = 0.45f) else Color(0xFFE8F5E9)
                                 isAnswerRevealed && isSelected && !isCorrect -> if (isDark) Color(0xFFB71C1C).copy(alpha = 0.45f) else Color(0xFFFFEBEE)
-                                isSelected -> if (isDark) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                else -> if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                             }
 
                             val borderColor = when {
                                 isAnswerRevealed && isCorrect -> Color(0xFF4CAF50)
                                 isAnswerRevealed && isSelected && !isCorrect -> Color(0xFFE53935)
                                 isSelected -> MaterialTheme.colorScheme.primary
-                                else -> if (isDark) MaterialTheme.colorScheme.outline.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant
+                                else -> MaterialTheme.colorScheme.outlineVariant
                             }
 
                             val borderWidth = if (isSelected || (isAnswerRevealed && (isCorrect || isSelected))) 2.dp else 1.dp
-                            val optionTextColor = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+                            val optionTextColor = MaterialTheme.colorScheme.onSurface
 
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -274,21 +275,14 @@ fun BenzerSorularTab(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(12.dp),
-                                    // DÜZELTME: CenterVertically -> Top.
-                                    // Sağdaki seçenek metni KaTeX WebView'i olabilir ve
-                                    // yüksekliğini ~0.4 sn sonra (yüklendikten sonra)
-                                    // bildiriyor. CenterVertical'de satır yüksekliği
-                                    // o an değişince soldaki "A" rozeti ve doğru/yanlış
-                                    // simgesi AŞAĞI KAYIYORDU. Top hizalama, metin
-                                    // büyüdüğünde diğer öğelerin konumunu sabit tutar.
-                                    verticalAlignment = Alignment.Top
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Surface(
                                         shape = CircleShape,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else if (isDark) MaterialTheme.colorScheme.surfaceVariant else Color(0xFFE0E2EC),
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                                         border = BorderStroke(
                                             width = if (isSelected) 1.5.dp else 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else if (isDark) MaterialTheme.colorScheme.outline.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                                         ),
                                         modifier = Modifier.size(32.dp)
                                     ) {
@@ -300,26 +294,20 @@ fun BenzerSorularTab(
                                             Text(
                                                 text = key,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else if (isDark) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
 
                                     Spacer(modifier = Modifier.width(12.dp))
 
-                                    MathMarkdownText(
-                                        text = text,
-                                        textColor = optionTextColor,
+                                    Text(
+                                        text = formatMathText(optionText),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = optionTextColor,
                                         modifier = Modifier.weight(1f)
                                     )
 
-                                    // DÜZELTME: Simge yalnızca cevap açıklandığında
-                                    // ekleniyordu. Bu, soldaki weight(1f) metin
-                                    // bloğunun genişliğini 24 dp daraltıyor, KaTeX
-                                    // yeniden satır kaydırıyor ve blok kalıcı olarak
-                                    // büyüyordu (tek yönlü, geri dönüşsüz). Yer
-                                    // HER ZAMAN ayrılmış olarak duruyoruz; simge
-                                    // sadece görünür/ görünmez.
                                     Box(
                                         modifier = Modifier.size(24.dp),
                                         contentAlignment = Alignment.Center
@@ -365,9 +353,9 @@ fun BenzerSorularTab(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
-                                MathMarkdownText(
+                                CombinedMathMarkdownText(
                                     text = similarQuestion.solution,
-                                    textColor = if (isSystemInDarkTheme()) Color.White else MaterialTheme.colorScheme.onSurface
+                                    textColor = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }

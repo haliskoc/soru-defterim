@@ -67,21 +67,26 @@ class TestSonucViewModel @Inject constructor(
         if (!hasProcessedReviewStages && result != null) {
             hasProcessedReviewStages = true
             viewModelScope.launch {
-                result.questions.forEach { tq ->
-                    when (tq.isCorrect) {
-                        true -> soruRepository.advanceReviewStage(tq.soru.id)
-                        false -> soruRepository.regressReviewStage(tq.soru.id)
-                        null -> {
-                            // Boş bırakılan veya cevap anahtarı olmayan soruların aşaması korunur
-                        }
-                    }
+                // PERF: 20+ tekil review güncellemesi yerine iki batch sorgu.
+                val correctIds = result.questions.mapNotNull { tq ->
+                    if (tq.isCorrect == true) tq.soru.id else null
+                }
+                val wrongIds = result.questions.mapNotNull { tq ->
+                    if (tq.isCorrect == false) tq.soru.id else null
+                }
+                if (correctIds.isNotEmpty()) {
+                    soruRepository.advanceReviewStageBatch(correctIds)
+                }
+                if (wrongIds.isNotEmpty()) {
+                    soruRepository.regressReviewStageBatch(wrongIds)
                 }
             }
         }
     }
 
     /**
-     * Testte doğru yapılan soruları arşivde 'Çözüldü' olarak işaretler
+     * Testte doğru yapılan soruları arşivde 'Çözüldü' olarak işaretler.
+     * PERF: Tekil cozumDurumuDegistir döngüsü yerine batch sorgu.
      */
     fun markCorrectAsSolved() {
         val result = _uiState.value.testResult ?: return
@@ -90,9 +95,7 @@ class TestSonucViewModel @Inject constructor(
 
         viewModelScope.launch {
             _uiState.update { it.copy(isMarkingSolved = true) }
-            correctQuestions.forEach { tq ->
-                soruRepository.cozumDurumuDegistir(tq.soru.id, true)
-            }
+            soruRepository.updateSolvedStatusBatch(correctQuestions.map { it.soru.id }, true)
             _uiState.update {
                 it.copy(
                     isMarkingSolved = false,

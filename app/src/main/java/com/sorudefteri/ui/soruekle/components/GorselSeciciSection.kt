@@ -5,6 +5,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,6 +40,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,12 +51,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.sorudefteri.ui.ortak.DrawingCanvasDialog
 import com.sorudefteri.ui.ortak.ZoomableImageDialog
 import java.io.File
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun GorselSeciciSection(
     soruImagePath: String?,
@@ -154,7 +160,11 @@ fun GorselSeciciSection(
                             .background(Color.Black.copy(alpha = 0.05f))
                     ) {
                         AsyncImage(
-                            model = File(soruImagePath),
+                            // PERF: 220dp önizlemeye orijinal yerine ekran katmanı.
+                            model = coil3.request.ImageRequest.Builder(LocalContext.current)
+                                .data(File(soruImagePath))
+                                .size(1080)
+                                .build(),
                             contentDescription = "Soru Fotoğrafı",
                             contentScale = ContentScale.Fit,
                             modifier = Modifier
@@ -190,24 +200,27 @@ fun GorselSeciciSection(
 
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    Row(
+                    FlowRow(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
                             onClick = { onOpenCropper(false) },
                             shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Default.Crop, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Kırp / Döndür")
+                            Text("Kırp / Döndür", maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
 
                         FilledTonalButton(
                             onClick = onPerformOcr,
                             enabled = !isOcrExtracting,
                             shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             if (isOcrExtracting) {
@@ -215,7 +228,7 @@ fun GorselSeciciSection(
                             } else {
                                 Icon(Icons.Default.DocumentScanner, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("OCR Tara")
+                                Text("OCR Tara", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
 
@@ -223,6 +236,7 @@ fun GorselSeciciSection(
                             onClick = onAutoTagWithAi,
                             enabled = !isAutoTagging,
                             shape = RoundedCornerShape(10.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             if (isAutoTagging) {
@@ -230,7 +244,7 @@ fun GorselSeciciSection(
                             } else {
                                 Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("AI Etiket")
+                                Text("AI Etiket", maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -299,7 +313,11 @@ fun GorselSeciciSection(
                         modifier = Modifier.weight(1f)
                     ) {
                         AsyncImage(
-                            model = File(solutionImagePath),
+                            // PERF: 64dp thumb'a orijinal yerine küçük katman.
+                            model = coil3.request.ImageRequest.Builder(LocalContext.current)
+                                .data(File(solutionImagePath))
+                                .size(192)
+                                .build(),
                             contentDescription = "Çözüm Görseli",
                             contentScale = ContentScale.Crop,
                             modifier = Modifier
@@ -338,7 +356,11 @@ fun GorselSeciciSection(
     if (isDrawingDialogOpen) {
         DrawingCanvasDialog(
             imagePath = solutionImagePath ?: soruImagePath ?: "",
-            onDismiss = { isDrawingDialogOpen = false }
+            onDismiss = { isDrawingDialogOpen = false },
+            onSave = { savedPath ->
+                onSolutionDrawingSaved(savedPath)
+                isDrawingDialogOpen = false
+            }
         )
     }
 }

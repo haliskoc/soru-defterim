@@ -58,6 +58,7 @@
 }
 -keep class com.sorudefteri.data.ai.dto.** { *; }
 -keep class com.sorudefteri.data.backup.** { *; }
+-keep class com.sorudefteri.data.sync.** { *; }
 -keep class com.sorudefteri.domain.model.** { *; }
 -keep class kotlinx.serialization.** { *; }
 -dontwarn kotlinx.serialization.**

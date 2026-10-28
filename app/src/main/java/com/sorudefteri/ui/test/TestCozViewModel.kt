@@ -19,13 +19,16 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * Test Çözme Ekranının UI Durumu
+ * Test Çözme Ekranının UI Durumu.
+ *
+ * PERF: 1 Hz zamanlayıcı artık tüm state'i her saniye yeniden yazmıyor.
+ * - `elapsedSeconds`/`questionTimes`/kalan-süre yalnızca [timerTick] akışında
+ *   yayınlanır (hafif snapshot);
+ * - soru listesi, cevaplar, dialog bayrakları ayrı state'te sabit kalır.
  */
 data class TestCozUiState(
     val questions: List<TestQuestion> = emptyList(),
     val currentIndex: Int = 0,
-    val elapsedSeconds: Long = 0L,
-    val questionTimes: Map<Int, Long> = emptyMap(),
     val userAnswers: Map<Int, String?> = emptyMap(),
     val showFinishDialog: Boolean = false,
     val showExitDialog: Boolean = false,
@@ -33,8 +36,6 @@ data class TestCozUiState(
     val zoomImageTitle: String? = null,
     val isFinished: Boolean = false,
     val targetTimePerQuestion: Long = 0L,
-    val currentQuestionRemainingSeconds: Long = 0L,
-    val isTimeWarning: Boolean = false,
     val isTimePressure: Boolean = false
 ) {
     val currentQuestion: TestQuestion?
@@ -56,6 +57,18 @@ data class TestCozUiState(
     val isLastQuestion: Boolean get() = questions.isNotEmpty() && currentIndex == questions.size - 1
 }
 
+/**
+ * PERF: 1 Hz'de yayınlanan hafif zaman snapshot'ı. Ekran bu akışı
+ * `collectAsStateWithLifecycle` ile dinler; soru listesi/cevaplar/dialog
+ * bayrakları içeren [TestCozUiState] her saniye yeniden yazılmaz.
+ */
+data class TestTimerTick(
+    val elapsedSeconds: Long = 0L,
+    val questionTimes: Map<Int, Long> = emptyMap(),
+    val currentQuestionRemainingSeconds: Long = 0L,
+    val isTimeWarning: Boolean = false
+)
+
 @HiltViewModel
 class TestCozViewModel @Inject constructor(
     private val testSessionManager: TestSessionManager,
@@ -65,6 +78,10 @@ class TestCozViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(TestCozUiState())
     val uiState: StateFlow<TestCozUiState> = _uiState.asStateFlow()
+
+    /** PERF: 1 Hz hafif zaman akışı (tüm uiState kopyası YOK). */
+    private val _timerTick = MutableStateFlow(TestTimerTick())
+    val timerTick: StateFlow<TestTimerTick> = _timerTick.asStateFlow()
 
     private var timerJob: Job? = null
 
@@ -85,28 +102,34 @@ class TestCozViewModel @Inject constructor(
                 questions = questions,
                 userAnswers = initialAnswers,
                 targetTimePerQuestion = limit,
-                currentQuestionRemainingSeconds = limit,
                 isTimePressure = limit > 0L,
                 currentIndex = 0,
-                elapsedSeconds = 0L,
-                questionTimes = emptyMap(),
                 isFinished = false,
                 showFinishDialog = false,
                 showExitDialog = false
             )
         }
+        _timerTick.value = TestTimerTick(
+            currentQuestionRemainingSeconds = limit
+        )
         startTimer()
     }
 
-    private fun startTimer() {
+    /**
+     * PERF: 1 Hz döngü yalnızca [_timerTick]'i günceller. `targetTimePerQuestion
+     * == 0` iken uyarı hesabı atlanır. Ekran arka plandayken [pauseTimer]
+     * çağrılmalı (CPU uyanması + recomposition dalgası bitmiştir).
+     */
+    fun startTimer() {
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
             while (isActive) {
                 delay(1000L)
                 val currentState = _uiState.value
-                val newTotal = currentState.elapsedSeconds + 1
-                val currentQTime = (currentState.questionTimes[currentState.currentIndex] ?: 0L) + 1
-                val newQTimes = currentState.questionTimes.toMutableMap().apply {
+                val tick = _timerTick.value
+                val newTotal = tick.elapsedSeconds + 1
+                val currentQTime = (tick.questionTimes[currentState.currentIndex] ?: 0L) + 1
+                val newQTimes = tick.questionTimes.toMutableMap().apply {
                     put(currentState.currentIndex, currentQTime)
                 }
 
@@ -114,14 +137,12 @@ class TestCozViewModel @Inject constructor(
                     val remaining = (currentState.targetTimePerQuestion - currentQTime).coerceAtLeast(0L)
                     val isWarning = remaining in 1L..15L
 
-                    _uiState.update {
-                        it.copy(
-                            elapsedSeconds = newTotal,
-                            questionTimes = newQTimes,
-                            currentQuestionRemainingSeconds = remaining,
-                            isTimeWarning = isWarning
-                        )
-                    }
+                    _timerTick.value = tick.copy(
+                        elapsedSeconds = newTotal,
+                        questionTimes = newQTimes,
+                        currentQuestionRemainingSeconds = remaining,
+                        isTimeWarning = isWarning
+                    )
 
                     if (remaining == 0L) {
                         // Süre doldu (timeout) -> sonraki soruya geç veya testi bitir
@@ -132,14 +153,25 @@ class TestCozViewModel @Inject constructor(
                         }
                     }
                 } else {
-                    _uiState.update {
-                        it.copy(
-                            elapsedSeconds = newTotal,
-                            questionTimes = newQTimes
-                        )
-                    }
+                    _timerTick.value = tick.copy(
+                        elapsedSeconds = newTotal,
+                        questionTimes = newQTimes
+                    )
                 }
             }
+        }
+    }
+
+    /** Ekran arka plana alınınca zamanlayıcıyı durdurur (pil + CPU). */
+    fun pauseTimer() {
+        timerJob?.cancel()
+        timerJob = null
+    }
+
+    /** Ekran öne dönünce zamanlayıcıyı kaldığı yerden sürdürür. */
+    fun resumeTimer() {
+        if (timerJob?.isActive != true && !_uiState.value.isFinished) {
+            startTimer()
         }
     }
 
@@ -172,14 +204,16 @@ class TestCozViewModel @Inject constructor(
     fun goToQuestion(index: Int) {
         val state = _uiState.value
         if (index in state.questions.indices) {
-            val spent = state.questionTimes[index] ?: 0L
+            val spent = _timerTick.value.questionTimes[index] ?: 0L
             val rem = if (state.targetTimePerQuestion > 0) {
                 (state.targetTimePerQuestion - spent).coerceAtLeast(0L)
             } else 0L
             val isWarning = state.targetTimePerQuestion > 0 && rem in 1L..15L
             _uiState.update {
+                it.copy(currentIndex = index)
+            }
+            _timerTick.update {
                 it.copy(
-                    currentIndex = index,
                     currentQuestionRemainingSeconds = rem,
                     isTimeWarning = isWarning
                 )
@@ -230,11 +264,14 @@ class TestCozViewModel @Inject constructor(
     }
 
     fun finishTest(onFinished: () -> Unit) {
+        if (_uiState.value.isFinished) return
+        _uiState.update { it.copy(isFinished = true, showFinishDialog = false) }
         timerJob?.cancel()
         val state = _uiState.value
+        val tick = _timerTick.value
         val result = testSessionManager.finishSession(
-            totalTimeSeconds = state.elapsedSeconds,
-            questionTimes = state.questionTimes
+            totalTimeSeconds = tick.elapsedSeconds,
+            questionTimes = tick.questionTimes
         )
         val filter = testSessionManager.currentFilter.value
 
@@ -262,7 +299,6 @@ class TestCozViewModel @Inject constructor(
             } catch (e: Exception) {
                 e.printStackTrace()
             }
-            _uiState.update { it.copy(isFinished = true, showFinishDialog = false) }
             onFinished()
         }
     }

@@ -1,18 +1,23 @@
 package com.sorudefteri.domain.model
 
+import androidx.compose.runtime.Immutable
+
 /**
  * Soru Reels akışında gösterilen ögeler.
  * Hem öğrencinin sorularını hem de aralara serpiştirilen hap bilgi & formül kartlarını destekler.
  */
+@Immutable
 sealed class ReelsItem {
     abstract val id: String
 
+    @Immutable
     data class SoruItem(
         val soru: Soru
     ) : ReelsItem() {
         override val id: String get() = "soru_${soru.id}"
     }
 
+    @Immutable
     data class FlashcardItem(
         override val id: String,
         val ders: String,

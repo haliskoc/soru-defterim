@@ -1,10 +1,7 @@
 package com.sorudefteri.ui.ortak
 
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -15,6 +12,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -31,6 +29,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -57,26 +58,24 @@ fun DailyDueRescueCard(
     onStartClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Glowing / pulsing animation for the rescue icon badge
-    val infiniteTransition = rememberInfiniteTransition(label = "RescueIconGlow")
-    val glowAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 0.65f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glowAlpha"
+    // PERF: Sonsuz glow animasyonu KALDIRILDI. Kart statik; dueCount
+    // değiştiğinde tek seferlik kısa parlama oynar.
+    var glowTick by remember { mutableStateOf(0) }
+    androidx.compose.runtime.LaunchedEffect(dueCount) {
+        glowTick++
+    }
+    val glowAlpha by animateFloatAsState(
+        targetValue = 0.45f,
+        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        label = "glowAlphaOnce"
     )
-    val glowScale by infiniteTransition.animateFloat(
-        initialValue = 1.0f,
-        targetValue = 1.15f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "glowScale"
+    val glowScale by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = tween(durationMillis = 400, easing = FastOutSlowInEasing),
+        label = "glowScaleOnce"
     )
+    @Suppress("UNUSED_EXPRESSION")
+    glowTick
 
     // Gradient border brush emphasizing Spaced Repetition urgency & elegance
     val borderGradient = Brush.linearGradient(
@@ -179,8 +178,7 @@ fun DailyDueRescueCard(
                 Text(
                     text = "Unutulmaya yakın $dueCount soru seni bekliyor! Spaced repetition ile hafızanı tazele.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    lineHeight = 20.sp
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 // Action button: [Hemen Başla ⚡]
@@ -196,7 +194,7 @@ fun DailyDueRescueCard(
                             contentColor = MaterialTheme.colorScheme.onPrimary
                         ),
                         elevation = ButtonDefaults.buttonElevation(defaultElevation = 3.dp),
-                        modifier = Modifier.height(44.dp)
+                        modifier = Modifier.heightIn(min = 48.dp)
                     ) {
                         Text(
                             text = "Hemen Başla ⚡",

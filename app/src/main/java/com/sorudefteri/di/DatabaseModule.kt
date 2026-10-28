@@ -3,6 +3,7 @@ package com.sorudefteri.di
 import android.content.Context
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.sorudefteri.data.local.SoruDatabase
 import com.sorudefteri.data.local.dao.BenzerSoruDao
 import com.sorudefteri.data.local.dao.DenemeSinaviDao
@@ -38,8 +39,16 @@ object DatabaseModule {
                 SoruDatabase.MIGRATION_7_8,
                 SoruDatabase.MIGRATION_8_9,
                 SoruDatabase.MIGRATION_9_10,
-                SoruDatabase.MIGRATION_10_11
+                SoruDatabase.MIGRATION_10_11,
+                SoruDatabase.MIGRATION_11_12,
+                SoruDatabase.MIGRATION_12_13
             )
+            .addCallback(object : RoomDatabase.Callback() {
+                override fun onOpen(db: SupportSQLiteDatabase) {
+                    super.onOpen(db)
+                    db.execSQL("PRAGMA foreign_keys = ON;")
+                }
+            })
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
             .build()
     }

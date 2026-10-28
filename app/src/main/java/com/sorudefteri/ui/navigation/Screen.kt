@@ -28,12 +28,21 @@ object KutuphaneNav
 
 /**
  * Type-safe navigation destination for Soru Ekleme (Add Question) screen.
- * Supports optional initial image URI and isSolution flag.
+ * Supports optional initial image URI, isSolution flag, and trial exam (deneme) linkage.
  */
 @Serializable
 data class SoruEkleNav(
     val initialImageUri: String? = null,
-    val isSolution: Boolean = false
+    val isSolution: Boolean = false,
+    val denemeId: Long? = null,
+    val denemeBaslik: String? = null,
+    val denemeYayin: String? = null,
+    val denemeSoruNo: Int? = null,
+    val initialExamType: String? = null,
+    val initialSubjectId: String? = null,
+    val initialTopic: String? = null,
+    val initialCorrectAnswer: String? = null,
+    val initialStudentAnswer: String? = null
 )
 
 /**
@@ -83,6 +92,15 @@ object ReelsNav
  * Convenience helper namespace for Screen destinations (e.g. Screen.TestCoz.route)
  */
 object Screen {
+    object Onboarding {
+        val route: Any = OnboardingNav
+    }
+    object Kutuphane {
+        val route: Any = KutuphaneNav
+    }
+    object Kamera {
+        val route: Any = KameraNav::class.qualifiedName ?: "KameraNav"
+    }
     object TestCoz {
         val route: Any = TestCozNav
     }
@@ -115,6 +133,33 @@ object IstatistikNav
  */
 @Serializable
 object AyarlarNav
+
+/**
+ * Type-safe navigation destination for Yakın-Cihaz Eşleşme screen.
+ */
+@Serializable
+object CihazEslemeNav
+
+/**
+ * Type-safe navigation destination for Deneme Detay (Trial Exam Detail & Wrong Questions) screen.
+ */
+@Serializable
+data class DenemeDetayNav(val denemeId: Long)
+
+/**
+ * Type-safe navigation destination for Kamera Tabanlı Optik Okuyucu (OMR Scanner) screen.
+ */
+@Serializable
+data class OmrScannerNav(
+    val denemeId: Long? = null,
+    val testId: String? = null
+)
+
+/**
+ * Type-safe navigation destination for Optik Okuma Sonuç & Karne (OMR Result) screen.
+ */
+@Serializable
+data class OmrSonucNav(val denemeId: Long)
 
 /**
  * Bottom navigation bar item definition with type-safe route, localized title, and icons.

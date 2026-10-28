@@ -68,10 +68,16 @@ fun YedeklemeGuvenlikTab(
     onImportBackup: (Uri, String?) -> Unit,
     onAutoBackupToggle: (Boolean) -> Unit = {},
     onWifiOnlyToggle: (Boolean) -> Unit = {},
+    // PERF: Hatırlatıcı bildirim anahtarları (koşulsuz 2 alarm yerine).
+    isDailyReminderEnabled: Boolean = true,
+    isStreakReminderEnabled: Boolean = true,
+    onDailyReminderToggle: (Boolean) -> Unit = {},
+    onStreakReminderToggle: (Boolean) -> Unit = {},
     onSyncDrive: () -> Unit = {},
     // Dosya yöneticisinden .sdefteri ile açılışta gelen bekleyen dosya
     pendingImportUri: String? = null,
     onPendingImportHandled: () -> Unit = {},
+    onNavigateToEslesme: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var exportPassword by rememberSaveable { mutableStateOf("") }
@@ -260,6 +266,46 @@ fun YedeklemeGuvenlikTab(
                         onCheckedChange = onWifiOnlyToggle
                     )
                 }
+
+                // Günlük Tekrar Hatırlatıcısı (19:00)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Günlük Tekrar Hatırlatıcısı (19:00)", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Kapalıysa her gün süreç uyandırılmaz (pil).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isDailyReminderEnabled,
+                        onCheckedChange = onDailyReminderToggle
+                    )
+                }
+
+                // Seri Koruma Hatırlatıcısı (21:00)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Seri Koruma Hatırlatıcısı (21:00)", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Kapalıysa her gün süreç uyandırılmaz (pil).",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = isStreakReminderEnabled,
+                        onCheckedChange = onStreakReminderToggle
+                    )
+                }
             }
         }
 
@@ -340,6 +386,42 @@ fun YedeklemeGuvenlikTab(
                         style = MaterialTheme.typography.bodySmall,
                         color = if (isDriveSyncError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
                     )
+                }
+            }
+        }
+
+        // 4. Yakındaki Cihazla Eşle (telefon ↔ tablet, internetsiz)
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Sync, contentDescription = "Cihaz Eşleşme", tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Yakındaki Cihazla Eşle",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Text(
+                    "Telefon ve tabletinizi yan yana getirin; olmayan sorular karşılıklı aktarılır. İnternet gerekmez, Bluetooth + Wi-Fi ile şifreli aktarım.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Button(
+                    onClick = onNavigateToEslesme,
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Eşleşmeyi Başlat")
                 }
             }
         }

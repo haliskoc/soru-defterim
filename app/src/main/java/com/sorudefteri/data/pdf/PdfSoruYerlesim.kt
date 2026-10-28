@@ -8,24 +8,23 @@ import kotlin.math.min
 /**
  * A4 soru yerleşim motoru (ölçüm-sonra-yerleştir / measure-then-pack).
  *
- * Eski akışın sorunları:
- * - Yükseklik tahmini (satır sayısı tahmini + 200 pt / 160 pt sabit üst sınır)
- *   ile çizim sarması farklı hesaplar yürütüyordu: plan küçük, çizim büyük
- *   çıktığında soru metni altındaki çözüm alanına taşıyordu (kayma/çakışma).
- * - Sıralama + tam rastgele karıştırma biçimsiz boşluklar ve "bazı dar / bazı
- *   ferah" algısı yaratıyordu.
- *
- * Yeni mimari:
- * - [MetinAkisi] satır sarmayı hem ölçümde hem çizimde TEK algoritmayla yapar →
- *   pl plan yüksekliği == çizilen yükseklik (kayma kaynağı biter).
+ * Yeni nesil mimari:
+ * - [MetinAkisi] paragraf sonlarını (`\n`), boş satırları, şiir dizelerini ve
+ *   Roma rakamlı öncülleri (`I.`, `II.`, `III.`) koruyarak iki kademeli kelime
+ *   sarması yapar; ölçüm ve çizim TEK algoritmayı paylaşır → plan yüksekliği == çizilen yükseklik.
+ * - [SoruOlcum.elastikOlcekle] bir soru sütuna çok az farkla (%18'e kadar taşma)
+ *   sığmadığında ve görsel içerdiğinde görseli `%80 - %100` aralığında elastik
+ *   ölçekleyerek sütunun yarısının boş kalmasını önler.
  * - [yerlesimPlanla] her soruyu ölçülmüş yüksekliğiyle sırayla sütunlara koyar
- *   (Next-Fit paginasyonu; soru sırası hiç bozulmaz): mevcut sütun → 2. sütun →
- *   yeni sayfa → tam genişlik sayfa → metin için sayfadan sayfaya satır bölme.
- * - Tam genişlik sayfası yalnızca TEK soru taşır (kitap tipi geniş soru sayfası).
- * - Sütun kalan boşluğu bloklar arasına üst sınırlı ek boşlukla dağıtılır
- *   (dengeli görünüm); hiçbir zaman kapasiteyi aşmaz.
+ *   (Elastik Next-Fit + Akıllı Boşluk Doldurma; soru numaraları asla karışmaz).
  */
 object PdfSoruYerlesim {
+
+    /** Elastik görsel sıkıştırma alt sınırı (%80). */
+    const val ELASTIK_MIN_OLCEK = 0.80f
+
+    /** Elastik sığdırmanın devreye gireceği maksimum taşma oranı (%18). */
+    const val ELASTIK_MAKS_TASMA_ORANI = 0.18f
 
     // =========================================================
     // 1) TEK KAYNAKLI METİN AKIŞI (ölçüm + çizim aynı kod)
@@ -33,24 +32,41 @@ object PdfSoruYerlesim {
     object MetinAkisi {
 
         /**
-         * Greedy kelime sarma: kelimeyi bir satırda tutamıyorsak satırı kapat.
-         * Tek başına genişlikten uzun kelime kendi satırında kalır (eski çizimle
-         * aynı davranış). Bozuk/boş metin boş liste döner.
+         * Paragraf koruyucu iki kademeli kelime sarma:
+         * 1) Metni `\n` satır sonlarına göre paragraflara ayırır (boş satırlar `""` olarak korunur).
+         * 2) Her paragrafın içindeki kelimeleri [genislik] sınırına göre açgözlü (greedy) sarar.
+         * Tamamen boş/boşluktan ibaret metin için boş liste döner.
          */
         fun satirlaraAyir(text: String, paint: Paint, genislik: Float): List<String> {
+            if (text.isBlank()) return emptyList()
+
+            val norm = text.replace("\r\n", "\n").replace('\r', '\n').trimEnd()
+            if (norm.isBlank()) return emptyList()
+
             val satirlar = mutableListOf<String>()
-            var mevcut: String? = null
-            for (kelime in text.split(Regex("\\s+"))) {
-                if (kelime.isBlank()) continue
-                val deneme = if (mevcut == null) kelime else "$mevcut $kelime"
-                if (mevcut != null && paint.measureText(deneme) > genislik) {
+            val paragraflar = norm.split("\n")
+
+            for (paragraf in paragraflar) {
+                if (paragraf.isBlank()) {
+                    // Paragraf arası boş satırı koru
+                    satirlar += ""
+                    continue
+                }
+                var mevcut: String? = null
+                for (kelime in paragraf.trim().split(Regex("\\s+"))) {
+                    if (kelime.isBlank()) continue
+                    val deneme = if (mevcut == null) kelime else "$mevcut $kelime"
+                    if (mevcut != null && paint.measureText(deneme) > genislik) {
+                        satirlar += mevcut!!
+                        mevcut = kelime
+                    } else {
+                        mevcut = deneme
+                    }
+                }
+                if (mevcut != null) {
                     satirlar += mevcut!!
-                    mevcut = kelime
-                } else {
-                    mevcut = deneme
                 }
             }
-            if (mevcut != null) satirlar += mevcut!!
             return satirlar
         }
 
@@ -72,7 +88,9 @@ object PdfSoruYerlesim {
         ): Float {
             var y = startY
             for (satir in satirlar) {
-                canvas.drawText(satir, x, y, paint)
+                if (satir.isNotEmpty()) {
+                    canvas.drawText(satir, x, y, paint)
+                }
                 y += satirYuksekligi
             }
             return y
@@ -102,22 +120,32 @@ object PdfSoruYerlesim {
         val genislik: Float,
         /** Başlık barı + kaynak + not bölgesi (içerikten önce). */
         val ustYukseklik: Float,
-        /** İçerik akış yüksekliği (metin: ilk + satırlar + son boşluk; bitmap: çerçeve + son boşluk). */
+        /** İçerik akış yüksekliği (metin + görsel + iç boşluklar). */
         val icerikYukseklik: Float,
         /** Çözüm bölümü (doğru cevap rozeti + AI kutusu + kalem alanı). */
         val cozumYukseklik: Float,
         /** Bloklar arası taban boşluk. */
         val altBosluk: Float,
-        /** Soru metni sarmalı satırları (bitmap/placeholder'da boş). */
+        /** Soru metni sarmalı satırları. */
         val metinSatirlari: List<String>,
         val satirYuksekligi: Float,
         val metinIlkBosluk: Float,
         val metinSonraBosluk: Float,
         /** Bitmap içerik varsa yükseklik/genişlik oranı; yoksa 0f. */
-        val bitmapRatio: Float
+        val bitmapRatio: Float,
+        /** İçerik içindeki saf görsel yüksekliği (0f ise metin dışı içerikten türetilir). */
+        val gorselYukseklik: Float = 0f,
+        /** Elastik sığdırma uygulandıysa görsel ölçek çarpanı (0.80f..1.0f). */
+        val gorselOlcek: Float = 1.0f
     ) {
         val toplamYukseklik: Float
             get() = ustYukseklik + icerikYukseklik + cozumYukseklik + altBosluk
+
+        /** Metin bloğunun (ilk boşluk + satırlar + son boşluk) toplam yüksekliği. */
+        val metinBlokYuksekligi: Float
+            get() = if (metinSatirlari.isNotEmpty()) {
+                metinIlkBosluk + (metinSatirlari.size * satirYuksekligi) + metinSonraBosluk
+            } else 0f
 
         /** Metin içeriği var mı (bölme olanak sağlar)? */
         val metinBolunebilir: Boolean
@@ -128,6 +156,39 @@ object PdfSoruYerlesim {
             get() = if (metinBolunebilir) {
                 (toplamYukseklik - metinSatirlari.size * satirYuksekligi).coerceAtLeast(0f)
             } else toplamYukseklik
+
+        /**
+         * Görselli bir soru mevcut sütun/sayfa kalan alanına çok az farkla (%18'e kadar)
+         * sığmıyorsa görsel yüksekliğini `[minScale, 1.0]` aralığında elastik sıkıştırır.
+         */
+        fun elastikOlcekle(
+            hedefKapasite: Float,
+            minScale: Float = ELASTIK_MIN_OLCEK,
+            maxOverflowRatio: Float = ELASTIK_MAKS_TASMA_ORANI
+        ): SoruOlcum? {
+            if (bitmapRatio <= 0f || hedefKapasite <= 0f) return null
+            if (toplamYukseklik <= hedefKapasite + 0.01f) return this
+
+            val fazla = toplamYukseklik - hedefKapasite
+            if (fazla > hedefKapasite * maxOverflowRatio) return null
+
+            val hamGorsel = if (gorselYukseklik > 0f) {
+                gorselYukseklik
+            } else {
+                (icerikYukseklik - metinBlokYuksekligi - 6f).coerceAtLeast(0f)
+            }
+            if (hamGorsel <= 20f) return null
+
+            val yeniGorsel = hamGorsel - fazla
+            val scale = yeniGorsel / hamGorsel
+            if (scale < minScale) return null
+
+            return copy(
+                icerikYukseklik = (icerikYukseklik - fazla).coerceAtLeast(1f),
+                gorselYukseklik = yeniGorsel,
+                gorselOlcek = scale
+            )
+        }
     }
 
     /** Planlayıcı girdisi: sorunun sütun genişliği ve tam genişlik ölçümleri. */
@@ -167,7 +228,9 @@ object PdfSoruYerlesim {
             /** Sütun dizini; tam genişlik sayfada −1. */
             val sutun: Int,
             /** Metin bölünmüş ilk parça ise 0 until k aralığı, yoksa null. */
-            val satirAraligi: IntRange? = null
+            val satirAraligi: IntRange? = null,
+            /** Elastik ölçekleme uygulandıysa güncellenmiş ölçüm kaydı. */
+            val olcumOverride: SoruOlcum? = null
         ) : Oge()
 
         /** Metin satırları sonraki sayfaya meşru devam parçası (kitap tipi akış). */
@@ -195,19 +258,18 @@ object PdfSoruYerlesim {
     const val MAKS_EK_BOSLUK = 14f
 
     // =========================================================
-    // 4) YERLEŞİM PLANLAYICISI
+    // 4) YERLEŞİM PLANLAYICISI (Elastik Bin-Packing)
     // =========================================================
 
     /**
      * Sıralamayı BOZMADAN her soruyu ölçüsüne göre yerleştirir:
-     * 1) mevcut sütuna sığar → koy;
-     * 2) sığmaz ve henüz 1. sütundayken 2. sütuna sığar → ikinci sütuna geçir;
-     * 3) sığmaz → yeni sayfa aç (sütun düzeni);
-     * 4) sütun kapasitesinde hiçbir düzenle sığmıyorsa → tam genişlik sayfa;
-     * 5) tam genişlikçesine de taşacaksa → metin satırlarını sayfa sayfa böl.
-     *
-     * İki sütundan sonra 1. sütuna geri dönmek yasaktır (soru sırası görsel
-     * olarak korunur; numaralandırma ve cevap anahtarı ile mutabık kalır).
+     * 1) Mevcut sütuna tam veya elastik (%80-%100 görsel ölçekle) sığar → koy;
+     * 2) Sığmaz ve 1. sütundayken 2. sütuna tam veya elastik sığar → 2. sütuna geçir;
+     * 3) 2. sütundayken sığmayan kısa bir soru, 1. sütunda hala ciddi boşluk (%35+) varsa
+     *    ve oraya sığıyorsa 1. sütunun alt boşluğunu değerlendir (Best-Fit boşluk kurtarma);
+     * 4) Sığmaz → yeni sayfa aç (tam veya elastik sütun düzeni);
+     * 5) Sütun kapasitesinde hiçbir düzenle sığmıyorsa → tam genişlik sayfa (tam veya elastik);
+     * 6) Tam genişliğe de taşacaksa → metin satırlarını sayfa sayfa böl.
      */
     fun yerlesimPlanla(girdiler: List<Girdi>, geometri: Geometri): List<SayfaPlani> {
         val hamSayfalar = mutableListOf<List<Oge>>()
@@ -225,7 +287,11 @@ object PdfSoruYerlesim {
         }
 
         fun tamKutuYerles(acim: SoruOlcum, sutun: Int) {
-            val x = if (sutun < 0) geometri.sutunXlar.first() else geometri.sutunXlar[sutun.coerceIn(0, geometri.sutunXlar.size - 1)]
+            val x = if (sutun < 0) {
+                geometri.sutunXlar.first()
+            } else {
+                geometri.sutunXlar[sutun.coerceIn(0, geometri.sutunXlar.size - 1)]
+            }
             val genislik = if (sutun < 0) geometri.tamGenislik else geometri.sutunGenislik
             val tabanIdx = if (sutun < 0) 0 else sutun
             sayfaOgeleri += Oge.TamSoru(
@@ -234,7 +300,8 @@ object PdfSoruYerlesim {
                 y = geometri.icerikUstY + (if (sutun < 0) 0f else sutunKullanim[tabanIdx]),
                 genislik = genislik,
                 yukseklik = acim.toplamYukseklik,
-                sutun = sutun
+                sutun = sutun,
+                olcumOverride = acim
             )
             if (sutun >= 0) sutunKullanim[tabanIdx] += acim.toplamYukseklik
         }
@@ -242,6 +309,13 @@ object PdfSoruYerlesim {
         fun sigeDene(acim: SoruOlcum, sutun: Int): Boolean =
             sutun >= 0 && sutun < sutunKullanim.size &&
                 sutunKullanim[sutun] + acim.toplamYukseklik <= geometri.kapasite + 0.01f
+
+        fun elastikSigdirDene(acim: SoruOlcum, sutun: Int): SoruOlcum? {
+            if (sutun < 0 || sutun >= sutunKullanim.size) return null
+            val kalan = geometri.kapasite - sutunKullanim[sutun]
+            if (kalan <= 0f) return null
+            return acim.elastikOlcekle(kalan)
+        }
 
         fun metniBol(f: SoruOlcum) {
             val satirlar = f.metinSatirlari
@@ -259,7 +333,8 @@ object PdfSoruYerlesim {
                 genislik = geometri.tamGenislik,
                 yukseklik = sabit + ilkSayisi * lh,
                 sutun = -1,
-                satirAraligi = 0 until ilkSayisi
+                satirAraligi = 0 until ilkSayisi,
+                olcumOverride = f
             )
 
             // DEVAM PARÇALARI — devam başlığı + satırlar; her biri kendi sayfasında.
@@ -289,35 +364,85 @@ object PdfSoruYerlesim {
             val m = girdi.sutunMetriki
             val f = girdi.tamGenislikMetriki
 
-            // 1) MEVCUT SÜTUNA SIĞAR:
+            // 1) MEVCUT SÜTUNA TAM VEYA ELASTİK SIĞAR:
             if (sigeDene(m, aktifSutun)) {
                 tamKutuYerles(m, aktifSutun)
                 continue
             }
-            // 2) İKİNCİ SÜTUNA GEÇİŞ (yalnızca 1. sütundan 2.'ye; geri dönüş yasak):
-            if (aktifSutun == 0 && sutunKullanim.size > 1 && sigeDene(m, 1)) {
-                aktifSutun = 1
-                tamKutuYerles(m, 1)
+            val elastikAktif = elastikSigdirDene(m, aktifSutun)
+            if (elastikAktif != null) {
+                tamKutuYerles(elastikAktif, aktifSutun)
                 continue
             }
-            // 3) YENİ SAYFA (sütun düzeni devam eder):
+
+            // 2) İKİNCİ SÜTUNA GEÇİŞ (1. sütundan 2.'ye; tam veya elastik):
+            if (aktifSutun == 0 && sutunKullanim.size > 1) {
+                if (sigeDene(m, 1)) {
+                    aktifSutun = 1
+                    tamKutuYerles(m, 1)
+                    continue
+                }
+                val elastikIkinci = elastikSigdirDene(m, 1)
+                if (elastikIkinci != null) {
+                    aktifSutun = 1
+                    tamKutuYerles(elastikIkinci, 1)
+                    continue
+                }
+            }
+
+            // 2b) AKILLI BEST-FIT BOŞLUK KURTARMA:
+            // Eğer 2. sütuna geçilmişse ama 1. sütunda hala ciddi boşluk (%35+) kalmışsa
+            // ve bu kısa soru 1. sütundaki boşluğa sığıyorsa, sayfayı erken kapatmak yerine
+            // 1. sütunun altındaki boşluğu değerlendir (soruIndex ve kendi numarası korunur).
+            if (aktifSutun == 1 && sutunKullanim.size > 1) {
+                val birinciKalan = geometri.kapasite - sutunKullanim[0]
+                if (birinciKalan >= geometri.kapasite * 0.35f) {
+                    if (sigeDene(m, 0)) {
+                        tamKutuYerles(m, 0)
+                        continue
+                    }
+                    val elastikBirinci = elastikSigdirDene(m, 0)
+                    if (elastikBirinci != null) {
+                        tamKutuYerles(elastikBirinci, 0)
+                        continue
+                    }
+                }
+            }
+
+            // 3) YENİ SAYFA (sütun düzeni devam eder — tam veya elastik):
             if (m.toplamYukseklik <= geometri.kapasite) {
                 sayfaDoldu()
                 tamKutuYerles(m, 0)
                 continue
             }
-            // 4) TAM GENİŞLİK SAYFA (geniş/uzun soruyu rahat gösterir):
+            val yeniSayfaElastik = m.elastikOlcekle(geometri.kapasite)
+            if (yeniSayfaElastik != null) {
+                sayfaDoldu()
+                tamKutuYerles(yeniSayfaElastik, 0)
+                continue
+            }
+
+            // 4) TAM GENİŞLİK SAYFA (geniş/uzun soruyu rahat gösterir — tam veya elastik):
             if (f.toplamYukseklik <= geometri.kapasite) {
                 sayfaDoldu()
                 tamKutuYerles(f, -1)
                 sayfaDoldu() // tam genişlik sayfa TEK soru taşır; sonraki soru yeni sayfada
                 continue
             }
+            val tamSayfaElastik = f.elastikOlcekle(geometri.kapasite)
+            if (tamSayfaElastik != null) {
+                sayfaDoldu()
+                tamKutuYerles(tamSayfaElastik, -1)
+                sayfaDoldu()
+                continue
+            }
+
             // 5) METİN BÖLME:
             if (f.metinBolunebilir) {
                 metniBol(f)
                 continue
             }
+
             // 6) İSTİSNA (dev blok + metin dışı): kapasiteye sabitle (taşma kesin önlenir).
             sayfaDoldu()
             sayfaOgeleri += Oge.TamSoru(
@@ -326,7 +451,8 @@ object PdfSoruYerlesim {
                 y = geometri.icerikUstY,
                 genislik = geometri.tamGenislik,
                 yukseklik = minOf(f.toplamYukseklik, geometri.kapasite),
-                sutun = -1
+                sutun = -1,
+                olcumOverride = f
             )
             sayfaDoldu()
         }

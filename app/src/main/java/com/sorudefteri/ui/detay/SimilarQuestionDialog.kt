@@ -7,7 +7,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,12 +45,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.sorudefteri.domain.model.SimilarQuestionResult
-import com.sorudefteri.ui.ortak.math.MathMarkdownText
+import com.sorudefteri.ui.ortak.math.CombinedMathMarkdownText
+import com.sorudefteri.ui.ortak.math.formatMathText
 
 @Composable
 fun SimilarQuestionDialog(
@@ -72,6 +74,7 @@ fun SimilarQuestionDialog(
     ) {
         Surface(
             modifier = Modifier
+                .widthIn(max = 640.dp)
                 .fillMaxSize()
                 .padding(16.dp),
             shape = RoundedCornerShape(24.dp),
@@ -189,10 +192,10 @@ fun SimilarQuestionDialog(
                         verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
                         // Soru Metni Kartı
-                        val isDark = isSystemInDarkTheme()
+                        val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
                         Card(
                             shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
@@ -203,9 +206,9 @@ fun SimilarQuestionDialog(
                                     color = MaterialTheme.colorScheme.primary
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
-                                MathMarkdownText(
+                                CombinedMathMarkdownText(
                                     text = similarQuestion.questionText,
-                                    textColor = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+                                    textColor = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
@@ -215,7 +218,7 @@ fun SimilarQuestionDialog(
                             text = "Seçenekler (Kendini dene):",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold,
-                            color = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface
                         )
 
                         val optionKeys = listOf("A", "B", "C", "D", "E")
@@ -227,19 +230,19 @@ fun SimilarQuestionDialog(
                             val backgroundColor = when {
                                 isAnswerRevealed && isCorrect -> if (isDark) Color(0xFF1B5E20).copy(alpha = 0.45f) else Color(0xFFE8F5E9)
                                 isAnswerRevealed && isSelected && !isCorrect -> if (isDark) Color(0xFFB71C1C).copy(alpha = 0.45f) else Color(0xFFFFEBEE)
-                                isSelected -> if (isDark) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                else -> if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
+                                isSelected -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                             }
 
                             val borderColor = when {
                                 isAnswerRevealed && isCorrect -> Color(0xFF4CAF50)
                                 isAnswerRevealed && isSelected && !isCorrect -> Color(0xFFE53935)
                                 isSelected -> MaterialTheme.colorScheme.primary
-                                else -> if (isDark) MaterialTheme.colorScheme.outline.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outlineVariant
+                                else -> MaterialTheme.colorScheme.outlineVariant
                             }
 
                             val borderWidth = if (isSelected || (isAnswerRevealed && (isCorrect || isSelected))) 2.dp else 1.dp
-                            val optionTextColor = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+                            val optionTextColor = MaterialTheme.colorScheme.onSurface
 
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
@@ -257,10 +260,10 @@ fun SimilarQuestionDialog(
                                 ) {
                                     Surface(
                                         shape = CircleShape,
-                                        color = if (isSelected) MaterialTheme.colorScheme.primary else if (isDark) MaterialTheme.colorScheme.surfaceVariant else Color(0xFFE0E2EC),
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
                                         border = BorderStroke(
                                             width = if (isSelected) 1.5.dp else 1.dp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.primary else if (isDark) MaterialTheme.colorScheme.outline.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                                         ),
                                         modifier = Modifier.size(32.dp)
                                     ) {
@@ -268,7 +271,7 @@ fun SimilarQuestionDialog(
                                             Text(
                                                 text = key,
                                                 fontWeight = FontWeight.Bold,
-                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else if (isDark) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
                                     }
@@ -276,9 +279,10 @@ fun SimilarQuestionDialog(
                                     Spacer(modifier = Modifier.width(12.dp))
 
                                     Box(modifier = Modifier.weight(1f)) {
-                                        MathMarkdownText(
-                                            text = optionText,
-                                            textColor = optionTextColor
+                                        Text(
+                                            text = formatMathText(optionText),
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = optionTextColor
                                         )
                                     }
 
@@ -324,7 +328,7 @@ fun SimilarQuestionDialog(
                             ) {
                                 Card(
                                     shape = RoundedCornerShape(16.dp),
-                                    colors = CardDefaults.cardColors(containerColor = if (isDark) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f) else MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)),
+                                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f)),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
                                     Column(modifier = Modifier.padding(16.dp)) {
@@ -349,12 +353,12 @@ fun SimilarQuestionDialog(
                                             text = "Adım Adım Çözüm:",
                                             style = MaterialTheme.typography.labelLarge,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+                                            color = MaterialTheme.colorScheme.onSurface
                                         )
                                         Spacer(modifier = Modifier.height(6.dp))
-                                        MathMarkdownText(
+                                        CombinedMathMarkdownText(
                                             text = similarQuestion.solution,
-                                            textColor = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+                                            textColor = MaterialTheme.colorScheme.onSurface
                                         )
                                     }
                                 }

@@ -1,14 +1,20 @@
 package com.sorudefteri.ui.navigation
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -27,6 +33,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination
@@ -45,6 +52,7 @@ import com.sorudefteri.domain.repository.SoruRepository
 import com.sorudefteri.domain.repository.TestSessionManager
 import com.sorudefteri.ui.ayarlar.AyarlarScreen
 import com.sorudefteri.ui.detay.SoruDetayScreen
+import com.sorudefteri.ui.eslesme.CihazEslemeScreen
 import com.sorudefteri.ui.istatistik.IstatistikScreen
 import com.sorudefteri.ui.kamera.KameraScreen
 import com.sorudefteri.ui.kutuphane.KutuphaneScreen
@@ -105,6 +113,12 @@ fun AppNavHost(
 
     val isMainNavDestination = currentDestination?.let { dest ->
         dest.hasRoute<KutuphaneNav>() || dest.hasRoute<ReelsNav>() || dest.hasRoute<TestNav>() || dest.hasRoute<IstatistikNav>() || dest.hasRoute<AyarlarNav>()
+    } ?: false
+
+    val showNavigationRail = currentDestination?.let { dest ->
+        !dest.hasRoute<KameraNav>() &&
+            !dest.hasRoute<TestCozNav>() &&
+            !dest.hasRoute<OnboardingNav>()
     } ?: false
 
     val isMediumOrExpanded = windowWidthSizeClass == WindowWidthSizeClass.Medium || windowWidthSizeClass == WindowWidthSizeClass.Expanded
@@ -184,7 +198,7 @@ fun AppNavHost(
     if (isMediumOrExpanded) {
         // TABLET / FOLDABLE / WIDE SCREEN LAYOUT: Side NavigationRail
         Row(modifier = modifier.fillMaxSize()) {
-            if (isMainNavDestination) {
+            if (isMediumOrExpanded && showNavigationRail) {
                 NavigationSideRail(
                     navController = navController,
                     currentDestination = currentDestination
@@ -205,6 +219,7 @@ fun AppNavHost(
         // PHONE / COMPACT SCREEN LAYOUT: Standard Scaffold with Bottom Navigation Bar
         Scaffold(
             modifier = modifier.fillMaxSize(),
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             bottomBar = {
                 if (isMainNavDestination) {
                     BottomNavBar(
@@ -223,7 +238,7 @@ fun AppNavHost(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(bottom = innerPadding.calculateBottomPadding())
-                    .consumeWindowInsets(innerPadding)
+                    .consumeWindowInsets(PaddingValues(bottom = innerPadding.calculateBottomPadding()))
             )
         }
     }
@@ -470,7 +485,15 @@ private fun AppNavGraph(
         composable<AyarlarNav> {
             AyarlarScreen(
                 pendingImportUri = pendingImportUri,
-                onPendingImportHandled = onPendingImportHandled
+                onPendingImportHandled = onPendingImportHandled,
+                onNavigateToEslesme = { navController.navigate(CihazEslemeNav) }
+            )
+        }
+
+        // 11. Yakın-Cihaz Eşleşme Ekranı
+        composable<CihazEslemeNav> {
+            CihazEslemeScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
     }
@@ -490,69 +513,79 @@ fun NavigationSideRail(
         modifier = modifier.fillMaxHeight(),
         containerColor = MaterialTheme.colorScheme.surface,
         header = {
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Surface(
                 shape = androidx.compose.foundation.shape.CircleShape,
                 color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(48.dp)
+                modifier = Modifier.size(40.dp)
             ) {
                 Box(contentAlignment = androidx.compose.ui.Alignment.Center) {
                     Text(
                         text = "SD",
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.ExtraBold,
                         color = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "Soru Defterim",
                 style = MaterialTheme.typography.labelSmall,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
         }
     ) {
-        Spacer(modifier = Modifier.weight(1f))
-        BottomNavItem.items.forEach { item ->
-            val isSelected = currentDestination?.hierarchy?.any { it.hasRoute(item.route::class) } == true
-            NavigationRailItem(
-                icon = {
-                    Icon(
-                        imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
-                        contentDescription = item.title
-                    )
-                },
-                label = {
-                    Text(text = item.title)
-                },
-                selected = isSelected,
-                onClick = {
-                    if (!isSelected) {
-                        if (item.route == TestNav) {
-                            navController.navigate(TestNav) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+        Column(
+            modifier = Modifier
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp, androidx.compose.ui.Alignment.CenterVertically)
+        ) {
+            BottomNavItem.items.forEach { item ->
+                val isSelected = currentDestination?.hierarchy?.any { it.hasRoute(item.route::class) } == true
+                NavigationRailItem(
+                    icon = {
+                        Icon(
+                            imageVector = if (isSelected) item.selectedIcon else item.unselectedIcon,
+                            contentDescription = item.title
+                        )
+                    },
+                    label = {
+                        Text(
+                            text = item.title,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    selected = isSelected,
+                    onClick = {
+                        if (!isSelected) {
+                            if (item.route == TestNav) {
+                                navController.navigate(TestNav) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = false
                                 }
-                                launchSingleTop = true
-                                restoreState = false
-                            }
-                        } else {
-                            navController.navigate(item.route) {
-                                popUpTo(navController.graph.findStartDestination().id) {
-                                    saveState = true
+                            } else {
+                                navController.navigate(item.route) {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
                                 }
-                                launchSingleTop = true
-                                restoreState = true
                             }
                         }
                     }
-                }
-            )
+                )
+            }
         }
-        Spacer(modifier = Modifier.weight(1f))
     }
 }
 
@@ -586,6 +619,7 @@ fun BottomNavBar(
                     Text(
                         text = item.shortTitle,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = if (isSelected) androidx.compose.ui.text.font.FontWeight.Bold
                         else androidx.compose.ui.text.font.FontWeight.Medium

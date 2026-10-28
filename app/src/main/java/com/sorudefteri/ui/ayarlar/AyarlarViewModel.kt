@@ -60,7 +60,10 @@ data class AyarlarUiState(
     val isDriveSyncError: Boolean = false,
     val stylusDoubleTapAction: StylusDoubleTapAction = StylusDoubleTapAction.PEN_ERASER_TOGGLE,
     val isStylusPalmRejectionEnabled: Boolean = true,
-    val isStylusHapticFeedbackEnabled: Boolean = true
+    val isStylusHapticFeedbackEnabled: Boolean = true,
+    // PERF: Hatırlatıcı bildirim anahtarları (koşulsuz 2 alarm yerine).
+    val isDailyReminderEnabled: Boolean = true,
+    val isStreakReminderEnabled: Boolean = true
 )
 
 private data class DynamicModelsInfo(
@@ -86,7 +89,9 @@ private data class BackupPrefGroup(
     val isAutoBackupEnabled: Boolean,
     val isWifiOnly: Boolean,
     val driveLastSyncTime: Long,
-    val driveSyncState: DriveSyncState
+    val driveSyncState: DriveSyncState,
+    val isDailyReminderEnabled: Boolean = true,
+    val isStreakReminderEnabled: Boolean = true
 )
 
 @HiltViewModel
@@ -126,9 +131,16 @@ class AyarlarViewModel @Inject constructor(
         ayarlarDataStore.isAutoBackupEnabled,
         ayarlarDataStore.isWifiOnlyBackup,
         ayarlarDataStore.driveLastSyncTime.onEmpty { emit(0L) },
-        _driveSyncState
-    ) { auto, wifi, driveTime, driveSync ->
-        BackupPrefGroup(auto, wifi, driveTime, driveSync)
+        _driveSyncState,
+        ayarlarDataStore.isDailyReminderEnabled.onEmpty { emit(true) },
+        ayarlarDataStore.isStreakReminderEnabled.onEmpty { emit(true) }
+    ) { args ->
+        @Suppress("UNCHECKED_CAST")
+        val a = args as Array<Any?>
+        BackupPrefGroup(
+            a[0] as Boolean, a[1] as Boolean, a[2] as Long, a[3] as DriveSyncState,
+            a[4] as Boolean, a[5] as Boolean
+        )
     }
 
     private val stylusPrefsFlow = combine(
@@ -164,6 +176,8 @@ class AyarlarViewModel @Inject constructor(
             isWifiOnly = prefs.isWifiOnly,
             driveLastSyncTime = prefs.driveLastSyncTime,
             driveSyncState = prefs.driveSyncState,
+            isDailyReminderEnabled = prefs.isDailyReminderEnabled,
+            isStreakReminderEnabled = prefs.isStreakReminderEnabled,
             stylusAction = stylus.first,
             stylusPalm = stylus.second,
             stylusHaptics = stylus.third
@@ -211,6 +225,8 @@ class AyarlarViewModel @Inject constructor(
             isDriveSyncing = p2.driveSyncState.isSyncing,
             driveSyncMessage = p2.driveSyncState.message,
             isDriveSyncError = p2.driveSyncState.isError,
+            isDailyReminderEnabled = p2.isDailyReminderEnabled,
+            isStreakReminderEnabled = p2.isStreakReminderEnabled,
             stylusDoubleTapAction = p2.stylusAction,
             isStylusPalmRejectionEnabled = p2.stylusPalm,
             isStylusHapticFeedbackEnabled = p2.stylusHaptics
@@ -299,6 +315,33 @@ class AyarlarViewModel @Inject constructor(
                     AutoBackupWorker.schedulePeriodic(appContext, wifiOnly)
                 } else {
                     AutoBackupWorker.cancel(appContext)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    // PERF: Hatırlatıcı anahtarları (kapalıysa WorkManager işi iptal edilir).
+    fun setDailyReminderEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            ayarlarDataStore.setDailyReminderEnabled(enabled)
+            try {
+                if (enabled) {
+                    com.sorudefteri.data.worker.ReminderScheduler.scheduleDailyReminder(appContext)
+                } else {
+                    com.sorudefteri.data.worker.ReminderScheduler.cancelDailyReminder(appContext)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun setStreakReminderEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            ayarlarDataStore.setStreakReminderEnabled(enabled)
+            try {
+                if (enabled) {
+                    com.sorudefteri.data.worker.ReminderScheduler.scheduleStreakReminder(appContext)
+                } else {
+                    com.sorudefteri.data.worker.ReminderScheduler.cancelStreakReminder(appContext)
                 }
             } catch (_: Exception) {}
         }
@@ -570,8 +613,10 @@ class AyarlarViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 soruRepository.deleteAllSorular()
-                // Diskteki görselleri de temizle (hayalet dosya kalmasın)
+                // Diskteki görselleri, sesli notları ve çizimleri de temizle (hayalet dosya kalmasın)
                 try { gorselDepo.tumGorselleriSil() } catch (_: Exception) {}
+                try { java.io.File(appContext.filesDir, "audio_memos").deleteRecursively() } catch (_: Exception) {}
+                try { java.io.File(appContext.filesDir, "scratchpads").deleteRecursively() } catch (_: Exception) {}
                 // Ayarları temizle ama onboarding flag'ini resetleme? Şimdilik tümü siliniyor, kullanıcı onboarding tekrar görecek
                 ayarlarDataStore.clearSettings()
                 onSuccess()
@@ -612,6 +657,8 @@ private data class AyarlarPrefGroup2(
     val isWifiOnly: Boolean,
     val driveLastSyncTime: Long,
     val driveSyncState: DriveSyncState,
+    val isDailyReminderEnabled: Boolean,
+    val isStreakReminderEnabled: Boolean,
     val stylusAction: StylusDoubleTapAction,
     val stylusPalm: Boolean,
     val stylusHaptics: Boolean

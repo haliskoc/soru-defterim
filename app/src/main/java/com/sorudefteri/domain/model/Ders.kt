@@ -1,5 +1,7 @@
 package com.sorudefteri.domain.model
 
+import androidx.compose.runtime.Immutable
+
 /**
  * Ders modeli (TYT / AYT)
  *
@@ -9,6 +11,7 @@ package com.sorudefteri.domain.model
  * @property examType Sınav türü ("TYT" veya "AYT")
  * @property jsonKey Konular JSON dosyasındaki ders anahtarı
  */
+@Immutable
 data class Ders(
     val id: String,
     val ad: String,

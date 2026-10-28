@@ -14,11 +14,14 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
@@ -64,9 +67,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.compose.SubcomposeAsyncImage
+import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
-import coil3.request.crossfade
 import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.Ders
@@ -408,6 +410,8 @@ fun PhoneFiltreDetaySayfasi(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
@@ -677,35 +681,16 @@ fun PhoneSoruListeKarti(
                     if (displayPath.startsWith("http") || displayPath.startsWith("content://")) displayPath
                     else File(displayPath)
                 }
-                SubcomposeAsyncImage(
+                // PERF: Izgarada SubcomposeAsyncImage yerine AsyncImage.
+                AsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(imageModel)
-                        .crossfade(true)
+                        .size(240, 240)
+                        .memoryCacheKey("liste_${soru.id}")
                         .build(),
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.matchParentSize(),
-                    loading = {
-                        Box(
-                            modifier = Modifier.matchParentSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                        }
-                    },
-                    error = {
-                        Box(
-                            modifier = Modifier.matchParentSize(),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ImageNotSupported,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
+                    modifier = Modifier.matchParentSize()
                 )
             }
 
@@ -876,6 +861,7 @@ fun PhoneSecimAltBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {

@@ -30,6 +30,15 @@ object AppModule {
     @Singleton
     fun provideContext(@ApplicationContext context: Context): Context = context
 
+    /**
+     * PERF/Düzeltme: ViewModel'lerdeki `defaultDispatcher` parametresi için
+     * Hilt binding'i (önceden eksikti; hiltJavaCompileDebug patlıyordu).
+     */
+    @Provides
+    @Singleton
+    fun provideDefaultDispatcher(): kotlinx.coroutines.CoroutineDispatcher =
+        kotlinx.coroutines.Dispatchers.Default
+
     @Provides
     @Singleton
     fun provideJson(): Json = Json {

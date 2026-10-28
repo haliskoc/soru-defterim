@@ -3,7 +3,6 @@ package com.sorudefteri.ui.detay.components
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,7 +47,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sorudefteri.data.ai.AiJsonParser
 import com.sorudefteri.domain.model.SimilarQuestionResult
-import com.sorudefteri.ui.ortak.math.MathMarkdownText
+import com.sorudefteri.ui.ortak.math.CombinedMathMarkdownText
 
 @Composable
 fun ManualSimilarQuestionDialog(
@@ -196,16 +195,15 @@ fun ManualSimilarQuestionDialog(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            val isDark = isSystemInDarkTheme()
                             Text(
                                 text = "Soru Önizleme:",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
-                                color = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface
+                                color = MaterialTheme.colorScheme.onSurface
                             )
-                            MathMarkdownText(
+                            CombinedMathMarkdownText(
                                 text = res.questionText.take(180) + if (res.questionText.length > 180) "..." else "",
-                                textColor = if (isDark) Color.White else MaterialTheme.colorScheme.onSurface,
+                                textColor = MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.fillMaxWidth()
                             )
 
@@ -215,7 +213,7 @@ fun ManualSimilarQuestionDialog(
                                     Text(
                                         text = "$key) ${optText.take(60)}",
                                         style = MaterialTheme.typography.bodySmall,
-                                        color = if (key == res.correctAnswer) MaterialTheme.colorScheme.primary else if (isDark) Color(0xFFE0E2EC) else MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = if (key == res.correctAnswer) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }

@@ -149,6 +149,9 @@ dependencies {
     // ML Kit OCR
     implementation(libs.mlkit.text.recognition)
 
+    // Nearby Connections (telefon ↔ tablet yakın-cihaz eşleşme)
+    implementation(libs.nearby.connections)
+
     // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

@@ -52,7 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.sorudefteri.ui.ortak.math.MathMarkdownText
+import com.sorudefteri.ui.ortak.math.CombinedMathMarkdownText
 import kotlinx.coroutines.launch
 
 @Composable
@@ -316,11 +316,11 @@ fun AiCozumTab(
                             }
                         }
                     } else {
-                        MathMarkdownText(
+                        CombinedMathMarkdownText(
                             text = rawExplanation,
                             modifier = Modifier.fillMaxWidth()
                         )
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(32.dp))
                     }
 
                     // Yeniden denemede oluşan hata - cached çözüm varken bile göster
@@ -469,7 +469,7 @@ private fun UnlockedTierCard(
                 }
             }
             Spacer(modifier = Modifier.height(10.dp))
-            MathMarkdownText(
+            CombinedMathMarkdownText(
                 text = tier.content,
                 modifier = Modifier.fillMaxWidth()
             )

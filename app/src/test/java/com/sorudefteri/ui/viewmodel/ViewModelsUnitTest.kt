@@ -137,6 +137,12 @@ class ViewModelsUnitTest {
         every { mockSoruRepository.getAllTestResults() } returns flowOf(emptyList())
         every { mockSoruRepository.getAllSorular() } returns flowOf(emptyList())
         every { mockSoruRepository.getAllDenemeler() } returns flowOf(emptyList())
+        every { mockSoruRepository.getKutuphaneMetaFlow() } returns flowOf(com.sorudefteri.domain.model.KutuphaneMeta())
+        coEvery { mockSoruRepository.getKutuphaneMeta() } returns com.sorudefteri.domain.model.KutuphaneMeta()
+        coEvery { mockSoruRepository.countAddedBetween(any(), any()) } returns 0
+        coEvery { mockSoruRepository.countSolvedBetween(any(), any()) } returns 0
+        coEvery { mockSoruRepository.getFilteredSoruIds(any(), any(), any(), any(), any(), any(), any(), any()) } returns emptyList()
+        coEvery { mockSoruRepository.getSorularByIds(any()) } returns emptyList()
         every { mockKonuKatalog.getUniteList(any(), any()) } returns listOf(
             KonuUnite(uniteAdi = "Fonksiyonlar", konular = listOf("Fonksiyon Grafikleri", "Bileşke"))
         )
@@ -285,54 +291,65 @@ class ViewModelsUnitTest {
         val s2 = Soru(id = 2, imagePath = "2", examType = "AYT", subjectId = "fizik", topic = "Optik", isFavorite = false, isSolved = true)
         val s3 = Soru(id = 3, imagePath = "3", examType = "TYT", subjectId = "turkce", topic = "Paragraf", isFavorite = false, isSolved = false)
 
-        val tumSorularFlow = MutableStateFlow(listOf(s1, s2, s3))
-        every { mockSoruRepository.getAllSorular() } returns tumSorularFlow
+        every { mockSoruRepository.getKutuphaneMetaFlow() } returns flowOf(
+            com.sorudefteri.domain.model.KutuphaneMeta(
+                totalCount = 3, solvedCount = 1, unsolvedCount = 2,
+                favoriteCount = 1, dueReviewCount = 2
+            )
+        )
 
-        val viewModel = KutuphaneViewModel(mockSoruRepository, mockAyarlarDataStore, TestSessionManager())
+        val viewModel = KutuphaneViewModel(mockSoruRepository, mockAyarlarDataStore, TestSessionManager(), mainDispatcherRule.testDispatcher)
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()
 
-        // 1. Başlangıç durumu (3 soru)
-        assertEquals(3, viewModel.uiState.value.filteredSorular.size)
+        // 1. Başlangıç meta sayıları (tam liste state'te tutulmaz)
+        assertEquals(3, viewModel.uiState.value.totalCount)
+        assertEquals(1, viewModel.uiState.value.solvedCount)
+        assertEquals(1, viewModel.uiState.value.favoriteCount)
 
-        // 2. Arama sorgusu filtresi (300ms debounce)
+        // 2. Arama sorgusu state'e yansır (filtreleme Paging tarafında yapılır)
         viewModel.onSearchQueryChange("Trigono")
         testScheduler.advanceTimeBy(350L)
-        assertEquals(1, viewModel.uiState.value.filteredSorular.size)
-        assertEquals("Trigonometri", viewModel.uiState.value.filteredSorular[0].topic)
+        assertEquals("Trigono", viewModel.uiState.value.searchQuery)
 
         // Arama temizle
         viewModel.onSearchQueryChange("")
         testScheduler.advanceTimeBy(350L)
-        assertEquals(3, viewModel.uiState.value.filteredSorular.size)
+        assertEquals("", viewModel.uiState.value.searchQuery)
 
-        // 3. Sınav tipi filtresi (AYT)
+        // 3. Sınav tipi filtresi state'e yansır
         viewModel.onExamTypeSelected("AYT")
         testScheduler.advanceUntilIdle()
-        assertEquals(1, viewModel.uiState.value.filteredSorular.size)
-        assertEquals("Optik", viewModel.uiState.value.filteredSorular[0].topic)
+        assertEquals("AYT", viewModel.uiState.value.selectedExamType)
 
         // 4. Sadece favoriler
         viewModel.resetFilters()
         viewModel.onOnlyFavoritesToggle(true)
         testScheduler.advanceUntilIdle()
-        assertEquals(1, viewModel.uiState.value.filteredSorular.size)
-        assertTrue(viewModel.uiState.value.filteredSorular[0].isFavorite)
+        assertTrue(viewModel.uiState.value.onlyFavorites)
 
         // 5. Sadece çözülmemişler
         viewModel.resetFilters()
         viewModel.onOnlyUnsolvedToggle(true)
         testScheduler.advanceUntilIdle()
-        assertEquals(2, viewModel.uiState.value.filteredSorular.size)
+        assertTrue(viewModel.uiState.value.onlyUnsolved)
+
+        // 6. Export yolu id->satır okur (mock repository relaxed: boş liste)
+        coEvery { mockSoruRepository.getFilteredSoruIds(any(), any(), any(), any(), any(), any(), any(), any()) } returns listOf(1L, 2L, 3L)
+        coEvery { mockSoruRepository.getSorularByIds(listOf(1L, 2L, 3L)) } returns listOf(s1, s2, s3)
+        val exported = viewModel.getFilteredSorularForExport()
+        assertEquals(3, exported.size)
     }
 
     @Test
     fun kutuphaneViewModel_topluSecimVeAksiyonlar() = runTest {
         val s1 = Soru(id = 1, imagePath = "1", examType = "TYT", subjectId = "mat", topic = "A")
         val s2 = Soru(id = 2, imagePath = "2", examType = "TYT", subjectId = "mat", topic = "B")
-        every { mockSoruRepository.getAllSorular() } returns flowOf(listOf(s1, s2))
+        every { mockSoruRepository.getKutuphaneMetaFlow() } returns flowOf(
+            com.sorudefteri.domain.model.KutuphaneMeta(totalCount = 2)
+        )
 
-        val viewModel = KutuphaneViewModel(mockSoruRepository, mockAyarlarDataStore, TestSessionManager())
+        val viewModel = KutuphaneViewModel(mockSoruRepository, mockAyarlarDataStore, TestSessionManager(), mainDispatcherRule.testDispatcher)
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()
 
@@ -341,10 +358,11 @@ class ViewModelsUnitTest {
         assertTrue(viewModel.uiState.value.isSelectionMode)
         assertEquals(setOf(1L), viewModel.uiState.value.selectedSoruIds)
 
-        // Tümünü seç
+        // Tümünü seç (DAO id sorgusu üzerinden)
+        coEvery { mockSoruRepository.getFilteredSoruIds(any(), any(), any(), any(), any(), any(), any(), any()) } returns listOf(1L, 2L)
         viewModel.selectAll()
+        testScheduler.advanceUntilIdle()
         assertEquals(setOf(1L, 2L), viewModel.uiState.value.selectedSoruIds)
-        assertTrue(viewModel.uiState.value.isAllSelected)
 
         // Toplu çözüldü yap
         viewModel.batchMarkSolvedSelected(true)
@@ -522,10 +540,10 @@ class ViewModelsUnitTest {
         )
         testScheduler.advanceUntilIdle()
 
-        // tq1 doğru -> advanceReviewStage(10L)
-        coVerify(exactly = 1) { mockSoruRepository.advanceReviewStage(10L) }
-        // tq2 yanlış -> regressReviewStage(20L)
-        coVerify(exactly = 1) { mockSoruRepository.regressReviewStage(20L) }
+        // tq1 doğru -> advanceReviewStageBatch(listOf(10L))
+        coVerify(exactly = 1) { mockSoruRepository.advanceReviewStageBatch(listOf(10L)) }
+        // tq2 yanlış -> regressReviewStageBatch(listOf(20L))
+        coVerify(exactly = 1) { mockSoruRepository.regressReviewStageBatch(listOf(20L)) }
         // tq3 boş -> regressReviewStage(30L) ÇAĞRILMAMALI (Item 1.1 pedagojik düzeltmesi)
         coVerify(exactly = 0) { mockSoruRepository.regressReviewStage(30L) }
 
@@ -533,8 +551,8 @@ class ViewModelsUnitTest {
         viewModel.loadResult()
         testScheduler.advanceUntilIdle()
 
-        coVerify(exactly = 1) { mockSoruRepository.advanceReviewStage(10L) }
-        coVerify(exactly = 1) { mockSoruRepository.regressReviewStage(20L) }
+        coVerify(exactly = 1) { mockSoruRepository.advanceReviewStageBatch(listOf(10L)) }
+        coVerify(exactly = 1) { mockSoruRepository.regressReviewStageBatch(listOf(20L)) }
         coVerify(exactly = 0) { mockSoruRepository.regressReviewStage(30L) }
     }
 
@@ -582,7 +600,7 @@ class ViewModelsUnitTest {
 
     @Test
     fun istatistikViewModel_bosVeri_varsayilanDegerlerDogru() = runTest {
-        val viewModel = IstatistikViewModel(mockSoruRepository, mockKonuKatalog, mockTestSessionManager)
+        val viewModel = IstatistikViewModel(mockSoruRepository, mockKonuKatalog, mockTestSessionManager, null, null, null, mainDispatcherRule.testDispatcher)
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()
 
@@ -610,7 +628,7 @@ class ViewModelsUnitTest {
 
         every { mockSoruRepository.getAllTestResults() } returns flowOf(listOf(t1, t2, t3))
 
-        val viewModel = IstatistikViewModel(mockSoruRepository, mockKonuKatalog, mockTestSessionManager)
+        val viewModel = IstatistikViewModel(mockSoruRepository, mockKonuKatalog, mockTestSessionManager, null, null, null, mainDispatcherRule.testDispatcher)
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()
 
@@ -644,7 +662,7 @@ class ViewModelsUnitTest {
         }
         every { mockSoruRepository.getAllTestResults() } returns flowOf(testList)
 
-        val viewModel = IstatistikViewModel(mockSoruRepository, mockKonuKatalog, mockTestSessionManager)
+        val viewModel = IstatistikViewModel(mockSoruRepository, mockKonuKatalog, mockTestSessionManager, null, null, null, mainDispatcherRule.testDispatcher)
         backgroundScope.launch { viewModel.uiState.collect() }
         testScheduler.advanceUntilIdle()
 

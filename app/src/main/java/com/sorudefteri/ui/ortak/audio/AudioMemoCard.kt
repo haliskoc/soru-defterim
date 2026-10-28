@@ -55,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -121,6 +122,7 @@ fun AudioMemoCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -135,7 +137,10 @@ fun AudioMemoCard(
                             text = "Kayıt sürüyor ${formatSeconds(recordingSeconds)} / 01:00 — bitirdiğinde ✓ 'Kaydet' düğmesine bas",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.error
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
                     }
 
@@ -175,7 +180,7 @@ fun AudioMemoCard(
                     IconButton(
                         onClick = { audioManager.togglePlayPause(audioPath) },
                         modifier = Modifier
-                            .size(40.dp)
+                            .size(48.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.primary)
                     ) {
@@ -236,6 +241,7 @@ fun AudioMemoCard(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
@@ -249,7 +255,9 @@ fun AudioMemoCard(
                             text = "Sesli Not / Çözüm Açıklaması",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 

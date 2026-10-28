@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
@@ -43,7 +44,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.ZoomIn
-import com.sorudefteri.ui.ortak.math.MathMarkdownText
+import com.sorudefteri.ui.ortak.math.CombinedMathMarkdownText
 import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.RadioButtonUnchecked
 import androidx.compose.material3.Button
@@ -69,6 +70,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -188,13 +190,19 @@ fun TestSonucScreen(
                 }
             }
         } else {
-            LazyColumn(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                contentAlignment = Alignment.TopCenter
             ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .widthIn(max = 840.dp)
+                        .fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
                 // 1. Test Tamamlandı Özet Kartı
                 item {
                     TestResultSummaryCard(result = result)
@@ -287,7 +295,11 @@ fun TestSonucScreen(
                 }
 
                 // 4. Soruların Detaylı Listesi
-                itemsIndexed(result.questions) { index, testQuestion ->
+                itemsIndexed(
+                    items = result.questions,
+                    key = { _, testQuestion -> testQuestion.soru.id },
+                    contentType = { _, _ -> "question_result" }
+                ) { index, testQuestion ->
                     val soruId = testQuestion.soru.id
                     val isAiLoading = uiState.aiLoadingIds.contains(soruId)
                     val aiSolution = uiState.aiSolutions[soruId]
@@ -310,6 +322,7 @@ fun TestSonucScreen(
 
                 item {
                     Spacer(modifier = Modifier.height(16.dp))
+                }
                 }
             }
         }
@@ -710,7 +723,11 @@ private fun QuestionResultItemCard(
                         }
                 ) {
                     AsyncImage(
-                        model = File(soru.imagePath),
+                        // PERF: 100x75 kutuya orijinal yerine thumb katmanı.
+                        model = coil3.request.ImageRequest.Builder(LocalContext.current)
+                            .data(File(soru.imagePath))
+                            .size(200, 150)
+                            .build(),
                         contentDescription = "Soru Görseli",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
@@ -934,7 +951,7 @@ private fun QuestionResultItemCard(
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
-                        MathMarkdownText(
+                        CombinedMathMarkdownText(
                             text = aiSolution.orEmpty(),
                             modifier = Modifier.fillMaxWidth()
                         )
@@ -959,12 +976,17 @@ private fun TestSonucBottomBar(
         color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
         ) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 840.dp)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -1018,6 +1040,7 @@ private fun TestSonucBottomBar(
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("İstatistikler & Öneriler", fontWeight = FontWeight.SemiBold)
             }
+            }
         }
     }
 }
@@ -1030,7 +1053,7 @@ private fun SureTuzagiCard(
     slowQuestions: List<Pair<Int, TestQuestion>>,
     targetSeconds: Long
 ) {
-    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val containerColor = if (isDark) MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.25f)
     else Color(0xFFFFF3E0)
     val borderColor = if (isDark) MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f)

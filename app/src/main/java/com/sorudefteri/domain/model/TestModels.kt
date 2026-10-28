@@ -1,5 +1,7 @@
 package com.sorudefteri.domain.model
 
+import androidx.compose.runtime.Immutable
+
 /**
  * Test oluşturma filtreleme kriterleri
  *
@@ -11,6 +13,7 @@ package com.sorudefteri.domain.model
  * @property questionCount Testteki hedeflenen soru sayısı (örn: 5, 10, 15, 20, 0: Tümü)
  * @property timeLimitPerQuestionSeconds Soru başına tanınan süre limiti (0 = Süresiz, 75 = TYT, 120 = AYT)
  */
+@Immutable
 data class TestFiltre(
     val examType: String? = null,
     val selectedSubjects: Set<String> = emptySet(),
@@ -46,6 +49,7 @@ enum class ZamanBaskisiModu(val displayName: String, val secondsPerQuestion: Lon
  * @property isCorrect Sorunun doğru cevaplanıp cevaplanmadığı (true: Doğru, false: Yanlış, null: Boş/Belirsiz)
  * @property timeSpentSeconds Bu sorunun çözümünde harcanan süre (saniye cinsinden)
  */
+@Immutable
 data class TestQuestion(
     val soru: Soru,
     val userAnswer: String? = null,
@@ -65,6 +69,7 @@ data class TestQuestion(
  * @property completedAt Testin tamamlanma zaman damgası (milisaniye)
  * @property targetTimePerQuestionSeconds Soru başına hedef süre (0 = Sınırsız, 75 = TYT, 120 = AYT)
  */
+@Immutable
 data class TestResult(
     val totalQuestions: Int,
     val correctCount: Int,

@@ -11,6 +11,13 @@ import androidx.camera.core.FocusMeteringAction
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
+import android.app.ActivityManager
+import android.content.Context
+import android.os.Build
+import android.util.Size
+import androidx.camera.core.resolutionselector.AspectRatioStrategy
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -33,13 +40,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cameraswitch
 import androidx.compose.material.icons.filled.Close
@@ -73,6 +83,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -140,7 +151,17 @@ fun KameraScreen(
     val viewModel: KameraViewModel = hiltViewModel()
     val uzunPozlama by viewModel.uzunPozlamaAkisi.collectAsStateWithLifecycle()
     val otomatikCekim by viewModel.otomatikCekimAkisi.collectAsStateWithLifecycle()
+    val otomatikAlgila by viewModel.otomatikAlgilaAkisi.collectAsStateWithLifecycle()
+    val yuksekDogrulukAyar by viewModel.yuksekDogrulukAkisi.collectAsStateWithLifecycle()
+    val perfOtomatik by viewModel.perfOtomatikAkisi.collectAsStateWithLifecycle()
     val taramaBilgi by viewModel.taramaBilgi.collectAsStateWithLifecycle()
+    val modelUyari by viewModel.modelUyari.collectAsStateWithLifecycle()
+
+    // Düşük donanım koruması: RAM ≤ 3GB veya çekirdek ≤ 4 ise yüksek doğruluk otomatik kapanır.
+    val dusukDonanim = remember {
+        dusukDonanimMi(context)
+    }
+    val yuksekDogruluk = yuksekDogrulukAyar && !(perfOtomatik && dusukDonanim)
 
     // Kamera İzni Durumu
     var hasCameraPermission by remember {
@@ -263,10 +284,10 @@ fun KameraScreen(
     }
 
     // ==================== Kamera Durumları ====================
-    var kameraModu by remember { mutableStateOf(KameraModu.TEKLI) }
-    var ayarSayfasiAcik by remember { mutableStateOf(false) }
-    var lensFacing by remember { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
-    var flashMode by remember { mutableIntStateOf(ImageCapture.FLASH_MODE_AUTO) }
+    var kameraModu by rememberSaveable { mutableStateOf(KameraModu.TEKLI) }
+    var ayarSayfasiAcik by rememberSaveable { mutableStateOf(false) }
+    var lensFacing by rememberSaveable { mutableIntStateOf(CameraSelector.LENS_FACING_BACK) }
+    var flashMode by rememberSaveable { mutableIntStateOf(ImageCapture.FLASH_MODE_AUTO) }
     var isCapturing by remember { mutableStateOf(false) }
     var flashShutterEffect by remember { mutableStateOf(false) }
     var islemMesaji by remember { mutableStateOf<String?>(null) }
@@ -286,27 +307,52 @@ fun KameraScreen(
     var cameraInstance by remember { mutableStateOf<Camera?>(null) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
 
-    val metinAnalizci = remember(viewModel) {
-        MetinAnalizci(analizKontrolcu) { satirlar, g, y ->
-            viewModel.onAnalizSonuc(satirlar, g, y)
-        }
+    val metinAnalizci = remember(viewModel, cameraExecutor) {
+        MetinAnalizci(
+            kontrolcu = analizKontrolcu,
+            sonucGeldi = { satirlar, g, y -> viewModel.onAnalizSonuc(satirlar, g, y) },
+            hataOldu = { viewModel.onAnalizHata() },
+            callbackExecutor = cameraExecutor
+        )
     }
 
-    val imageAnalysis = remember {
-        ImageAnalysis.Builder()
+    // Yüksek doğrulukta analiz 1280x720 sabit; normalde varsayılan (pil dostu).
+    val imageAnalysis = remember(yuksekDogruluk) {
+        val kurucu = ImageAnalysis.Builder()
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
+        if (yuksekDogruluk) {
+            kurucu.setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            Size(1280, 720),
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                        )
+                    )
+                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+                    .build()
+            )
+        }
+        kurucu.build()
     }
 
     DisposableEffect(Unit) {
         onDispose {
             try {
+                imageAnalysis.clearAnalyzer()
+            } catch (_: Exception) {}
+            try {
                 cameraProviderInstance?.unbindAll()
+            } catch (_: Exception) {}
+            try {
+                ProcessCameraProvider.getInstance(context).get().unbindAll()
             } catch (_: Exception) {}
             try {
                 metinAnalizci.kapat()
             } catch (_: Exception) {}
-            cameraExecutor.shutdown()
+            try {
+                cameraExecutor.shutdownNow()
+            } catch (_: Exception) {}
         }
     }
 
@@ -314,9 +360,18 @@ fun KameraScreen(
         imageAnalysis.setAnalyzer(cameraExecutor, metinAnalizci)
     }
 
-    // Mod <—> analiz aktiflik; mod değişince tarama stabilitesi sıfırlanır
-    LaunchedEffect(kameraModu) {
-        analizKontrolcu.acik = kameraModu == KameraModu.TEKLI
+    // PERF: Kilit sonrası veya ayar sheet açıkken OCR durur
+    // (kilit-sonrası birleştirme ile CPU yarışması biter).
+    LaunchedEffect(taramaBilgi.durum, ayarSayfasiAcik) {
+        analizKontrolcu.duraklatildi =
+            taramaBilgi.durum == TaramaDurumu.KILITLI || ayarSayfasiAcik
+    }
+
+    // Mod + algılama + doğruluk <—> analiz aktiflik; değişince tarama sıfırlanır
+    LaunchedEffect(kameraModu, otomatikAlgila, yuksekDogruluk) {
+        analizKontrolcu.acik = kameraModu == KameraModu.TEKLI && otomatikAlgila
+        analizKontrolcu.yuksekDogruluk = yuksekDogruluk && otomatikAlgila
+        viewModel.yuksekAktif = analizKontrolcu.yuksekDogruluk
         viewModel.taramayiSifirla()
     }
 
@@ -326,10 +381,12 @@ fun KameraScreen(
         viewModel.taramayiSifirla()
     }
 
-    // Bağlama (Lens / Önizleme hazır olunca)
-    LaunchedEffect(lensFacing, lifecycleOwner, previewView) {
+    // Bağlama (Lens / Önizleme / Doğruluk hazır olunca)
+    // PERF: future tek seferlik alınır; lens değişiminde aynı future'a
+    // ikinci listener eklenmez (çift unbind/bind yarışı biter).
+    val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
+    LaunchedEffect(lensFacing, lifecycleOwner, previewView, imageAnalysis) {
         val currentPreview = previewView ?: return@LaunchedEffect
-        val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
         cameraProviderFuture.addListener({
             try {
                 val cameraProvider = cameraProviderFuture.get()
@@ -343,6 +400,10 @@ fun KameraScreen(
                     .build()
 
                 imageCapture.flashMode = flashMode
+                currentPreview.display?.rotation?.let { rot ->
+                    imageCapture.targetRotation = rot
+                    imageAnalysis.targetRotation = rot
+                }
 
                 cameraProvider.unbindAll()
                 cameraInstance = cameraProvider.bindToLifecycle(
@@ -363,14 +424,17 @@ fun KameraScreen(
     val cerceveKutu: Kutu? = remember(onizlemeBoyut) {
         if (onizlemeBoyut == IntSize.Zero) null else {
             val manzara = onizlemeBoyut.width > onizlemeBoyut.height
+            val duseyMi = !manzara
             with(density) {
                 val yanal = 24.dp.roundToPx()
-                val dikey = 96.dp.roundToPx()
+                val ustAlanPx = 96.dp.roundToPx()
+                val altAlanDp = if (duseyMi) 216.dp else 110.dp
+                val altAlanPx = altAlanDp.roundToPx()
                 KirpmaHesaplayici.statikCerceve(
                     gorunumGen = onizlemeBoyut.width,
                     gorunumYuk = onizlemeBoyut.height,
-                    ustAlanPx = dikey,
-                    altAlanPx = dikey,
+                    ustAlanPx = ustAlanPx,
+                    altAlanPx = altAlanPx,
                     yanalAlanPx = yanal,
                     oranGen = if (manzara) 4 else 3,
                     oranYuk = if (manzara) 3 else 4,
@@ -382,11 +446,40 @@ fun KameraScreen(
 
     // Algılanan tarama alanının overlapping px kutusu (çizim için)
     val aynaliMi = lensFacing == CameraSelector.LENS_FACING_FRONT
+    val yuksekRoiPx: Kutu? = remember(cerceveKutu, yuksekDogruluk, otomatikAlgila) {
+        val c = cerceveKutu
+        if (!yuksekDogruluk || !otomatikAlgila || c == null) null
+        else {
+            val genisletX = (c.genislik * 0.10).toInt()
+            val genisletY = (c.yukseklik * 0.10).toInt()
+            Kutu(c.sol - genisletX, c.ust - genisletY, c.genislik + genisletX * 2, c.yukseklik + genisletY * 2)
+        }
+    }
+
+    // ROI'yi analiz koordinatına çevirip kontrolcü + ViewModel'e besle
+    LaunchedEffect(yuksekRoiPx, taramaBilgi.analizGen, taramaBilgi.analizYuk, aynaliMi, yuksekDogruluk) {
+        val roi = yuksekRoiPx
+        val g = taramaBilgi.analizGen
+        val y = taramaBilgi.analizYuk
+        if (!yuksekDogruluk || roi == null || g <= 0 || y <= 0 || onizlemeBoyut == IntSize.Zero) {
+            analizKontrolcu.kilavuzRoi = null
+            viewModel.yuksekRoi = null
+        } else {
+            val oran = KirpmaHesaplayici.gorunumPxiGorselOranina(
+                roi, g, y, onizlemeBoyut.width, onizlemeBoyut.height, aynaliMi
+            )
+            val kutu = KirpmaHesaplayici.oraniKutuya(oran, g, y)
+            analizKontrolcu.kilavuzRoi = kutu
+            viewModel.yuksekRoi = kutu
+        }
+    }
+
     val taramaAlanKutuPx: Kutu? = remember(
-        taramaBilgi.alan, taramaBilgi.analizGen, taramaBilgi.analizYuk, onizlemeBoyut, aynaliMi
+        taramaBilgi.alan, taramaBilgi.analizGen, taramaBilgi.analizYuk, onizlemeBoyut, aynaliMi,
+        otomatikAlgila
     ) {
         val alan = taramaBilgi.alan
-        if (alan == null || taramaBilgi.analizGen <= 0 || onizlemeBoyut == IntSize.Zero) null
+        if (!otomatikAlgila || alan == null || taramaBilgi.analizGen <= 0 || onizlemeBoyut == IntSize.Zero) null
         else KirpmaHesaplayici.gorselOraniGorunumPxne(
             alan,
             taramaBilgi.analizGen,
@@ -404,7 +497,7 @@ fun KameraScreen(
             KutuOrani(0.0, 0.0, 1.0, 1.0)
         } else {
             KameraGoruntuIslemleri.hedefOrani(
-                soruOrani = taramaBilgi.alan,
+                soruOrani = if (otomatikAlgila) taramaBilgi.alan else null,
                 cerceveKutu = cerceveKutu,
                 tamGen = tamGen,
                 tamYuk = tamYuk,
@@ -455,7 +548,7 @@ fun KameraScreen(
                             // Hizalama/birleştirme başarısız → en keskin kareyi kırp
                             val ilk = kareYollari.first()
                             val yol = withContext(Dispatchers.Default) {
-                                KameraGoruntuIslemleri.tekCekimIsle(ilk, hedefOraniUret)
+                                KameraGoruntuIslemleri.tekCekimIsle(ilk, hedefOraniUret, refine = yuksekDogruluk)
                             }
                             kareYollari.drop(1).forEach { p ->
                                 try {
@@ -469,8 +562,9 @@ fun KameraScreen(
                         val kare = File(context.cacheDir, "soru_${UUID.randomUUID()}.jpg")
                         val cekildi = tekKareCek(kare, imageCapture, cameraExecutor)
                         if (!cekildi) throw IllegalStateException("Fotoğraf çekilemedi")
+                        if (yuksekDogruluk) islemMesaji = "Soru alanı netleştiriliyor…"
                         val sonuc = withContext(Dispatchers.Default) {
-                            KameraGoruntuIslemleri.tekCekimIsle(kare.absolutePath, hedefOraniUret)
+                            KameraGoruntuIslemleri.tekCekimIsle(kare.absolutePath, hedefOraniUret, refine = yuksekDogruluk)
                         }
                         cekimBitti(sonuc)
                     }
@@ -485,10 +579,12 @@ fun KameraScreen(
     }
 
     // Otomatik çekim: KILITLI'ya gelince biraz sonra tetikle (belirtilen kararlılık penceresi)
-    LaunchedEffect(otomatikCekim, kameraModu, taramaBilgi.durum) {
+    LaunchedEffect(otomatikCekim, otomatikAlgila, kameraModu, taramaBilgi.durum) {
         if (otomatikCekim &&
+            otomatikAlgila &&
             kameraModu == KameraModu.TEKLI &&
-            taramaBilgi.durum == TaramaDurumu.KILITLI
+            taramaBilgi.durum == TaramaDurumu.KILITLI &&
+            !modelUyari
         ) {
             delay(600)
             if (kameraModu == KameraModu.TEKLI &&
@@ -517,7 +613,9 @@ fun KameraScreen(
         AndroidView(
             factory = { ctx ->
                 PreviewView(ctx).also {
-                    it.implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                    // PERF: PERFORMANCE (SurfaceView) — COMPATIBLE TextureView'e
+                    // göre daha az GC/batarya maliyeti.
+                    it.implementationMode = PreviewView.ImplementationMode.PERFORMANCE
                     it.scaleType = PreviewView.ScaleType.FILL_CENTER
                     previewView = it
                 }
@@ -525,8 +623,12 @@ fun KameraScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .onSizeChanged { onizlemeBoyut = it },
-            update = {
+            update = { view ->
                 imageCapture.flashMode = flashMode
+                view.display?.rotation?.let { rot ->
+                    imageCapture.targetRotation = rot
+                    imageAnalysis.targetRotation = rot
+                }
             }
         )
 
@@ -635,14 +737,14 @@ fun KameraScreen(
 
                 // Odak halkası
                 odakNokta?.let { odak ->
-                    val yari = 44f
+                    val yari = 24.dp.toPx()
                     drawCircle(
                         Color.White.copy(alpha = 0.9f),
                         radius = yari,
                         center = odak,
-                        style = Stroke(width = 3f)
+                        style = Stroke(width = 2.dp.toPx())
                     )
-                    drawCircle(Color.White.copy(alpha = 0.6f), radius = 4f, center = odak)
+                    drawCircle(Color.White.copy(alpha = 0.6f), radius = 3.dp.toPx(), center = odak)
                 }
             } else {
                 // ÇOKLU: köşe vurguları yalnızca çerçevelendirmeye yardımcı olur
@@ -718,6 +820,12 @@ fun KameraScreen(
                         text = when {
                             kameraModu == KameraModu.COKLU ->
                                 "Çoklu mod — sayfanın tamamı tek karede"
+                            kameraModu == KameraModu.TEKLI && !otomatikAlgila ->
+                                "Otomatik algılama kapalı — çerçeveye hizalayın"
+                            modelUyari ->
+                                "Metin modeli hazırlanıyor — yaklaşın ve sabit tutun"
+                            perfOtomatik && dusukDonanim && yuksekDogrulukAyar ->
+                                "Düşük donanım — yüksek doğruluk otomatik kapalı"
                             taramaBilgi.durum == TaramaDurumu.KILITLI ->
                                 if (otomatikCekim) "Soru kilitlendi — çekiliyor…"
                                 else "Soru kilitlendi — deklanşöre basın"
@@ -735,6 +843,7 @@ fun KameraScreen(
             }
 
             if (kameraModu == KameraModu.TEKLI &&
+                otomatikAlgila &&
                 taramaBilgi.durum == TaramaDurumu.KILITLI &&
                 !isCapturing
             ) {
@@ -888,21 +997,27 @@ fun KameraScreen(
                         shape = arkaPlani,
                         color = if (secili) MaterialTheme.colorScheme.primary
                         else Color.Black.copy(alpha = 0.5f),
-                        modifier = Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = ripple(bounded = true)
-                        ) {
-                            if (kameraModu != modadi && !isCapturing) kameraModu = modadi
-                        }
+                        modifier = Modifier
+                            .heightIn(min = 44.dp)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = ripple(bounded = true)
+                            ) {
+                                if (kameraModu != modadi && !isCapturing) kameraModu = modadi
+                            }
                     ) {
-                        Text(
-                            text = etiket,
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (secili) MaterialTheme.colorScheme.onPrimary
-                            else Color.White.copy(alpha = 0.9f),
+                        Box(
+                            contentAlignment = Alignment.Center,
                             modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
-                        )
+                        ) {
+                            Text(
+                                text = etiket,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (secili) MaterialTheme.colorScheme.onPrimary
+                                else Color.White.copy(alpha = 0.9f)
+                            )
+                        }
                     }
                 }
             }
@@ -1017,6 +1132,7 @@ fun KameraScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp)
                         .padding(bottom = 24.dp)
                 ) {
@@ -1028,20 +1144,57 @@ fun KameraScreen(
                     )
                     Spacer(modifier = Modifier.height(16.dp))
 
+                    KameraAyarBaslik("Algılama")
+                    Spacer(modifier = Modifier.height(8.dp))
+
                     KameraAyarSatiri(
-                        baslik = "Uzun Pozlama",
-                        aciklama = "Deklanşöre bastığınızda birden çok kare alınır ve akıllıca birleştirilir; düşük ışıkta netlik belirgin artar. Çekim 1-2 saniye uzar.",
-                        secili = uzunPozlama,
-                        onDegisti = { viewModel.setUzunPozlama(it) }
+                        baslik = "Otomatik Soru Algılama",
+                        aciklama = "Tekli modda soru alanını otomatik bulur ve kırpar. Kapalıysa sabit çerçeveden kırpılır, metin aranmaz.",
+                        secili = otomatikAlgila,
+                        onDegisti = { viewModel.setOtomatikAlgila(it) }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    KameraAyarSatiri(
+                        baslik = "Yüksek Doğruluk",
+                        aciklama = if (perfOtomatik && dusukDonanim) "Bu cihazda otomatik kapalı (düşük donanım koruması). Manuel açabilirsiniz."
+                        else "1280x720 analiz + soru-no/şık tespiti + çekimde netleştirme. Pili ve işlemciyi daha çok kullanır.",
+                        secili = yuksekDogruluk,
+                        onDegisti = { viewModel.setYuksekDogruluk(it) },
+                        etkin = otomatikAlgila
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
 
                     KameraAyarSatiri(
                         baslik = "Otomatik Çekim",
-                        aciklama = "Soru kilitlendiğinde fotoğraf otomatik çekilir. Yalnız \"Tekli Soru\" modunda etkili.",
-                        secili = otomatikCekim,
-                        onDegisti = { viewModel.setOtomatikCekim(it) }
+                        aciklama = if (otomatikAlgila) "Soru kilitlendiğinde fotoğraf otomatik çekilir. Yalnız \"Tekli Soru\" modunda etkili."
+                        else "Otomatik algılama kapalıyken çalışmaz.",
+                        secili = otomatikCekim && otomatikAlgila,
+                        onDegisti = { viewModel.setOtomatikCekim(it) },
+                        etkin = otomatikAlgila
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    KameraAyarBaslik("Çekim & Pil")
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    KameraAyarSatiri(
+                        baslik = "Otomatik Performans",
+                        aciklama = "Düşük donanımlı cihazlarda yüksek doğruluğu otomatik kapatır. Kapalıysa seçim size aittir.",
+                        secili = perfOtomatik,
+                        onDegisti = { viewModel.setPerfOtomatik(it) }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    KameraAyarSatiri(
+                        baslik = "Uzun Pozlama",
+                        aciklama = "Deklanşöre bastığınızda 4 kare alınır ve birleştirilir; düşük ışıkta netlik artar. Çekim 1-2 saniye uzar — iyi ışıkta kapalı tutun.",
+                        secili = uzunPozlama,
+                        onDegisti = { viewModel.setUzunPozlama(it) }
                     )
                 }
             }
@@ -1055,11 +1208,22 @@ fun KameraScreen(
 }
 
 @Composable
+private fun KameraAyarBaslik(baslik: String) {
+    Text(
+        text = baslik,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary
+    )
+}
+
+@Composable
 private fun KameraAyarSatiri(
     baslik: String,
     aciklama: String,
     secili: Boolean,
-    onDegisti: (Boolean) -> Unit
+    onDegisti: (Boolean) -> Unit,
+    etkin: Boolean = true
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -1080,7 +1244,7 @@ private fun KameraAyarSatiri(
             )
         }
         Spacer(modifier = Modifier.width(12.dp))
-        Switch(checked = secili, onCheckedChange = onDegisti)
+        Switch(checked = secili, onCheckedChange = onDegisti, enabled = etkin)
     }
 }
 
@@ -1105,3 +1269,25 @@ private suspend fun tekKareCek(hedef: File, imageCapture: ImageCapture, executor
 }
 
 private const val UZUN_POZLAMA_KARE_SAYISI = 4
+
+/**
+ * Düşük donanım eşiği: toplam RAM ≤ 3 GB veya CPU çekirdeği ≤ 4 ise true.
+ * Bu cihazlarda yüksek doğruluk otomatik kapanır (yük hiç binmez); kullanıcı
+ * dilerse manuel açar. Yük yalnız kamera ekranı açıkken biner — ekran
+ * kapanınca analiz durur, tanıyıcı serbest kalır.
+ */
+private fun dusukDonanimMi(context: Context): Boolean {
+    return try {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        val ramDusuk = if (am != null) {
+            val bilgi = ActivityManager.MemoryInfo()
+            am.getMemoryInfo(bilgi)
+            bilgi.totalMem in 1..3L * 1024 * 1024 * 1024
+        } else false
+        val cekirdekDusuk = Runtime.getRuntime().availableProcessors() <= 4
+        val eskiSdk = Build.VERSION.SDK_INT < Build.VERSION_CODES.O
+        ramDusuk || cekirdekDusuk || eskiSdk
+    } catch (_: Exception) {
+        false
+    }
+}

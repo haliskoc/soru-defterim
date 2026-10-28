@@ -43,6 +43,9 @@ class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Conf
     @Inject
     lateinit var soruRepository: com.sorudefteri.data.repository.SoruRepository
 
+    @Inject
+    lateinit var gorselDepo: com.sorudefteri.data.images.GorselDepo
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override val workManagerConfiguration: Configuration
@@ -52,10 +55,18 @@ class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Conf
 
     override fun onCreate() {
         super.onCreate()
-        // Her gün saat 19:00'da tetiklenecek Aralıklı Tekrar bildirimini zamanla
-        ReminderScheduler.scheduleDailyReminder(this)
-        // Her gün saat 21:00'de tetiklenecek Seri Koruma (Streak) bildirimini zamanla
-        ReminderScheduler.scheduleStreakReminder(this)
+        appScope.launch {
+            try {
+                // PERF: Hatırlatıcılar ayarlı — kapalıysa planlama yapılmaz, açıksa güncellenir.
+                val dailyOn = ayarlarDataStore.isDailyReminderEnabled.first()
+                val streakOn = ayarlarDataStore.isStreakReminderEnabled.first()
+                if (dailyOn) ReminderScheduler.scheduleDailyReminder(this@SoruDefteriApplication)
+                else ReminderScheduler.cancelDailyReminder(this@SoruDefteriApplication)
+                if (streakOn) ReminderScheduler.scheduleStreakReminder(this@SoruDefteriApplication)
+                else ReminderScheduler.cancelStreakReminder(this@SoruDefteriApplication)
+            } catch (_: Exception) {
+            }
+        }
         // Otomatik yerel yedek - sadece ayar açıksa schedule et, yoksa iptal et
         appScope.launch {
             try {
@@ -71,18 +82,38 @@ class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Conf
             }
         }
         // Akıllı içe aktarma (dedup/merge) bakımı: contentHash kolonu sonradan
-        // eklendiği için eski kayıtların parmak izleri boş kalabilir. Tek seferlik
-        // olarak tüm boş kayıtların hash'i hesaplanır ve yazılır.
+        // eklendiği için eski kayıtların parmak izleri boş kalabilir.
+        // PERF: Bayrakla TEK SEFER çalışır; her açılışta tekrarlanmaz.
         appScope.launch {
             try {
-                soruRepository.backfillContentHashes()
+                if (!ayarlarDataStore.isContentHashBackfilled.first()) {
+                    soruRepository.backfillContentHashes()
+                    ayarlarDataStore.setContentHashBackfilled(true)
+                }
             } catch (_: Exception) {
                 // bakım başarısız olsa bile uygulama çalışmaya devam eder
+            }
+        }
+        // PERF: Eski/senkronla gelmiş görsellerin eksik thumb'ları tek seferlik
+        // üretilir (grid tam çözünürlük çözmesin). Hafif yol listesi + chunked IO.
+        appScope.launch {
+            try {
+                if (!ayarlarDataStore.isThumbsRepairedV1.first()) {
+                    val yollar = soruRepository.getAllImagePaths()
+                    if (yollar.isNotEmpty()) {
+                        gorselDepo.repairMissingThumbnails(yollar)
+                    }
+                    ayarlarDataStore.setThumbsRepairedV1(true)
+                }
+            } catch (_: Exception) {
             }
         }
     }
 
     override fun newImageLoader(context: PlatformContext): ImageLoader {
+        // Düşük donanımda önbelleği kıs (liste + reels aynı anda açıkken RAM baskısı olmasın).
+        // Kalite etkilenmez — önbellek yalnız kaydırma hızını etkiler.
+        val dusuk = dusukCihazMi()
         return ImageLoader.Builder(context)
             .components {
                 add(
@@ -93,16 +124,31 @@ class SoruDefteriApplication : Application(), SingletonImageLoader.Factory, Conf
             }
             .memoryCache {
                 MemoryCache.Builder()
-                    .maxSizePercent(context, 0.25)
+                    .maxSizePercent(context, if (dusuk) 0.12 else 0.18)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(context.cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(100L * 1024 * 1024)
+                    .maxSizeBytes(if (dusuk) 50L * 1024 * 1024 else 75L * 1024 * 1024)
                     .build()
             }
             .crossfade(true)
             .build()
+    }
+
+    /** RAM ≤ 3 GB veya çekirdek ≤ 4 ise düşük cihaz (görsel önbelleği kısılır). */
+    private fun dusukCihazMi(): Boolean {
+        return try {
+            val am = getSystemService(ACTIVITY_SERVICE) as? android.app.ActivityManager
+            val ramDusuk = if (am != null) {
+                val bilgi = android.app.ActivityManager.MemoryInfo()
+                am.getMemoryInfo(bilgi)
+                bilgi.totalMem in 1..3L * 1024 * 1024 * 1024
+            } else false
+            ramDusuk || Runtime.getRuntime().availableProcessors() <= 4
+        } catch (_: Exception) {
+            false
+        }
     }
 }

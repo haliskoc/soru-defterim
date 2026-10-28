@@ -6,10 +6,6 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -34,7 +30,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -81,11 +79,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -110,6 +110,9 @@ fun TestCozScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    // PERF: 1 Hz zaman akışı ayrı dinlenir; soru/cevap/dialog state'i
+    // her saniye recompose olmaz.
+    val timerTick by viewModel.timerTick.collectAsStateWithLifecycle()
     val scrollState = rememberScrollState()
     val navListState = rememberLazyListState()
     var isTestDrawingActive by rememberSaveable { mutableStateOf(false) }
@@ -117,6 +120,20 @@ fun TestCozScreen(
     // Test ekranı her açıldığında aktif oturum sorularını güvenle yükle
     LaunchedEffect(Unit) {
         viewModel.refreshSession()
+    }
+
+    // PERF: Ekran arka plandayken 1 Hz döngü durur (pil + CPU).
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+                androidx.lifecycle.Lifecycle.Event.ON_RESUME -> viewModel.resumeTimer()
+                androidx.lifecycle.Lifecycle.Event.ON_PAUSE -> viewModel.pauseTimer()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Geri tuşuna basıldığında çıkış onay dialogu
@@ -135,9 +152,9 @@ fun TestCozScreen(
 
     // Zaman Baskısı: 15s, 10s, 5s haptik titreşim uyarısı
     val view = LocalView.current
-    LaunchedEffect(uiState.currentQuestionRemainingSeconds) {
+    LaunchedEffect(timerTick.currentQuestionRemainingSeconds) {
         if (uiState.isTimePressure) {
-            val rem = uiState.currentQuestionRemainingSeconds
+            val rem = timerTick.currentQuestionRemainingSeconds
             if (rem == 15L || rem == 10L || rem == 5L) {
                 try {
                     view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
@@ -153,10 +170,10 @@ fun TestCozScreen(
                     title = {
                         // Sayaç / Kronometre veya Geri Sayım
                         TimerBadge(
-                            seconds = uiState.elapsedSeconds,
-                            remainingSeconds = uiState.currentQuestionRemainingSeconds,
+                            seconds = timerTick.elapsedSeconds,
+                            remainingSeconds = timerTick.currentQuestionRemainingSeconds,
                             isTimePressure = uiState.isTimePressure,
-                            isWarning = uiState.isTimeWarning
+                            isWarning = timerTick.isTimeWarning
                         )
                     },
                     navigationIcon = {
@@ -314,8 +331,8 @@ fun TestCozScreen(
                                 question = question,
                                 selectedAnswer = currentAnswer,
                                 questionIndex = targetIndex,
-                                isTimeWarning = uiState.isTimeWarning && targetIndex == uiState.currentIndex,
-                                remainingSeconds = uiState.currentQuestionRemainingSeconds,
+                                isTimeWarning = timerTick.isTimeWarning && targetIndex == uiState.currentIndex,
+                                remainingSeconds = timerTick.currentQuestionRemainingSeconds,
                                 onAnswerSelected = { option ->
                                     viewModel.selectAnswer(option)
                                 },
@@ -569,26 +586,25 @@ private fun QuestionContent(
     val soru = question.soru
     val dersAdi = DersTaksonomisi.getDersAdi(soru.examType, soru.subjectId)
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.TopCenter
     ) {
-        // Son 15 saniye uyarı kartı ve animasyonu
+        Column(
+            modifier = Modifier
+                .widthIn(max = 840.dp)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+        // Son 15 saniye uyarı kartı
+        // PERF: Sonsuz nabız KALDIRILDI — kalan süre değişiminde renk
+        // şiddeti statik hesaplanır (recomposition yalnızca saniyede bir).
         if (isTimeWarning && remainingSeconds > 0) {
-            val infiniteTransition = rememberInfiniteTransition(label = "warningPulse")
-            val pulseAlpha by infiniteTransition.animateFloat(
-                initialValue = 0.5f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(500, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "warningAlpha"
-            )
             val warningColor = if (remainingSeconds <= 5) Color(0xFFD32F2F) else Color(0xFFF57C00)
+            val urgency = ((15L - remainingSeconds.coerceIn(0L, 15L)).toFloat() / 15f)
+            val pulseAlpha = 0.5f + 0.5f * urgency
 
             Surface(
                 shape = RoundedCornerShape(12.dp),
@@ -702,7 +718,11 @@ private fun QuestionContent(
         ) {
             Box(modifier = Modifier.fillMaxWidth()) {
                 AsyncImage(
-                    model = File(soru.imagePath),
+                    // PERF: Orijinal dosya yerine ekran katmanı (1080px).
+                    model = coil3.request.ImageRequest.Builder(LocalContext.current)
+                        .data(File(soru.imagePath))
+                        .size(1080)
+                        .build(),
                     contentDescription = "Soru Görseli",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
@@ -740,54 +760,64 @@ private fun QuestionContent(
             color = MaterialTheme.colorScheme.onSurface
         )
 
-        Row(
+        Box(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-            verticalAlignment = Alignment.CenterVertically
+            contentAlignment = Alignment.Center
         ) {
-            CEVAP_SIKLARI.forEach { option ->
-                val isSelected = selectedAnswer.equals(option, ignoreCase = true)
+            Row(
+                modifier = Modifier
+                    .widthIn(max = 312.dp)
+                    .fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CEVAP_SIKLARI.forEach { option ->
+                    val isSelected = selectedAnswer.equals(option, ignoreCase = true)
 
-                val backgroundColor by animateColorAsState(
-                    targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                    label = "optionBg_$option"
-                )
-                val textColor by animateColorAsState(
-                    targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                    label = "optionText_$option"
-                )
-                val borderColor by animateColorAsState(
-                    targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                    label = "optionBorder_$option"
-                )
-
-                Box(
-                    modifier = Modifier
-                        .size(58.dp)
-                        .clip(CircleShape)
-                        .background(backgroundColor)
-                        .border(
-                            width = if (isSelected) 2.5.dp else 1.dp,
-                            color = borderColor,
-                            shape = CircleShape
-                        )
-                        .clickable {
-                            onAnswerSelected(option)
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = option,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
-                        color = textColor,
-                        fontSize = 20.sp
+                    val backgroundColor by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                        label = "optionBg_$option"
                     )
+                    val textColor by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                        label = "optionText_$option"
+                    )
+                    val borderColor by animateColorAsState(
+                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                        label = "optionBorder_$option"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .sizeIn(maxWidth = 56.dp, maxHeight = 56.dp)
+                            .aspectRatio(1f)
+                            .clip(CircleShape)
+                            .background(backgroundColor)
+                            .border(
+                                width = if (isSelected) 2.5.dp else 1.dp,
+                                color = borderColor,
+                                shape = CircleShape
+                            )
+                            .clickable {
+                                onAnswerSelected(option)
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = option,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.Bold,
+                            color = textColor,
+                            fontSize = 20.sp
+                        )
+                    }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
+        }
     }
 }
 
@@ -809,74 +839,89 @@ private fun TestCozBottomBar(
         color = MaterialTheme.colorScheme.surface,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center
         ) {
-            // Önceki Soru Butonu
-            OutlinedButton(
-                onClick = onPrevious,
-                enabled = !isFirst,
-                shape = RoundedCornerShape(12.dp),
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 52.dp)
+                    .widthIn(max = 840.dp)
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Önceki")
-            }
+                // Önceki Soru Butonu
+                OutlinedButton(
+                    onClick = onPrevious,
+                    enabled = !isFirst,
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 52.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Önceki", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
 
-            Spacer(modifier = Modifier.width(8.dp))
+                // Boş Bırak Butonu
+                FilledTonalButton(
+                    onClick = onClear,
+                    enabled = hasAnswer,
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 52.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.RadioButtonUnchecked,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        "Boş Bırak",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
 
-            // Boş Bırak Butonu
-            FilledTonalButton(
-                onClick = onClear,
-                enabled = hasAnswer,
-                shape = RoundedCornerShape(12.dp),
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 52.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.RadioButtonUnchecked,
-                    contentDescription = null,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Boş Bırak", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Sonraki / Bitir Butonu
-            Button(
-                onClick = if (isLast) onFinish else onNext,
-                shape = RoundedCornerShape(12.dp),
-                colors = if (isLast) {
-                    ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                } else {
-                    ButtonDefaults.buttonColors()
-                },
-                modifier = Modifier
-                    .weight(1f)
-                    .heightIn(min = 52.dp)
-            ) {
-                Text(if (isLast) "Bitir" else "Sonraki")
-                Spacer(modifier = Modifier.width(4.dp))
-                Icon(
-                    imageVector = if (isLast) Icons.Default.Flag else Icons.AutoMirrored.Filled.ArrowForward,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
+                // Sonraki / Bitir Butonu
+                Button(
+                    onClick = if (isLast) onFinish else onNext,
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                    colors = if (isLast) {
+                        ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    } else {
+                        ButtonDefaults.buttonColors()
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 52.dp)
+                ) {
+                    Text(
+                        if (isLast) "Bitir" else "Sonraki",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Icon(
+                        imageVector = if (isLast) Icons.Default.Flag else Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }

@@ -44,6 +44,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
@@ -63,6 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -162,7 +164,8 @@ fun SoruDetayScreen(
     }
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-        val isTabletLayout = maxWidth >= 700.dp
+        val isTabletLayout = maxWidth >= 700.dp && maxHeight >= 500.dp
+        val isNarrowRightPane = maxWidth * 0.45f < 420.dp
         var selectedTabletTabIndex by rememberSaveable { mutableStateOf(0) }
 
         Scaffold(
@@ -291,27 +294,59 @@ fun SoruDetayScreen(
                             .fillMaxHeight()
                             .background(MaterialTheme.colorScheme.surface)
                     ) {
-                        PrimaryTabRow(
-                            selectedTabIndex = selectedTabletTabIndex,
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                        ) {
+                        val tabletTabsContent: @Composable () -> Unit = {
                             Tab(
                                 selected = selectedTabletTabIndex == 0,
                                 onClick = { selectedTabletTabIndex = 0 },
-                                text = { Text("AI Çözüm & Koç", fontWeight = if (selectedTabletTabIndex == 0) FontWeight.Bold else FontWeight.Normal) },
+                                text = {
+                                    Text(
+                                        "AI Çözüm & Koç",
+                                        fontWeight = if (selectedTabletTabIndex == 0) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
                                 icon = { Icon(Icons.Default.AutoAwesome, contentDescription = "AI Çözüm") }
                             )
                             Tab(
                                 selected = selectedTabletTabIndex == 1,
                                 onClick = { selectedTabletTabIndex = 1 },
-                                text = { Text("Sokratik Koç", fontWeight = if (selectedTabletTabIndex == 1) FontWeight.Bold else FontWeight.Normal) },
+                                text = {
+                                    Text(
+                                        "Sokratik Koç",
+                                        fontWeight = if (selectedTabletTabIndex == 1) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
                                 icon = { Icon(Icons.Default.Psychology, contentDescription = "Sokratik Koç") }
                             )
                             Tab(
                                 selected = selectedTabletTabIndex == 2,
                                 onClick = { selectedTabletTabIndex = 2 },
-                                text = { Text("Benzer Soru", fontWeight = if (selectedTabletTabIndex == 2) FontWeight.Bold else FontWeight.Normal) },
+                                text = {
+                                    Text(
+                                        "Benzer Soru",
+                                        fontWeight = if (selectedTabletTabIndex == 2) FontWeight.Bold else FontWeight.Normal,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                },
                                 icon = { Icon(Icons.Default.School, contentDescription = "Benzer Soru") }
+                            )
+                        }
+                        if (isNarrowRightPane) {
+                            SecondaryScrollableTabRow(
+                                selectedTabIndex = selectedTabletTabIndex,
+                                edgePadding = 8.dp,
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                tabs = tabletTabsContent
+                            )
+                        } else {
+                            PrimaryTabRow(
+                                selectedTabIndex = selectedTabletTabIndex,
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                                tabs = tabletTabsContent
                             )
                         }
 
@@ -341,7 +376,7 @@ fun SoruDetayScreen(
                                     onManualSolution = { viewModel.setShowManualSolutionDialog(true) },
                                     onExternalAiShare = { viewModel.setShowExternalAiShareDialog(true, ExternalAiMode.SOLUTION) }
                                 )
-                                Spacer(modifier = Modifier.navigationBarsPadding().height(88.dp))
+                                Spacer(modifier = Modifier.navigationBarsPadding().height(32.dp))
                             }
 
                             1 -> SoruChatContent(

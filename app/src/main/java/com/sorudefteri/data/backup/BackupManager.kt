@@ -103,6 +103,9 @@ data class ImportOzeti(
 @Serializable
 data class BackupSoruItem(
     val originalId: Long? = null,
+    val evrenselId: String = "",
+    val updatedAt: Long = 0L,
+    val isDeleted: Int = 0,
     // Varsayılan değer eklendi: eski manifestlerde imageName alanı olmayabilir ve
     // eksik alan tüm decode'u çökertiyordu. Boş değer "görselsiz metin kaydı" demektir.
     val imageName: String = "",
@@ -134,7 +137,9 @@ data class BackupSoruItem(
     val fsrsDifficulty: Double? = null,
     val fsrsReps: Int = 0,
     val fsrsLapses: Int = 0,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val denemeId: Long? = null,
+    val denemeSoruNo: Int? = null
 )
 
 @Serializable
@@ -170,13 +175,23 @@ data class BackupBenzerSoruItem(
 
 @Serializable
 data class BackupDenemeItem(
+    val testId: String = "",
     val baslik: String,
+    val yayinEvi: String = "",
     val sinavTuru: String,
     val tarih: Long,
+    val sureDakika: Int = 165,
+    val toplamSoru: Int = 0,
+    val toplamDogru: Int = 0,
+    val toplamYanlis: Int = 0,
+    val toplamBos: Int = 0,
     val toplamNet: Double,
     val dersNetleriJson: String,
+    val cevapAnahtariJson: String? = null,
+    val ogrenciCevaplariJson: String? = null,
     val notlar: String? = null,
-    val createdAt: Long
+    val createdAt: Long,
+    val updatedAt: Long = 0L
 )
 
 @Serializable
@@ -377,6 +392,9 @@ open class BackupManager @Inject constructor(
                         backupItems.add(
                             BackupSoruItem(
                                 originalId = imageKey,
+                                evrenselId = soru.evrenselId,
+                                updatedAt = soru.updatedAt,
+                                isDeleted = soru.isDeleted,
                                 // Boşsa içe aktarma bu soruyu "görselsiz metin" olarak alır.
                                 imageName = uniqueImageName ?: "",
                                 solutionImageName = uniqueSolutionName,
@@ -707,7 +725,9 @@ open class BackupManager @Inject constructor(
             }
             val existingByHash: MutableMap<String, SoruEntity> = HashMap<String, SoruEntity>().apply {
                 if (soruDedupDao != null) {
-                    putAll(soruDedupDao.getByContentHashes(itemHashes.filter { it.isNotBlank() }).associateBy { it.contentHash })
+                    itemHashes.filter { it.isNotBlank() }.distinct().chunked(400).forEach { batch ->
+                        putAll(soruDedupDao.getByContentHashes(batch).associateBy { it.contentHash })
+                    }
                 }
             }
             var guncellenenSoru = 0
@@ -880,6 +900,8 @@ open class BackupManager @Inject constructor(
                 newSorular.add(
                     Soru(
                         id = 0L,
+                        evrenselId = item.evrenselId.ifBlank { UUID.randomUUID().toString() },
+                        isDeleted = 0,
                         imagePath = permanentSoruPath,
                         solutionImagePath = permanentSolutionPath,
                         correctAnswer = item.correctAnswer,
@@ -910,7 +932,10 @@ open class BackupManager @Inject constructor(
                         fsrsReps = item.fsrsReps,
                         fsrsLapses = item.fsrsLapses,
                         createdAt = item.createdAt,
-                        updatedAt = System.currentTimeMillis(),
+                        // Senkron uyumu: kaynak updatedAt korunur (0/eski manifest ise now).
+                        // Önceden her import now basıyordu; bu, cihazlar-arası
+                        // "yenisi kazanır" sırasını bozuyordu.
+                        updatedAt = item.updatedAt.takeIf { it > 0 } ?: System.currentTimeMillis(),
                         contentHash = contentHash
                     )
                 )

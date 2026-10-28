@@ -24,7 +24,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -94,7 +97,8 @@ class IstatistikViewModel @Inject constructor(
     private val testSessionManager: TestSessionManager,
     private val ayarlarDataStore: AyarlarDataStore? = null,
     val badgeManager: BadgeManager? = null,
-    private val aiRepository: AiRepository? = null
+    private val aiRepository: AiRepository? = null,
+    private val defaultDispatcher: kotlinx.coroutines.CoroutineDispatcher = kotlinx.coroutines.Dispatchers.Default
 ) : ViewModel() {
 
     private val _diagnosticReport = MutableStateFlow<String?>(null)
@@ -154,18 +158,31 @@ class IstatistikViewModel @Inject constructor(
         Triple(report, isGen, err)
     }
 
+    // PERF: Haftalık karşılaştırma SQL COUNT'larla ayrı hafif akıştadır;
+    // allQuestions yalnızca kartların ihtiyacı için tek Flow'dan gelir.
+    private val haftalikFlow = soruRepository.totalCount
+        .flatMapLatest { haftalikKarsilastirmaAkisi() }
+        .flowOn(defaultDispatcher)
+
+    private val grupA = combine(
+        soruRepository.getAllTestResults(),
+        soruRepository.getAllSorular(),
+        gamificationFlow
+    ) { tests, questions, gamification -> Triple(tests, questions, gamification) }
+
+    private val grupB = combine(
+        soruRepository.getAllDenemeler(),
+        diagnosticFlow,
+        haftalikFlow
+    ) { denemeler, diagnostic, haftalik -> Triple(denemeler, diagnostic, haftalik) }
+
     val uiState: StateFlow<IstatistikUiState> = combine(
         combine(countsFlow, distributionsFlow) { counts, dist -> counts to dist },
-        combine(
-            soruRepository.getAllTestResults(),
-            soruRepository.getAllSorular(),
-            gamificationFlow,
-            soruRepository.getAllDenemeler(),
-            diagnosticFlow
-        ) { tests, questions, gamification, denemeler, diagnostic ->
-            Tuple5(tests, questions, gamification, denemeler, diagnostic)
-        }
-    ) { (counts, dist), (testResults, allQuestions, gamification, denemeler, diagnostic) ->
+        combine(grupA, grupB) { a, b -> a to b }
+    ) { cd, ab ->
+        val (counts, dist) = cd
+        val (testResults, allQuestions, gamification) = ab.first
+        val (denemeler, diagnostic, haftalik) = ab.second
         val total = counts.first
         val solved = counts.second
         val unsolved = counts.third
@@ -201,9 +218,16 @@ class IstatistikViewModel @Inject constructor(
             isGeneratingDiagnostic = diagnostic.second,
             diagnosticError = diagnostic.third,
             isLoading = false,
-            haftalikKarsilastirma = haftalikKarsilastirmaHesapla(allQuestions, testResults, denemeler)
+            haftalikKarsilastirma = haftalik.copy(
+                buHaftaTestSayisi = testResults.count { buHaftada(it.completedAt, nowMs()) },
+                gecenHaftaTestSayisi = testResults.count { gecenHaftada(it.completedAt, nowMs()) },
+                buHaftaOrtNet = testResults.filter { buHaftada(it.completedAt, nowMs()) }.map { it.netCount.toDouble() }.toFloatOrZero(),
+                gecenHaftaOrtNet = testResults.filter { gecenHaftada(it.completedAt, nowMs()) }.map { it.netCount.toDouble() }.toFloatOrZero(),
+                buHaftaDenemeSayisi = denemeler.count { buHaftada(it.tarih, nowMs()) },
+                gecenHaftaDenemeSayisi = denemeler.count { gecenHaftada(it.tarih, nowMs()) }
+            )
         )
-    }.stateIn(
+    }.flowOn(defaultDispatcher).stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = IstatistikUiState(isLoading = true)
@@ -213,6 +237,29 @@ class IstatistikViewModel @Inject constructor(
      * Yeni detay: son 7 günü önceki 7 günle karşılaştır.
      * Tüm veriler zaten yüklü listelerden türetilir; ek DB sorgusu yapmaz.
      */
+    /**
+     * PERF: Soru sayımları SQL COUNT ile (tam liste gezmesi yok).
+     * Test/deneme sayımları küçük listelerden (zaten bellekte) hesaplanır.
+     */
+    private fun haftalikKarsilastirmaAkisi(): kotlinx.coroutines.flow.Flow<HaftalikKarsilastirma> = flow {
+        val now = System.currentTimeMillis()
+        val haftaMillis = 7L * 24L * 60L * 60L * 1000L
+        val buHaftaBas = now - haftaMillis
+        val gecenHaftaBas = now - 2L * haftaMillis
+        val buEklenen = soruRepository.countAddedBetween(buHaftaBas, now)
+        val gecenEklenen = soruRepository.countAddedBetween(gecenHaftaBas, buHaftaBas)
+        val buCozulen = soruRepository.countSolvedBetween(buHaftaBas, now)
+        val gecenCozulen = soruRepository.countSolvedBetween(gecenHaftaBas, buHaftaBas)
+        emit(
+            HaftalikKarsilastirma(
+                buHaftaEklenenSoru = buEklenen,
+                gecenHaftaEklenenSoru = gecenEklenen,
+                buHaftaCozulenSoru = buCozulen,
+                gecenHaftaCozulenSoru = gecenCozulen
+            )
+        )
+    }
+
     private fun haftalikKarsilastirmaHesapla(
         allQuestions: List<Soru>,
         testResults: List<TestSonucEntity>,
@@ -425,3 +472,14 @@ private data class Tuple5<A, B, C, D, E>(
     val fourth: D,
     val fifth: E
 )
+
+private fun nowMs(): Long = System.currentTimeMillis()
+private fun buHaftada(t: Long, now: Long): Boolean {
+    val hafta = 7L * 24L * 60L * 60L * 1000L
+    return t > now - hafta && t <= now
+}
+private fun gecenHaftada(t: Long, now: Long): Boolean {
+    val hafta = 7L * 24L * 60L * 60L * 1000L
+    return t > now - 2L * hafta && t <= now - hafta
+}
+private fun List<Double>.toFloatOrZero(): Float = if (isEmpty()) 0f else average().toFloat()

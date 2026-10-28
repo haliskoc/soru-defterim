@@ -21,8 +21,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
@@ -108,12 +110,13 @@ class TestOlusturViewModel @Inject constructor(
                     _uiState.update { it.copy(isLoading = false, errorMessage = e.localizedMessage) }
                 }
                 .collect { questions ->
-                    _uiState.update { state ->
-                        val newState = state.copy(
-                            allQuestions = questions,
-                            isLoading = false
+                    _uiState.update { current ->
+                        recomputeUi(
+                            current.copy(
+                                allQuestions = questions,
+                                isLoading = false
+                            )
                         )
-                        recomputeUi(newState)
                     }
                 }
         }

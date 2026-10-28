@@ -26,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -549,9 +550,15 @@ object KaTeXHtmlGenerator {
         // olduğu için sistem ölçeğini KENDİSİ uygulamıyor; Compose Text ise
         // uyguluyor. Büyütülmüş yazıda formüller komşu metinden küçük kalıp
         // hizalamayı bozuyordu. Ölçek burada HTML'e uygulanıyor.
-        fontScale: Float = 1f
+        fontScale: Float = 1f,
+        // PERF: Birleştirilmiş AI çözüm gövdesi zaten preprocess edilmiş
+        // HTML içeriyorsa (bkz. generateCombinedHtml) ikinci kez
+        // preprocessContent çalıştırılmaz — hem CPU hem çift-escape riski biter.
+        skipPreprocess: Boolean = false,
+        // PERF: Birleştirilmiş kart stilleri (tek WebView'de bölüm kartları).
+        extraCss: String = ""
     ): String {
-        val preprocessed = preprocessContent(content, displayMode)
+        val preprocessed = if (skipPreprocess) content else preprocessContent(content, displayMode)
         val fontSizePx: Float = (fontSizeSp * fontScale.coerceIn(0.85f, 2.0f))
 
         return """
@@ -651,6 +658,7 @@ object KaTeXHtmlGenerator {
                         font-weight: 700;
                         color: $textColorHex;
                     }
+                    $extraCss
                 </style>
             </head>
             <body>
@@ -751,6 +759,66 @@ object KaTeXHtmlGenerator {
             </html>
         """.trimIndent()
     }
+
+    /**
+     * PERF: AI çözüm bölümlerini TEK WebView'de renderlamak için birleştirilmiş
+     * gövde üretir. Her bölüm [MathMarkdownText] kartındaki renk/başlık
+     * karşılığıyla HTML'e gömülür; sonuç [generateHtml] içine
+     * `skipPreprocess=true` ile verilir (bölümler burada zaten preprocess edilir).
+     *
+     * Bölüm tipi -> kart stili eşlemesi:
+     * - CORRECT_ANSWER (yeşil), FORMULAS (mor), STEPS (nötr),
+     *   MISTAKES (kırmızı), TIPS (turuncu), GENERAL (sade).
+     */
+    fun generateCombinedHtml(
+        sections: List<Triple<Int, String, String>>,
+        displayMode: Boolean = false
+    ): String {
+        if (sections.isEmpty()) return ""
+        val sb = StringBuilder()
+        for ((typeOrdinal, title, content) in sections) {
+            val preprocessed = preprocessContent(content, displayMode)
+            if (preprocessed.isBlank() && title.isBlank()) continue
+            val cardClass = when (typeOrdinal) {
+                0 -> "katex-card katex-card-answer"
+                1 -> "katex-card katex-card-formulas"
+                2 -> "katex-card katex-card-steps"
+                3 -> "katex-card katex-card-mistakes"
+                4 -> "katex-card katex-card-tips"
+                else -> "katex-card katex-card-general"
+            }
+            val safeTitle = title
+                .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            sb.append("<div class=\"$cardClass\">")
+            if (safeTitle.isNotBlank()) {
+                sb.append("<div class=\"katex-card-title\">").append(safeTitle).append("</div>")
+            }
+            sb.append("<div class=\"katex-card-body\">").append(preprocessed).append("</div>")
+            sb.append("</div>")
+        }
+        return sb.toString()
+    }
+
+    /**
+     * PERF: Birleştirilmiş kart stilleri. [generateHtml] içine
+     * `extraCss` olarak verilir. Renkler MathMarkdownText kartlarıyla birebir
+     * eşleşir (yeşil/mor/nötr/kırmızı/turuncu).
+     */
+    fun combinedCardsCss(textColorHex: String): String = """
+        .katex-card { border-radius: 14px; padding: 14px; margin: 0 0 12px 0; }
+        .katex-card:last-child { margin-bottom: 0; }
+        .katex-card-title { font-size: 1.1em; font-weight: 700; margin: 0 0 8px 0; }
+        .katex-card-body { color: $textColorHex; }
+        .katex-card-answer { background: rgba(46,125,50,0.12); border: 1px solid rgba(46,125,50,0.35); }
+        .katex-card-answer .katex-card-title { color: #2E7D32; }
+        .katex-card-formulas { background: rgba(98,0,238,0.08); border: 1px solid rgba(98,0,238,0.25); }
+        .katex-card-steps { background: rgba(128,128,128,0.10); border: 1px solid rgba(128,128,128,0.30); }
+        .katex-card-mistakes { background: rgba(211,47,47,0.08); border: 1px solid rgba(211,47,47,0.28); }
+        .katex-card-mistakes .katex-card-title { color: #D32F2F; }
+        .katex-card-tips { background: rgba(245,124,0,0.10); border: 1px solid rgba(245,124,0,0.30); }
+        .katex-card-tips .katex-card-title { color: #F57C00; }
+        .katex-card-general { background: transparent; border: none; padding: 4px 0; }
+    """.trimIndent()
 }
 
 /**
@@ -778,9 +846,13 @@ fun KaTeXMathView(
     fontSizeSp: Float = 15f,
     textColor: Color = MaterialTheme.colorScheme.onSurface,
     backgroundColor: Color = Color.Transparent,
-    isDarkTheme: Boolean = isSystemInDarkTheme(),
+    isDarkTheme: Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f,
     displayMode: Boolean = false,
-    fallback: (@Composable () -> Unit)? = null
+    fallback: (@Composable () -> Unit)? = null,
+    // PERF: Birleştirilmiş kart gövdesi verilirse content ikinci kez
+    // preprocess edilmez; tek WebView'de bölüm kartları renderlanır.
+    combinedBodyHtml: String? = null,
+    combinedCss: String = ""
 ) {
     if (content.isBlank()) return
 
@@ -831,16 +903,30 @@ fun KaTeXMathView(
         remeasureToken++
     }
 
-    val html = remember(content, isDarkTheme, textColorHex, bgColorHex, fontSizeSp, displayMode, density.fontScale) {
-        KaTeXHtmlGenerator.generateHtml(
-            content = content,
-            isDarkTheme = isDarkTheme,
-            textColorHex = textColorHex,
-            backgroundColorHex = bgColorHex,
-            fontSizeSp = fontSizeSp,
-            displayMode = displayMode,
-            fontScale = density.fontScale
-        )
+    val html = remember(content, combinedBodyHtml, isDarkTheme, textColorHex, bgColorHex, fontSizeSp, displayMode, density.fontScale, combinedCss) {
+        if (combinedBodyHtml != null) {
+            KaTeXHtmlGenerator.generateHtml(
+                content = combinedBodyHtml,
+                isDarkTheme = isDarkTheme,
+                textColorHex = textColorHex,
+                backgroundColorHex = bgColorHex,
+                fontSizeSp = fontSizeSp,
+                displayMode = displayMode,
+                fontScale = density.fontScale,
+                skipPreprocess = true,
+                extraCss = combinedCss
+            )
+        } else {
+            KaTeXHtmlGenerator.generateHtml(
+                content = content,
+                isDarkTheme = isDarkTheme,
+                textColorHex = textColorHex,
+                backgroundColorHex = bgColorHex,
+                fontSizeSp = fontSizeSp,
+                displayMode = displayMode,
+                fontScale = density.fontScale
+            )
+        }
     }
 
     Box(
@@ -945,6 +1031,16 @@ fun KaTeXMathView(
                         hasWebViewError = true
                     }
                 }
+            },
+            onRelease = { webView ->
+                // Bellek sızıntısı koruması: sayfa değişince WebView + JS context serbest kalır.
+                try {
+                    webView.stopLoading()
+                    webView.loadUrl("about:blank")
+                    webView.clearHistory()
+                    webView.removeAllViews()
+                    webView.destroy()
+                } catch (_: Throwable) {}
             }
         )
     }

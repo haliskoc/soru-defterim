@@ -28,7 +28,7 @@ import com.sorudefteri.data.local.entity.SoruFtsEntity
         BenzerSoruEntity::class,
         DenemeSinaviEntity::class
     ],
-    version = 11,
+    version = 13,
     exportSchema = true
 )
 abstract class SoruDatabase : RoomDatabase() {
@@ -192,6 +192,45 @@ abstract class SoruDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("ALTER TABLE `sorular` ADD COLUMN `contentHash` TEXT NOT NULL DEFAULT ''")
                 db.execSQL("CREATE INDEX IF NOT EXISTS `index_sorular_contentHash` ON `sorular` (`contentHash`)")
+            }
+        }
+
+        // Cihazlar-arası eşleşme: evrensel kimlik + soft-delete
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `sorular` ADD COLUMN `evrenselId` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `sorular` ADD COLUMN `isDeleted` INTEGER NOT NULL DEFAULT 0")
+                // Önce backfill (boş string'ler unique index'i ihlal eder), sonra unique index
+                db.execSQL(
+                    "UPDATE `sorular` SET `evrenselId` = lower(hex(randomblob(16))) " +
+                        "WHERE `evrenselId` = '' OR `evrenselId` IS NULL"
+                )
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_sorular_evrenselId` ON `sorular` (`evrenselId`)")
+            }
+        }
+
+        // Deneme sınavı & optik form & çift yönlü soru bağı alanları
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // 1. Sorular tablosuna denemeId ve denemeSoruNo ekle
+                db.execSQL("ALTER TABLE `sorular` ADD COLUMN `denemeId` INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE `sorular` ADD COLUMN `denemeSoruNo` INTEGER DEFAULT NULL")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_sorular_denemeId` ON `sorular` (`denemeId`)")
+
+                // 2. Denemeler tablosuna optik, yayınevi ve soru detay alanlarını ekle
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `testId` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `yayinEvi` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `sureDakika` INTEGER NOT NULL DEFAULT 165")
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `toplamSoru` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `toplamDogru` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `toplamYanlis` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `toplamBos` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `cevapAnahtariJson` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `ogrenciCevaplariJson` TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `updatedAt` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `denemeler` ADD COLUMN `isDeleted` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("UPDATE `denemeler` SET `updatedAt` = `createdAt` WHERE `updatedAt` = 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_denemeler_testId` ON `denemeler` (`testId`)")
             }
         }
     }

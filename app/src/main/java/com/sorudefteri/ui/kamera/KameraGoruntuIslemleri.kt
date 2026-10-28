@@ -5,16 +5,24 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.util.Log
+import com.google.android.gms.tasks.Tasks
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.sorudefteri.domain.kamera.KareBirlestirici
 import com.sorudefteri.domain.kamera.KareHizalayici
 import com.sorudefteri.domain.kamera.KirpmaHesaplayici
 import com.sorudefteri.domain.kamera.Kutu
 import com.sorudefteri.domain.kamera.KutuOrani
 import com.sorudefteri.domain.kamera.Ofset
+import com.sorudefteri.domain.kamera.SoruAlgilayici
+import com.sorudefteri.domain.kamera.TarananSatir
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 /**
  * "Ölç-sonra-kırp" görüntü HAT'ı (Android tarafı).
@@ -107,10 +115,16 @@ object KameraGoruntuIslemleri {
     }
 
     /** Tek kare: kırpma gerekmiyorsa özgün dosya yolunu aynen döner. */
-    fun tekCekimIsle(tamYol: String, hedefOraniKapatici: (tamGen: Int, tamYuk: Int) -> KutuOrani): String {
+    fun tekCekimIsle(
+        tamYol: String,
+        hedefOraniKapatici: (tamGen: Int, tamYuk: Int) -> KutuOrani,
+        refine: Boolean = false
+    ): String {
         return try {
             val tam = ornekliCoz(tamYol, TAVAN_TEK) ?: return tamYol
-            val hedefOrani = hedefOraniKapatici(tam.width, tam.height)
+            val hedefOrani = hedefOraniKapatici(tam.width, tam.height).let { oran ->
+                if (refine) refineOrani(tam, oran) ?: oran else oran
+            }
             val kutu = KirpmaHesaplayici.oraniKutuya(hedefOrani, tam.width, tam.height)
 
             if (kutu.genislik >= tam.width - 2 && kutu.yukseklik >= tam.height - 2) {
@@ -146,6 +160,16 @@ object KameraGoruntuIslemleri {
         hedefKlasor: File
     ): String? {
         if (dosyalar.isEmpty()) return null
+        // PERF: Hata/OOM yolunda yarım bitmap'ler recycle edilsin diye
+        // tüm ara bitmap'ler izlenir; tepe RAM düşer.
+        val izlenen = ArrayList<Bitmap>()
+        fun izle(b: Bitmap): Bitmap {
+            izlenen.add(b)
+            return b
+        }
+        fun birak(b: Bitmap) {
+            izlenen.remove(b)
+        }
         return try {
             val kirpikler = ArrayList<Bitmap>(dosyalar.size)
             var referansGen = 0
@@ -154,18 +178,20 @@ object KameraGoruntuIslemleri {
 
             for (yol in dosyalar) {
                 val tam = ornekliCoz(yol, TAVAN_UZUN) ?: continue
+                izle(tam)
                 if (referansKutu == null) {
                     val hedefOrani = hedefOraniKapatici(tam.width, tam.height)
                     referansKutu = KirpmaHesaplayici.oraniKutuya(hedefOrani, tam.width, tam.height)
                 }
                 val kirpik = kirp(tam, referansKutu) ?: continue
-                tam.recycle()
+                izle(kirpik)
+                if (!tam.isRecycled) tam.recycle()
+                birak(tam)
                 referansGen = referansKutu.genislik
                 referansYuk = referansKutu.yukseklik
                 kirpikler.add(kirpik)
             }
             if (kirpikler.size < 2) {
-                kirpikler.forEach { it.recycle() }
                 return null
             }
 
@@ -173,43 +199,57 @@ object KameraGoruntuIslemleri {
             val boyutlu = kirpikler.map { b ->
                 if (b.width == referansGen && b.height == referansYuk) b else {
                     val olcekli = Bitmap.createScaledBitmap(b, referansGen, referansYuk, true)
-                    if (olcekli != b) b.recycle()
+                    if (olcekli != b) {
+                        izle(olcekli)
+                        if (!b.isRecycled) b.recycle()
+                        birak(b)
+                    }
                     olcekli
                 }
             }
 
+            // PERF: Kare başına ARGB + gri IntArray aynı anda tutuluyordu
+            // (~2× piksel × kare sayısı). Gri dizi hizalamadan sonra
+            // serbest bırakılır; referans gri korunur.
             val argbDizileri = ArrayList<IntArray>(boyutlu.size)
+            var referansGri: IntArray? = null
             val griDizileri = ArrayList<IntArray>(boyutlu.size)
             for (b in boyutlu) {
                 val dizi = IntArray(referansGen * referansYuk)
                 b.getPixels(dizi, 0, referansGen, 0, 0, referansGen, referansYuk)
-                b.recycle()
+                if (!b.isRecycled) b.recycle()
+                birak(b)
                 argbDizileri.add(dizi)
-                griDizileri.add(griDizisigine(dizi))
+                val gri = griDizisigine(dizi)
+                if (referansGri == null) referansGri = gri
+                griDizileri.add(gri)
             }
+            val refGri = referansGri ?: return null
 
             // Hizalama: kare 0 referans
             val ofsetler = ArrayList<Ofset?>(griDizileri.size)
             var hizalanan = 0
             for (i in griDizileri.indices) {
                 val ofset = if (i == 0) null
-                else KareHizalayici.hizala(griDizileri[0], griDizileri[i], referansGen, referansYuk)
+                else KareHizalayici.hizala(refGri, griDizileri[i], referansGen, referansYuk)
                 ofsetler.add(ofset)
                 if (ofset != null) hizalanan++
             }
+            griDizileri.clear()
 
             val birlesik: IntArray? =
-                if (hizalanan * 10 >= griDizileri.size * 5) { // en az yarısı hizalanabildiyse
+                if (hizalanan * 10 >= argbDizileri.size * 5) { // en az yarısı hizalanabildiyse
                     KareBirlestirici.birlestir(argbDizileri, referansGen, referansYuk, ofsetler)
                 } else null
 
-            val sonDizi = birlesik ?: enKeskin(argbDizileri, griDizileri, referansGen, referansYuk)
+            val sonDizi = birlesik ?: enKeskinHafif(argbDizileri, refGri, referansGen, referansYuk)
+            argbDizileri.clear()
 
             val sonuc = Bitmap.createBitmap(referansGen, referansYuk, Bitmap.Config.ARGB_8888)
             sonuc.setPixels(sonDizi, 0, referansGen, 0, 0, referansGen, referansYuk)
             val hedefDosya = File(hedefKlasor, "uzunpoz_${UUID.randomUUID()}.jpg")
             dosyayaYaz(sonuc, hedefDosya)
-            sonuc.recycle()
+            if (!sonuc.isRecycled) sonuc.recycle()
 
             dosyalar.forEach { yol -> try { File(yol).delete() } catch (_: Exception) {} }
             hedefDosya.absolutePath
@@ -219,19 +259,28 @@ object KameraGoruntuIslemleri {
         } catch (t: Throwable) {
             Log.w(TAG, "Uzun pozlama hatası: ${t.message}")
             null
+        } finally {
+            for (b in izlenen) {
+                try { if (!b.isRecycled) b.recycle() } catch (_: Exception) {}
+            }
+            izlenen.clear()
         }
     }
 
-    private fun enKeskin(
+    /**
+     * PERF: En keskin kare seçimi gri dizileri yeniden hesaplamadan yapılır
+     * (önceden tüm gri diziler bellekte tutuluyordu).
+     */
+    private fun enKeskinHafif(
         argbDizileri: List<IntArray>,
-        griDizileri: List<IntArray>,
+        referansGri: IntArray,
         gen: Int,
         yuk: Int
     ): IntArray {
         var enIyi = 0
-        var enIyiSkor = Double.NEGATIVE_INFINITY
-        for (i in griDizileri.indices) {
-            val skor = KareHizalayici.keskinlikOlcu(griDizileri[i], gen, yuk)
+        var enIyiSkor = KareHizalayici.keskinlikOlcu(referansGri, gen, yuk)
+        for (i in 1 until argbDizileri.size) {
+            val skor = KareHizalayici.keskinlikOlcu(griDizisigine(argbDizileri[i]), gen, yuk)
             if (skor > enIyiSkor) {
                 enIyiSkor = skor
                 enIyi = i
@@ -250,6 +299,52 @@ object KameraGoruntuIslemleri {
             gri[i] = (r * 77 + g * 151 + b * 28) shr 8
         }
         return gri
+    }
+
+    /**
+     * Deklanşör-anında refine: çekilen tam çözünürlük kareye bir kez daha ML Kit
+     * çalıştırıp kutuyu düzeltir. Preview/analiz/çekim boy uyumsuzluğunu bitirir.
+     * Yalnız yüksek doğrulukta çağrılır (anlık ~200-400ms yük); başarısızlıkta null.
+     */
+    private fun refineOrani(tam: Bitmap, onizlemeOrani: KutuOrani): KutuOrani? {
+        // PERF: tanici.close() finally'de — timeout/hata yolunda client
+        // hafızada kalmıyordu (her çekimde model client birikiyordu).
+        val tanici = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+        return try {
+            val sonuc = tanici.process(InputImage.fromBitmap(tam, 0))
+            val metin = Tasks.await(sonuc, REFINE_ZAMAN_ASIMI_MS, TimeUnit.MILLISECONDS)
+            val satirlar = ArrayList<TarananSatir>()
+            for (blok in metin.textBlocks) {
+                for (satir in blok.lines) {
+                    val r = satir.boundingBox ?: continue
+                    if (r.width() > 0 && r.height() > 0) {
+                        satirlar.add(TarananSatir(Kutu(r.left, r.top, r.width(), r.height()), satir.text ?: ""))
+                    }
+                }
+            }
+            if (satirlar.isEmpty()) return null
+            val aday = SoruAlgilayici.secMetinli(satirlar, tam.width, tam.height)
+                ?.let { KirpmaHesaplayici.kutuyuOrana(it, tam.width, tam.height) }
+                ?: return null
+            val iou = iouOran(onizlemeOrani, aday)
+            if (iou < 0.30) onizlemeOrani else aday
+        } catch (t: Throwable) {
+            Log.w(TAG, "Refine başarısız: ${t.message}")
+            null
+        } finally {
+            try { tanici.close() } catch (_: Exception) {}
+        }
+    }
+
+    private fun iouOran(a: KutuOrani, b: KutuOrani): Double {
+        val sol = maxOf(a.sol, b.sol)
+        val ust = maxOf(a.ust, b.ust)
+        val sag = minOf(a.sag, b.sag)
+        val alt = minOf(a.alt, b.alt)
+        val ortus = (sag - sol).coerceAtLeast(0.0) * (alt - ust).coerceAtLeast(0.0)
+        val toplam = a.genislik * a.yukseklik + b.genislik * b.yukseklik - ortus
+        if (toplam <= 0.0) return 0.0
+        return ortus / toplam
     }
 
     private fun kirp(kaynak: Bitmap, kutu: Kutu): Bitmap? {
@@ -274,6 +369,8 @@ object KameraGoruntuIslemleri {
 
     /** Tek çekimde çözülen thumbnail tavanı (crop kalitesi için geniş). */
     private const val TAVAN_TEK = 2560
-    /** Uzun pozlamada N kare bulunduran tavan (RAM çerçevesi). */
-    private const val TAVAN_UZUN = 1600
+    /** Uzun pozlamada N kare bulunduran tavan (RAM çerçevesi, PERF: 1600→1280). */
+    private const val TAVAN_UZUN = 1280
+    /** Refine için ML Kit bekleme üst sınırı (ms) — çekimi kilitlemez. */
+    private const val REFINE_ZAMAN_ASIMI_MS = 2500L
 }

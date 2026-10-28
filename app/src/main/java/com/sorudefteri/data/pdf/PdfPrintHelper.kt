@@ -1,7 +1,9 @@
 package com.sorudefteri.data.pdf
 
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.Environment
@@ -11,6 +13,7 @@ import android.print.PrintAttributes
 import android.print.PrintDocumentAdapter
 import android.print.PrintDocumentInfo
 import android.print.PrintManager
+import android.provider.MediaStore
 import android.widget.Toast
 import androidx.core.content.FileProvider
 import java.io.File
@@ -128,22 +131,51 @@ object PdfPrintHelper {
         return try {
             if (!pdfFile.exists()) return null
 
-            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-            if (!downloadsDir.exists()) downloadsDir.mkdirs()
-
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
             val safeName = (customFileName?.replace(Regex("[^a-zA-Z0-9_\\-]"), "_")
                 ?: "SoruDefterim_Fasikul") + "_$timestamp.pdf"
 
-            val targetFile = File(downloadsDir, safeName)
-            pdfFile.copyTo(targetFile, overwrite = true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                    put(MediaStore.Downloads.MIME_TYPE, "application/pdf")
+                    put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = context.contentResolver
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    ?: throw IllegalStateException("MediaStore kaydı oluşturulamadı.")
+                resolver.openOutputStream(uri)?.use { output ->
+                    FileInputStream(pdfFile).use { input ->
+                        input.copyTo(output)
+                    }
+                } ?: throw IllegalStateException("Çıktı akışı açılamadı.")
 
-            showToastSafely(
-                context,
-                "Belge İndirilenler klasörüne kaydedildi:\n${targetFile.name}",
-                Toast.LENGTH_LONG
-            )
-            targetFile
+                values.clear()
+                values.put(MediaStore.Downloads.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+
+                showToastSafely(
+                    context,
+                    "Belge İndirilenler klasörüne kaydedildi:\n$safeName",
+                    Toast.LENGTH_LONG
+                )
+                pdfFile
+            } else {
+                @Suppress("DEPRECATION")
+                val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (!downloadsDir.exists()) downloadsDir.mkdirs()
+
+                val targetFile = File(downloadsDir, safeName)
+                pdfFile.copyTo(targetFile, overwrite = true)
+
+                showToastSafely(
+                    context,
+                    "Belge İndirilenler klasörüne kaydedildi:\n${targetFile.name}",
+                    Toast.LENGTH_LONG
+                )
+                targetFile
+            }
         } catch (e: Exception) {
             e.printStackTrace()
             showToastSafely(context, "Kaydedilemedi: ${e.localizedMessage}", Toast.LENGTH_LONG)

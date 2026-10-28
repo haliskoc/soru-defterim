@@ -9,13 +9,16 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -51,6 +54,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -98,6 +102,8 @@ fun PdfExportDialog(
     var includeStylusDrawing by remember { mutableStateOf(true) }
     var includeSourceInfo by remember { mutableStateOf(true) }
     var includeDifficulty by remember { mutableStateOf(true) }
+    var includePrintableOpticalForm by remember { mutableStateOf(true) }
+    var includeQuestionQrCodes by remember { mutableStateOf(true) }
     var workspaceType by remember { mutableStateOf(WorkspaceType.STANDARD) }
 
     var isGenerating by remember { mutableStateOf(false) }
@@ -114,6 +120,8 @@ fun PdfExportDialog(
                 columnsCount = 2
                 includeCoverPage = true
                 includeBackCover = true
+                includePrintableOpticalForm = true
+                includeQuestionQrCodes = true
                 // Deneme şablonunda da çözüm ve not kapsama alınsın; kullanıcı
                 // istemezse dialog'daki anahtarlardan kapatabilir.
                 includeAiSolution = true
@@ -128,6 +136,8 @@ fun PdfExportDialog(
                 columnsCount = 1 // Çözümler rahat okunsun diye tek sütun
                 includeCoverPage = true
                 includeBackCover = false
+                includePrintableOpticalForm = false
+                includeQuestionQrCodes = true
                 includeAiSolution = true
                 includeStudentNote = true
                 workspaceType = WorkspaceType.NONE
@@ -139,6 +149,8 @@ fun PdfExportDialog(
                 columnsCount = 1
                 includeCoverPage = true
                 includeBackCover = false
+                includePrintableOpticalForm = false
+                includeQuestionQrCodes = true
                 includeAiSolution = false
                 includeStudentNote = true
                 workspaceType = WorkspaceType.LARGE
@@ -150,6 +162,8 @@ fun PdfExportDialog(
                 columnsCount = 2
                 includeCoverPage = false
                 includeBackCover = false
+                includePrintableOpticalForm = false
+                includeQuestionQrCodes = false
                 includeAiSolution = false
                 includeStudentNote = false
                 workspaceType = WorkspaceType.NONE
@@ -166,7 +180,9 @@ fun PdfExportDialog(
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 6.dp,
             modifier = Modifier
+                .widthIn(max = 640.dp)
                 .fillMaxWidth(0.94f)
+                .imePadding()
                 .padding(vertical = 20.dp)
         ) {
             Column(
@@ -181,6 +197,7 @@ fun PdfExportDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
+                        modifier = Modifier.weight(1f),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
@@ -198,16 +215,20 @@ fun PdfExportDialog(
                                 )
                             }
                         }
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "Detaylı PDF Çıktısı Oluştur",
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = "📚 ${sorular.size} Soru Seçildi • A4 Çıktı Formatı",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
@@ -463,6 +484,20 @@ fun PdfExportDialog(
                         checked = includeBackCover,
                         onCheckedChange = { includeBackCover = it }
                     )
+
+                    ToggleRow(
+                        title = "📷 Kamera ile Okunabilir Optik Cevap Formu Ekle",
+                        subtitle = "4 köşe referans kareli, zamanlama raylı ve Test ID matris kodlu tam sayfa A4 optik kağıdı",
+                        checked = includePrintableOpticalForm,
+                        onCheckedChange = { includePrintableOpticalForm = it }
+                    )
+
+                    ToggleRow(
+                        title = "🔗 Sorulara Akıllı Karekod Ekle",
+                        subtitle = "Her soru başlığının sağ üst köşesine vektörel soru kimlik matris kodu yerleştirir",
+                        checked = includeQuestionQrCodes,
+                        onCheckedChange = { includeQuestionQrCodes = it }
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -483,34 +518,46 @@ fun PdfExportDialog(
                 } else {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         // Yazdır Butonu
                         OutlinedButton(
                             onClick = {
                                 isGenerating = true
                                 coroutineScope.launch {
-                                    val config = buildConfig(
-                                        title, subtitle, studentName, selectedTemplate,
-                                        targetMedium, density, columnsCount, includeCoverPage, includeBackCover,
-                                        includeAiSolution, includeStudentNote, includeMistakeType,
-                                        includeStylusDrawing, includeSourceInfo, includeDifficulty, workspaceType
-                                    )
-                                    val file = withContext(Dispatchers.IO) {
-                                        PdfDenemeKitapcikGenerator.generatePdfWithConfig(context, sorular, config)
+                                    try {
+                                        val config = buildConfig(
+                                            title, subtitle, studentName, selectedTemplate,
+                                            targetMedium, density, columnsCount, includeCoverPage, includeBackCover,
+                                            includeAiSolution, includeStudentNote, includeMistakeType,
+                                            includeStylusDrawing, includeSourceInfo, includeDifficulty, workspaceType,
+                                            includePrintableOpticalForm, includeQuestionQrCodes
+                                        )
+                                        val file = withContext(Dispatchers.IO) {
+                                            PdfDenemeKitapcikGenerator.generatePdfWithConfig(context, sorular, config)
+                                        }
+                                        generatedPdfFile = file
+                                        onSuccess(file)
+                                        PdfPrintHelper.printPdf(context, file, config.title)
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        Toast.makeText(
+                                            context,
+                                            "PDF oluşturulamadı: ${e.localizedMessage ?: "Bilinmeyen hata"}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } finally {
+                                        isGenerating = false
                                     }
-                                    isGenerating = false
-                                    generatedPdfFile = file
-                                    onSuccess(file)
-                                    PdfPrintHelper.printPdf(context, file, config.title)
                                 }
                             },
                             shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Default.Print, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Yazdır", fontSize = 12.5.sp)
+                            Text("Yazdır", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
 
                         // Paylaş Butonu
@@ -518,28 +565,40 @@ fun PdfExportDialog(
                             onClick = {
                                 isGenerating = true
                                 coroutineScope.launch {
-                                    val config = buildConfig(
-                                        title, subtitle, studentName, selectedTemplate,
-                                        targetMedium, density, columnsCount, includeCoverPage, includeBackCover,
-                                        includeAiSolution, includeStudentNote, includeMistakeType,
-                                        includeStylusDrawing, includeSourceInfo, includeDifficulty, workspaceType
-                                    )
-                                    val file = withContext(Dispatchers.IO) {
-                                        PdfDenemeKitapcikGenerator.generatePdfWithConfig(context, sorular, config)
+                                    try {
+                                        val config = buildConfig(
+                                            title, subtitle, studentName, selectedTemplate,
+                                            targetMedium, density, columnsCount, includeCoverPage, includeBackCover,
+                                            includeAiSolution, includeStudentNote, includeMistakeType,
+                                            includeStylusDrawing, includeSourceInfo, includeDifficulty, workspaceType,
+                                            includePrintableOpticalForm, includeQuestionQrCodes
+                                        )
+                                        val file = withContext(Dispatchers.IO) {
+                                            PdfDenemeKitapcikGenerator.generatePdfWithConfig(context, sorular, config)
+                                        }
+                                        generatedPdfFile = file
+                                        onSuccess(file)
+                                        PdfPrintHelper.sharePdf(context, file, config.title)
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        Toast.makeText(
+                                            context,
+                                            "PDF oluşturulamadı: ${e.localizedMessage ?: "Bilinmeyen hata"}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } finally {
+                                        isGenerating = false
                                     }
-                                    isGenerating = false
-                                    generatedPdfFile = file
-                                    onSuccess(file)
-                                    PdfPrintHelper.sharePdf(context, file, config.title)
                                 }
                             },
                             shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                             modifier = Modifier.weight(1.2f)
                         ) {
                             Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("PDF Paylaş", fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                            Text("PDF Paylaş", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
 
                         // İndirilenler'e Kaydet Butonu
@@ -547,27 +606,39 @@ fun PdfExportDialog(
                             onClick = {
                                 isGenerating = true
                                 coroutineScope.launch {
-                                    val config = buildConfig(
-                                        title, subtitle, studentName, selectedTemplate,
-                                        targetMedium, density, columnsCount, includeCoverPage, includeBackCover,
-                                        includeAiSolution, includeStudentNote, includeMistakeType,
-                                        includeStylusDrawing, includeSourceInfo, includeDifficulty, workspaceType
-                                    )
-                                    val file = withContext(Dispatchers.IO) {
-                                        PdfDenemeKitapcikGenerator.generatePdfWithConfig(context, sorular, config)
+                                    try {
+                                        val config = buildConfig(
+                                            title, subtitle, studentName, selectedTemplate,
+                                            targetMedium, density, columnsCount, includeCoverPage, includeBackCover,
+                                            includeAiSolution, includeStudentNote, includeMistakeType,
+                                            includeStylusDrawing, includeSourceInfo, includeDifficulty, workspaceType,
+                                            includePrintableOpticalForm, includeQuestionQrCodes
+                                        )
+                                        val file = withContext(Dispatchers.IO) {
+                                            PdfDenemeKitapcikGenerator.generatePdfWithConfig(context, sorular, config)
+                                        }
+                                        generatedPdfFile = file
+                                        onSuccess(file)
+                                        PdfPrintHelper.savePdfToDownloads(context, file, config.title)
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                        Toast.makeText(
+                                            context,
+                                            "PDF oluşturulamadı: ${e.localizedMessage ?: "Bilinmeyen hata"}",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                    } finally {
+                                        isGenerating = false
                                     }
-                                    isGenerating = false
-                                    generatedPdfFile = file
-                                    onSuccess(file)
-                                    PdfPrintHelper.savePdfToDownloads(context, file, config.title)
                                 }
                             },
                             shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Kaydet", fontSize = 12.5.sp)
+                            Text("Kaydet", fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -592,7 +663,9 @@ private fun buildConfig(
     includeStylusDrawing: Boolean,
     includeSourceInfo: Boolean,
     includeDifficulty: Boolean,
-    workspaceType: WorkspaceType
+    workspaceType: WorkspaceType,
+    includePrintableOpticalForm: Boolean = true,
+    includeQuestionQrCodes: Boolean = true
 ): PdfExportConfig {
     return PdfExportConfig(
         title = title.ifBlank { "Soru Defterim Özel Çalışma Fasikülü" },
@@ -611,7 +684,9 @@ private fun buildConfig(
         includeStylusDrawing = includeStylusDrawing,
         includeSourceInfo = includeSourceInfo,
         includeDifficulty = includeDifficulty,
-        workspaceType = workspaceType
+        workspaceType = workspaceType,
+        includePrintableOpticalForm = includePrintableOpticalForm,
+        includeQuestionQrCodes = includeQuestionQrCodes
     )
 }
 
@@ -634,7 +709,7 @@ private fun ColumnCardOption(
         Column(modifier = Modifier.padding(10.dp)) {
             Text(title, fontWeight = FontWeight.Bold, fontSize = 12.sp, color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
             Spacer(modifier = Modifier.height(2.dp))
-            Text(description, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 13.sp)
+            Text(description, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, lineHeight = 14.sp)
         }
     }
 }

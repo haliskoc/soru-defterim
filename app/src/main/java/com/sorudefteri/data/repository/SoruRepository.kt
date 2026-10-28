@@ -27,8 +27,12 @@ import com.sorudefteri.domain.model.Soru
 import com.sorudefteri.domain.repository.SoruRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import androidx.paging.map
@@ -39,6 +43,8 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import com.sorudefteri.domain.manager.BadgeManager
+import com.sorudefteri.domain.manager.FsrsRating
+import com.sorudefteri.domain.manager.FsrsScheduler
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -70,6 +76,10 @@ class SoruRepositoryImpl @Inject constructor(
         return soruDao.getAllSorular().map { list ->
             list.map { it.toDomain() }
         }.flowOn(Dispatchers.Default)
+    }
+
+    override suspend fun getAllSorularOnce(): List<Soru> = withContext(Dispatchers.IO) {
+        soruDao.getAllSorularList().map { it.toDomain() }
     }
 
     override fun getFilteredSorular(
@@ -130,6 +140,7 @@ class SoruRepositoryImpl @Inject constructor(
         val hash = if (soru.contentHash.isBlank()) SoruIcerikHash.hesapla(soru) else soru.contentHash
         val entity = soru.copy(
             contentHash = hash,
+            evrenselId = soru.evrenselId.ifBlank { java.util.UUID.randomUUID().toString() },
             createdAt = if (soru.createdAt > 0) soru.createdAt else now,
             updatedAt = now
         ).toEntity()
@@ -273,21 +284,31 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override suspend fun advanceReviewStage(id: Long) = withContext(Dispatchers.IO) {
-        // Atomik increment: read current stage via direct query then compute next review date
         val soru = soruDao.getSoruByIdDirect(id) ?: return@withContext
         val currentStage = soru.reviewStage
         val nextStage = (currentStage + 1).coerceAtMost(5)
         val now = System.currentTimeMillis()
-        val intervalDays = when (nextStage) {
-            1 -> 1L
-            2 -> 3L
-            3 -> 7L
-            4 -> 14L
-            else -> 30L
-        }
-        val nextReviewTimestamp = now + (intervalDays * 24 * 60 * 60 * 1000L)
-        // Atomik güncelleme (race-safe) - DAO'daki atomik sorgu
-        soruDao.advanceReviewStageAtomik(id, nextReviewTimestamp, now)
+        val fsrsState = FsrsScheduler.calculateNextState(
+            currentStability = soru.fsrsStability,
+            currentDifficulty = soru.fsrsDifficulty,
+            currentReps = soru.fsrsReps,
+            currentLapses = soru.fsrsLapses,
+            lastReviewedAt = soru.lastReviewedAt,
+            rating = FsrsRating.GOOD,
+            reviewTimestamp = now
+        )
+        soruDao.updateSoru(
+            soru.copy(
+                reviewStage = nextStage,
+                nextReviewDate = fsrsState.nextReviewDate,
+                lastReviewedAt = now,
+                fsrsStability = fsrsState.stability,
+                fsrsDifficulty = fsrsState.difficulty,
+                fsrsReps = fsrsState.reps,
+                fsrsLapses = fsrsState.lapses,
+                updatedAt = now
+            )
+        )
         if (currentStage < 5 && nextStage == 5) {
             badgeManager?.onMasterStageReached()
         }
@@ -295,8 +316,33 @@ class SoruRepositoryImpl @Inject constructor(
 
     override suspend fun regressReviewStage(id: Long) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val nextReviewTimestamp = now + (24 * 60 * 60 * 1000L) // +1 day
-        soruDao.regressReviewStageAtomik(id, nextReviewTimestamp, now)
+        val soru = soruDao.getSoruByIdDirect(id)
+        if (soru != null) {
+            val fsrsState = FsrsScheduler.calculateNextState(
+                currentStability = soru.fsrsStability,
+                currentDifficulty = soru.fsrsDifficulty,
+                currentReps = soru.fsrsReps,
+                currentLapses = soru.fsrsLapses,
+                lastReviewedAt = soru.lastReviewedAt,
+                rating = FsrsRating.AGAIN,
+                reviewTimestamp = now
+            )
+            soruDao.updateSoru(
+                soru.copy(
+                    reviewStage = 0,
+                    nextReviewDate = fsrsState.nextReviewDate,
+                    lastReviewedAt = now,
+                    fsrsStability = fsrsState.stability,
+                    fsrsDifficulty = fsrsState.difficulty,
+                    fsrsReps = fsrsState.reps,
+                    fsrsLapses = fsrsState.lapses,
+                    updatedAt = now
+                )
+            )
+        } else {
+            val nextReviewTimestamp = now + (24 * 60 * 60 * 1000L) // +1 day
+            soruDao.regressReviewStageAtomik(id, nextReviewTimestamp, now)
+        }
     }
 
     override suspend fun regressReviewStageBatch(ids: List<Long>) = withContext(Dispatchers.IO) {
@@ -308,14 +354,31 @@ class SoruRepositoryImpl @Inject constructor(
         }
     }
 
+    /**
+     * PERF: Test bitiminde N tekil advance (N okuma + N yazma) yerine tek
+     * batch sorgu. Usta-rozete (+50 XP) adaylar tek sorguyla bulunur.
+     */
+    override suspend fun advanceReviewStageBatch(ids: List<Long>) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        val now = System.currentTimeMillis()
+        val nextReviewTimestamp = now + (30 * 24 * 60 * 60 * 1000L) // üst sınır +30 gün
+        ids.chunked(500).forEach { chunk ->
+            soruDao.advanceReviewStageBatch(chunk, nextReviewTimestamp, now)
+        }
+    }
+
     override suspend fun deleteSorularByIds(ids: List<Long>) = withContext(Dispatchers.IO) {
         if (ids.isEmpty()) return@withContext
-        // Tüm ilişkili dosyaları ve verileri temizle
-        ids.forEach { id ->
-            val soru = soruDao.getSoruByIdDirect(id)
-            if (soru != null) {
-                cleanQuestionAssociatedFilesAndData(soru)
-            }
+        // PERF: N ardışık dosya-silme yerine paralel IO (sınırlı eşzamanlılık).
+        ids.chunked(20).forEach { chunk ->
+            chunk.map { id ->
+                async {
+                    try {
+                        val soru = soruDao.getSoruByIdDirect(id)
+                        if (soru != null) cleanQuestionAssociatedFilesAndData(soru)
+                    } catch (_: Exception) {}
+                }
+            }.awaitAll()
         }
         // SQLite IN clause limit (~999) aşılmaması için chunked
         ids.chunked(500).forEach { chunk ->
@@ -326,12 +389,18 @@ class SoruRepositoryImpl @Inject constructor(
     override suspend fun updateSolvedStatusBatch(ids: List<Long>, isSolved: Boolean) = withContext(Dispatchers.IO) {
         if (ids.isEmpty()) return@withContext
         val now = System.currentTimeMillis()
-        soruDao.updateSolvedStatusBatch(ids, isSolved, if (isSolved) now else null)
+        val solvedAt = if (isSolved) now else null
+        ids.distinct().chunked(500).forEach { batch ->
+            soruDao.updateSolvedStatusBatch(batch, isSolved, solvedAt, now)
+        }
     }
 
     override suspend fun updateFavoriteStatusBatch(ids: List<Long>, isFavorite: Boolean) = withContext(Dispatchers.IO) {
         if (ids.isEmpty()) return@withContext
-        soruDao.updateFavoriteStatusBatch(ids, isFavorite)
+        val now = System.currentTimeMillis()
+        ids.distinct().chunked(500).forEach { batch ->
+            soruDao.updateFavoriteStatusBatch(batch, isFavorite, now)
+        }
     }
 
     override suspend fun insertAllSorular(sorular: List<Soru>): List<Long> = withContext(Dispatchers.IO) {
@@ -340,8 +409,9 @@ class SoruRepositoryImpl @Inject constructor(
             val hash = if (s.contentHash.isBlank()) SoruIcerikHash.hesapla(s) else s.contentHash
             s.copy(
                 contentHash = hash,
+                evrenselId = s.evrenselId.ifBlank { java.util.UUID.randomUUID().toString() },
                 createdAt = if (s.createdAt > 0) s.createdAt else now,
-                updatedAt = now
+                updatedAt = if (s.updatedAt > 0) s.updatedAt else now
             ).toEntity()
         }
         soruDao.insertAll(entities)
@@ -360,19 +430,19 @@ class SoruRepositoryImpl @Inject constructor(
 
     /**
      * Tek seferlik bakım: contentHash'i boş olan (eski sürümde eklenen) tüm sorulara
-     * parmak izi yazar. Uygulama açılışında bir kez çağrılır.
+     * parmak izi yazar. PERF: toplu transaction içinde yazılır (tekil UPDATE yok).
+     * Uygulama açılışında bayrakla bir kez çağrılır (bkz. Application).
      */
     override suspend fun backfillContentHashes(): Int = withContext(Dispatchers.IO) {
         val rows = soruDao.getRowsWithMissingContentHash()
-        var updated = 0
-        for (row in rows) {
+        if (rows.isEmpty()) return@withContext 0
+        val hashes = rows.mapNotNull { row ->
             val hash = SoruIcerikHash.hesapla(row.toDomain())
-            if (hash.isNotBlank()) {
-                soruDao.updateContentHash(row.id, hash)
-                updated++
-            }
+            if (hash.isNotBlank()) row.id to hash else null
         }
-        updated
+        if (hashes.isEmpty()) return@withContext 0
+        soruDao.updateContentHashes(hashes)
+        hashes.size
     }
 
     override fun getFavoriteSorular(): Flow<List<Soru>> {
@@ -395,14 +465,17 @@ class SoruRepositoryImpl @Inject constructor(
         isSolved: Boolean?,
         isFavorite: Boolean?,
         onlyDueReview: Boolean?,
-        kaynak: String?
+        kaynak: String?,
+        sortOrder: String
     ): Flow<androidx.paging.PagingData<Soru>> {
         val sanitizedFts = query?.let { sanitizeFtsQuery(it) }?.ifBlank { null }
         return androidx.paging.Pager(
             config = androidx.paging.PagingConfig(
                 pageSize = 20,
+                prefetchDistance = 5,
                 enablePlaceholders = false,
-                initialLoadSize = 40
+                initialLoadSize = 40,
+                maxSize = 100
             )
         ) {
             if (sanitizedFts != null) {
@@ -414,7 +487,8 @@ class SoruRepositoryImpl @Inject constructor(
                     isSolved = isSolved,
                     isFavorite = isFavorite,
                     onlyDueReview = onlyDueReview,
-                    kaynak = kaynak
+                    kaynak = kaynak,
+                    sortOrder = sortOrder
                 )
             } else {
                 soruDao.getPagedFilteredSorular(
@@ -425,7 +499,8 @@ class SoruRepositoryImpl @Inject constructor(
                     isSolved = isSolved,
                     isFavorite = isFavorite,
                     onlyDueReview = onlyDueReview,
-                    kaynak = kaynak
+                    kaynak = kaynak,
+                    sortOrder = sortOrder
                 )
             }
         }.flow.map { pagingData ->
@@ -434,13 +509,135 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override suspend fun tumVerileriTemizle(): Unit = withContext(Dispatchers.IO) {
+        try {
+            soruChatDao?.getAllMessagesDirect()?.map { it.soruId }?.distinct()?.forEach { soruId ->
+                soruChatDao.clearMessagesForSoru(soruId)
+            }
+        } catch (_: Exception) {}
+        try {
+            benzerSoruDao.getAllBenzerSorularDirect().map { it.soruId }.distinct().forEach { soruId ->
+                benzerSoruDao.deleteAllForSoru(soruId)
+            }
+        } catch (_: Exception) {}
+        try {
+            testSonucDao.deleteAllTestResults()
+        } catch (_: Exception) {}
+        try {
+            denemeSinaviDao?.clearAll()
+        } catch (_: Exception) {}
         soruDao.clearAll()
         gorselDepo.tumGorselleriSil()
+        context?.let { ctx ->
+            try { File(ctx.filesDir, "audio_memos").deleteRecursively() } catch (_: Exception) {}
+            try { File(ctx.filesDir, "scratchpads").deleteRecursively() } catch (_: Exception) {}
+        }
         Unit
     }
 
     override fun getDistinctTopics(subjectId: String): Flow<List<String>> {
         return soruDao.getDistinctTopicsForSubject(subjectId).flowOn(Dispatchers.Default)
+    }
+
+    override suspend fun getKutuphaneMeta(): com.sorudefteri.domain.model.KutuphaneMeta = withContext(Dispatchers.IO) {
+        kutuphaneMetaHesapla()
+    }
+
+    /**
+     * PERF: DB değişimlerinde metayı yeniden yayınlar. 5 hafif sorgu
+     * (COUNT×4 + DISTINCT×2) IO'da çalışır; tam tablo belleğe çekilmez.
+     */
+    override fun getKutuphaneMetaFlow(): Flow<com.sorudefteri.domain.model.KutuphaneMeta> {
+        return combine(
+            soruDao.getTotalCount(),
+            soruDao.getSolvedCount(),
+            soruDao.getFavoriteCount(),
+            soruDao.getDueReviewCount()
+        ) { total, solved, fav, due -> MetaSayilar(total, solved, fav, due) }
+            .flatMapLatest { sayilar ->
+                flow {
+                    val publishers = try { soruDao.getDistinctPublishers() } catch (_: Exception) { emptyList() }
+                    val examNames = try { soruDao.getDistinctExamNames() } catch (_: Exception) { emptyList() }
+                    emit(
+                        com.sorudefteri.domain.model.KutuphaneMeta(
+                            totalCount = sayilar.total,
+                            solvedCount = sayilar.solved,
+                            unsolvedCount = (sayilar.total - sayilar.solved).coerceAtLeast(0),
+                            favoriteCount = sayilar.fav,
+                            dueReviewCount = sayilar.due,
+                            availablePublishers = publishers,
+                            availableExamNames = examNames
+                        )
+                    )
+                }.flowOn(Dispatchers.IO)
+            }
+            .flowOn(Dispatchers.Default)
+    }
+
+    private data class MetaSayilar(val total: Int, val solved: Int, val fav: Int, val due: Int)
+
+    private suspend fun kutuphaneMetaHesapla(): com.sorudefteri.domain.model.KutuphaneMeta {
+        val total = soruDao.getTotalCountDirect()
+        val solved = soruDao.getSolvedCountDirect()
+        return com.sorudefteri.domain.model.KutuphaneMeta(
+            totalCount = total,
+            solvedCount = solved,
+            unsolvedCount = (total - solved).coerceAtLeast(0),
+            favoriteCount = soruDao.getFavoriteCountDirect(),
+            dueReviewCount = soruDao.getDueReviewCountDirect(),
+            availablePublishers = soruDao.getDistinctPublishers(),
+            availableExamNames = soruDao.getDistinctExamNames()
+        )
+    }
+
+    override suspend fun getFilteredSoruIds(
+        query: String?,
+        examType: String?,
+        subjectId: String?,
+        mistakeType: String?,
+        isSolved: Boolean?,
+        isFavorite: Boolean?,
+        onlyDueReview: Boolean?,
+        kaynak: String?
+    ): List<Long> = withContext(Dispatchers.IO) {
+        soruDao.getFilteredIds(
+            query = query,
+            examType = examType,
+            subjectId = subjectId,
+            mistakeType = mistakeType,
+            isSolved = isSolved,
+            isFavorite = isFavorite,
+            onlyDueReview = onlyDueReview?.let { if (it) true else null },
+            kaynak = kaynak
+        )
+    }
+
+    override suspend fun getSorularByIds(ids: List<Long>): List<Soru> = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) emptyList()
+        else ids.distinct().chunked(500).flatMap { soruDao.getSorularByIds(it) }.map { it.toDomain() }
+    }
+
+    override suspend fun getAllImagePaths(): List<String> = withContext(Dispatchers.IO) {
+        try {
+            soruDao.getAllImagePaths()
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    override suspend fun countAddedBetween(start: Long, end: Long): Int = withContext(Dispatchers.IO) {
+        try {
+            soruDao.countAddedBetween(start, end)
+        } catch (_: Exception) {
+            0
+        }
+    }
+
+    override suspend fun countSolvedBetween(start: Long, end: Long): Int = withContext(Dispatchers.IO) {
+        try {
+            soruDao.countSolvedBetween(start, end)
+        } catch (_: Exception) {
+            0
+        }
     }
 
     // ThreadLocal SDF cache for stats
@@ -541,46 +738,45 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override fun getWeeklyActivity(): Flow<List<GunlukAktivite>> {
-        return soruDao.getAllSorular().map { list ->
-            val dateFormat = statsDateFormatTL.get() ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-            val dayNameFormat = SimpleDateFormat("EEE", Locale("tr", "TR"))
-
-            val last7Days = mutableListOf<GunlukAktivite>()
-
-            for (i in 6 downTo 0) {
-                val dayCal = Calendar.getInstance().apply {
-                    add(Calendar.DAY_OF_YEAR, -i)
-                    set(Calendar.HOUR_OF_DAY, 0)
-                    set(Calendar.MINUTE, 0)
-                    set(Calendar.SECOND, 0)
-                    set(Calendar.MILLISECOND, 0)
-                }
-
-                val startOfDay = dayCal.timeInMillis
-                dayCal.add(Calendar.DAY_OF_YEAR, 1)
-                val endOfDay = dayCal.timeInMillis
-
-                val dayDateStr = dateFormat.format(Date(startOfDay))
-                val dayNameStr = dayNameFormat.format(Date(startOfDay)).replace(".", "").replaceFirstChar { it.uppercase() }
-
-                val addedCount = list.count { it.createdAt in startOfDay until endOfDay }
-                val solvedCount = list.count {
-                    it.isSolved && it.solvedAt != null && it.solvedAt in startOfDay until endOfDay
-                }
-
-                last7Days.add(
-                    GunlukAktivite(
-                        date = dayDateStr,
-                        dayName = dayNameStr,
-                        count = addedCount,
-                        solvedCount = solvedCount,
-                        timestamp = startOfDay
-                    )
-                )
-            }
-
-            last7Days
+        return soruDao.getTotalCount().flatMapLatest {
+            flow { emit(weeklyActivityHesapla()) }
         }.flowOn(Dispatchers.Default)
+    }
+
+    /**
+     * PERF: Haftalık aktivite 7 gün × 2 COUNT sorgusuyla hesaplanır.
+     * Önceden tüm tablo belleğe çekilip Kotlin'de 14 kez filtreleniyordu.
+     */
+    // NOT: withContext(IO) YOK — çağıran flowOn(defaultDispatcher)'dadır.
+    // (Unit testlerde gerçek IO'ya kaçıp advanceUntilIdle'ı ıskalamasın diye.)
+    private suspend fun weeklyActivityHesapla(): List<GunlukAktivite> {
+        val dateFormat = statsDateFormatTL.get() ?: SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+        val dayNameFormat = SimpleDateFormat("EEE", Locale("tr", "TR"))
+        val last7Days = mutableListOf<GunlukAktivite>()
+        for (i in 6 downTo 0) {
+            val dayCal = Calendar.getInstance().apply {
+                add(Calendar.DAY_OF_YEAR, -i)
+                set(Calendar.HOUR_OF_DAY, 0)
+                set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0)
+                set(Calendar.MILLISECOND, 0)
+            }
+            val startOfDay = dayCal.timeInMillis
+            dayCal.add(Calendar.DAY_OF_YEAR, 1)
+            val endOfDay = dayCal.timeInMillis
+            val dayDateStr = dateFormat.format(Date(startOfDay))
+            val dayNameStr = dayNameFormat.format(Date(startOfDay)).replace(".", "").replaceFirstChar { it.uppercase() }
+            last7Days.add(
+                GunlukAktivite(
+                    date = dayDateStr,
+                    dayName = dayNameStr,
+                    count = soruDao.countAddedBetween(startOfDay, endOfDay),
+                    solvedCount = soruDao.countSolvedBetween(startOfDay, endOfDay),
+                    timestamp = startOfDay
+                )
+            )
+        }
+        return last7Days
     }
 
     override fun getAllTestResults(): Flow<List<TestSonucEntity>> = testSonucDao.getAllTestResults()
@@ -621,12 +817,42 @@ class SoruRepositoryImpl @Inject constructor(
         return denemeSinaviDao?.getAllDenemeler() ?: kotlinx.coroutines.flow.flowOf(emptyList())
     }
 
+    override fun getDenemeByIdFlow(id: Long): Flow<com.sorudefteri.data.local.entity.DenemeSinaviEntity?> {
+        return denemeSinaviDao?.getDenemeByIdFlow(id) ?: kotlinx.coroutines.flow.flowOf(null)
+    }
+
+    override suspend fun getDenemeById(id: Long): com.sorudefteri.data.local.entity.DenemeSinaviEntity? = withContext(Dispatchers.IO) {
+        denemeSinaviDao?.getDenemeById(id)
+    }
+
+    override suspend fun getDenemeByTestId(testId: String): com.sorudefteri.data.local.entity.DenemeSinaviEntity? = withContext(Dispatchers.IO) {
+        if (testId.isBlank()) null else denemeSinaviDao?.getByTestId(testId)
+    }
+
     override suspend fun insertDeneme(entity: com.sorudefteri.data.local.entity.DenemeSinaviEntity): Long = withContext(Dispatchers.IO) {
-        denemeSinaviDao?.insertDeneme(entity) ?: 0L
+        val normalized = if (entity.testId.isBlank()) {
+            entity.copy(testId = "SD-EXAM-${java.util.UUID.randomUUID().toString().take(8).uppercase()}")
+        } else entity
+        denemeSinaviDao?.insertDeneme(normalized) ?: 0L
+    }
+
+    override suspend fun updateDeneme(entity: com.sorudefteri.data.local.entity.DenemeSinaviEntity) = withContext(Dispatchers.IO) {
+        denemeSinaviDao?.updateDeneme(entity.copy(updatedAt = System.currentTimeMillis()))
+        Unit
     }
 
     override suspend fun deleteDeneme(id: Long) = withContext(Dispatchers.IO) {
-        denemeSinaviDao?.deleteDenemeById(id)
+        denemeSinaviDao?.softDelete(id)
         Unit
+    }
+
+    override fun getSorularByDenemeId(denemeId: Long): Flow<List<Soru>> {
+        return soruDao.getSorularByDenemeId(denemeId).map { list ->
+            list.map { it.toDomain() }
+        }.flowOn(Dispatchers.Default)
+    }
+
+    override suspend fun getSorularByDenemeIdList(denemeId: Long): List<Soru> = withContext(Dispatchers.IO) {
+        soruDao.getSorularByDenemeIdList(denemeId).map { it.toDomain() }
     }
 }

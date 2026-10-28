@@ -1,8 +1,11 @@
 package com.sorudefteri.ui.ayarlar
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,8 +34,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -46,7 +51,8 @@ fun AyarlarScreen(
     viewModel: AyarlarViewModel = hiltViewModel(),
     // Dosya yöneticisinden .sdefteri ile açılışta gelen bekleyen içe aktarma Uri'si
     pendingImportUri: String? = null,
-    onPendingImportHandled: () -> Unit = {}
+    onPendingImportHandled: () -> Unit = {},
+    onNavigateToEslesme: () -> Unit = {}
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -126,30 +132,57 @@ fun AyarlarScreen(
                 Tab(
                     selected = selectedTabIndex == 0,
                     onClick = { selectedTabIndex = 0 },
-                    text = { Text("1 Genel", fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal, maxLines = 1) },
+                    text = {
+                        Text(
+                            "1 Genel",
+                            fontWeight = if (selectedTabIndex == 0) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
                     icon = { Icon(Icons.Default.Settings, contentDescription = "Genel Ayarlar") }
                 )
                 Tab(
                     selected = selectedTabIndex == 1,
                     onClick = { selectedTabIndex = 1 },
-                    text = { Text("2 AI", fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal, maxLines = 1) },
+                    text = {
+                        Text(
+                            "2 AI",
+                            fontWeight = if (selectedTabIndex == 1) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
                     icon = { Icon(Icons.Default.AutoAwesome, contentDescription = "AI & Prompt") }
                 )
                 Tab(
                     selected = selectedTabIndex == 2,
                     onClick = { selectedTabIndex = 2 },
-                    text = { Text("3 Yedek", fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal, maxLines = 1) },
+                    text = {
+                        Text(
+                            "3 Yedek",
+                            fontWeight = if (selectedTabIndex == 2) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
                     icon = { Icon(Icons.Default.CloudUpload, contentDescription = "Yedek & Güvenlik") }
                 )
             }
 
             // Tab İçeriği
-            Column(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 16.dp)
+                    .verticalScroll(rememberScrollState()),
+                contentAlignment = Alignment.TopCenter
             ) {
+                Column(
+                    modifier = Modifier
+                        .widthIn(max = 760.dp)
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 16.dp)
+                ) {
                 when (selectedTabIndex) {
                     0 -> GenelAyarlarTab(
                         currentAlan = uiState.currentAlan,
@@ -220,11 +253,17 @@ fun AyarlarScreen(
                         onImportBackup = { uri, pwd -> viewModel.importBackup(uri, pwd) },
                         onAutoBackupToggle = { viewModel.setAutoBackupEnabled(it) },
                         onWifiOnlyToggle = { viewModel.setWifiOnly(it) },
+                        isDailyReminderEnabled = uiState.isDailyReminderEnabled,
+                        isStreakReminderEnabled = uiState.isStreakReminderEnabled,
+                        onDailyReminderToggle = { viewModel.setDailyReminderEnabled(it) },
+                        onStreakReminderToggle = { viewModel.setStreakReminderEnabled(it) },
                         onSyncDrive = { viewModel.syncGoogleDrive() },
                         // Dosyadan açma: Yedek sekmesinde değilsek sekmeyi aç, onay dialogu tab'da çıkar
                         pendingImportUri = pendingImportUri,
-                        onPendingImportHandled = onPendingImportHandled
+                        onPendingImportHandled = onPendingImportHandled,
+                        onNavigateToEslesme = onNavigateToEslesme
                     )
+                }
                 }
             }
         }

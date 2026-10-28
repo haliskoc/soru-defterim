@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -163,13 +164,19 @@ fun TestOlusturScreen(
                 CircularProgressIndicator()
             }
         } else {
-            LazyColumn(
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
+                contentAlignment = Alignment.TopCenter
             ) {
+                LazyColumn(
+                    modifier = Modifier
+                        .widthIn(max = 840.dp)
+                        .fillMaxSize(),
+                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
                 // Günün Kurtarma Paketi (Tekrar vakti gelmiş sorular varsa en tepede gösterilir)
                 if (uiState.dueReviewCount > 0) {
                     item {
@@ -511,6 +518,7 @@ fun TestOlusturScreen(
                 item {
                     Spacer(modifier = Modifier.height(16.dp))
                 }
+            }
             }
         }
     }

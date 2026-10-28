@@ -4,9 +4,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -38,8 +40,10 @@ fun CevapSeciciSection(
 
         val options = listOf("A", "B", "C", "D", "E")
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             options.forEach { option ->
                 val isSelected = correctAnswer == option
@@ -51,7 +55,10 @@ fun CevapSeciciSection(
                         width = if (isSelected) 2.dp else 1.dp,
                         color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
                     ),
-                    modifier = Modifier.size(52.dp)
+                    modifier = Modifier
+                        .weight(1f)
+                        .sizeIn(maxWidth = 52.dp, maxHeight = 52.dp)
+                        .aspectRatio(1f)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -79,7 +86,9 @@ fun CevapSeciciSection(
 
         val studentOptions = listOf("A", "B", "C", "D", "E", "Boş")
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .widthIn(max = 420.dp)
+                .fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             studentOptions.forEach { option ->

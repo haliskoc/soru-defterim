@@ -68,4 +68,14 @@ object ReminderScheduler {
             workRequest
         )
     }
+
+    /** PERF: Hatırlatıcı kapatıldığında süreci uyandırmayı bırakır. */
+    fun cancelDailyReminder(context: Context) {
+        WorkManager.getInstance(context).cancelUniqueWork(ReminderWorker.WORK_NAME)
+    }
+
+    /** PERF: Seri hatırlatıcısı kapatıldığında süreci uyandırmayı bırakır. */
+    fun cancelStreakReminder(context: Context) {
+        WorkManager.getInstance(context).cancelUniqueWork(ReminderWorker.STREAK_WORK_NAME)
+    }
 }

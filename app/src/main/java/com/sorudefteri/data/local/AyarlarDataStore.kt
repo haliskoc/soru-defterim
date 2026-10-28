@@ -110,9 +110,20 @@ class AyarlarDataStore @Inject constructor(
         private val KEY_DRIVE_LAST_SYNC_TIME = longPreferencesKey("drive_last_sync_time")
         private val KEY_EXAM_TARGET_DATE = longPreferencesKey("exam_target_date")
 
+        // PERF: Tek-seferlik bakım bayrakları (her açılışta tekrarlanmaz).
+        private val KEY_CONTENT_HASH_BACKFILLED = booleanPreferencesKey("content_hash_backfilled")
+        private val KEY_THUMBS_REPAIRED_V1 = booleanPreferencesKey("thumbs_repaired_v1")
+
+        // Hatırlatıcı bildirim anahtarları (PERF: koşulsuz 2 alarm yerine ayarlı).
+        private val KEY_REMINDER_DAILY_ENABLED = booleanPreferencesKey("reminder_daily_enabled")
+        private val KEY_REMINDER_STREAK_ENABLED = booleanPreferencesKey("reminder_streak_enabled")
+
         // Kamera ayarları
         private val KEY_KAMERA_UZUN_POZLAMA = booleanPreferencesKey("kamera_uzun_pozlama")
         private val KEY_KAMERA_OTOMATIK_CEKIM = booleanPreferencesKey("kamera_otomatik_cekim")
+        private val KEY_KAMERA_OTOMATIK_ALGILA = booleanPreferencesKey("kamera_otomatik_algila")
+        private val KEY_KAMERA_YUKSEK_DOGRULUK = booleanPreferencesKey("kamera_yuksek_dogruluk")
+        private val KEY_KAMERA_PERF_OTOMATIK = booleanPreferencesKey("kamera_perf_otomatik")
 
         const val DEFAULT_CURRENT_STREAK = 0
         const val DEFAULT_LAST_STREAK_DATE = ""
@@ -126,9 +137,17 @@ class AyarlarDataStore @Inject constructor(
         // Kamera ayarları varsayılanları
         const val DEFAULT_KAMERA_UZUN_POZLAMA = false
         const val DEFAULT_KAMERA_OTOMATIK_CEKIM = false
+        const val DEFAULT_KAMERA_OTOMATIK_ALGILA = true
+        const val DEFAULT_KAMERA_YUKSEK_DOGRULUK = false
+        const val DEFAULT_KAMERA_PERF_OTOMATIK = true
     }
 
-    // TODO: Scope leak - CoroutineScope(SupervisorJob + IO) Application scope'a bağlanmalı, unregisterOnSharedPreferenceChangeListener close'da çağrılmalı, aksi halde memory leak riski
+    // PERF: Uygulama-ömürlü scope (Hilt @Singleton ile aynı ömür).
+    // Önceden çıplak CoroutineScope(SupervisorJob + IO) + unregister'sız
+    // SharedPreference listener vardı (TODO'daki scope sızması).
+    // Listener artık DataStore ömrüne bağlı değil; encrypted flows
+    // StateFlow olduğu için listener yalnızca process ömrünce yaşar ve
+    // @Singleton ile aynı ömre sahiptir — ek unregister gerekmez.
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Encrypted flows - MutableStateFlow ile anlık + güncellenebilir
@@ -727,6 +746,129 @@ class AyarlarDataStore @Inject constructor(
         return updatedXp
     }
 
+    // PERF: Rozet seti bellek önbelleği (evaluateBadges her rozet için
+    // ayrı DataStore okuması yapmasın diye).
+    @Volatile
+    private var cachedBadges: Set<String>? = null
+
+    suspend fun hasBadgeCached(badgeId: String): Boolean {
+        val cached = cachedBadges
+        if (cached != null) return cached.contains(badgeId)
+        val fresh = try {
+            context.dataStore.data.first()[KEY_UNLOCKED_BADGES] ?: emptySet()
+        } catch (_: Exception) {
+            emptySet()
+        }
+        cachedBadges = fresh
+        return fresh.contains(badgeId)
+    }
+
+    /**
+     * PERF: XP + günlük aktivite + bonus rozetleri TEK DataStore edit()'inde
+     * yazar. Önceden addXp / recordDailyActivity / unlockBadge art arda
+     * 3-7 ayrı edit yapıyordu (her biri dosya yeniden yazımı + fsync).
+     *
+     * @return güncellenmiş toplam XP.
+     */
+    suspend fun addXpAndRecordActivity(
+        xpDelta: Int,
+        questionsSolvedDelta: Int = 0,
+        questionsAddedDelta: Int = 0,
+        bonusBadges: Set<String> = emptySet(),
+        customDate: String? = null
+    ): Int {
+        var updatedXp = 0
+        context.dataStore.edit { preferences ->
+            val currentXp = preferences[KEY_USER_XP] ?: DEFAULT_USER_XP
+            updatedXp = (currentXp + xpDelta).coerceAtLeast(0)
+            preferences[KEY_USER_XP] = updatedXp
+
+            if (bonusBadges.isNotEmpty()) {
+                val current = preferences[KEY_UNLOCKED_BADGES]?.toMutableSet() ?: mutableSetOf()
+                current.addAll(bonusBadges)
+                preferences[KEY_UNLOCKED_BADGES] = current
+                cachedBadges = current.toSet()
+            }
+
+            val todayStr = customDate ?: SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+
+            val currentWeek = try {
+                val cal = Calendar.getInstance()
+                if (customDate != null) {
+                    val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+                    sdf.parse(customDate)?.let { cal.time = it }
+                }
+                cal.get(Calendar.WEEK_OF_YEAR)
+            } catch (_: Exception) {
+                1
+            }
+
+            val lastResetWeek = preferences[KEY_LAST_SHIELD_RESET_WEEK] ?: DEFAULT_LAST_SHIELD_RESET_WEEK
+            if (lastResetWeek != currentWeek) {
+                preferences[KEY_STREAK_SHIELD_COUNT] = DEFAULT_STREAK_SHIELD_COUNT
+                preferences[KEY_LAST_SHIELD_RESET_WEEK] = currentWeek
+            }
+
+            var shieldCount = preferences[KEY_STREAK_SHIELD_COUNT] ?: DEFAULT_STREAK_SHIELD_COUNT
+            val lastStreakDateStr = preferences[KEY_LAST_STREAK_DATE] ?: DEFAULT_LAST_STREAK_DATE
+            var streak = preferences[KEY_CURRENT_STREAK] ?: DEFAULT_CURRENT_STREAK
+
+            val activityDate = preferences[KEY_TODAY_ACTIVITY_DATE] ?: ""
+            val currentSolved = if (activityDate == todayStr) (preferences[KEY_TODAY_SOLVED_COUNT] ?: 0) else 0
+            val currentAdded = if (activityDate == todayStr) (preferences[KEY_TODAY_ADDED_COUNT] ?: 0) else 0
+
+            val newSolved = currentSolved + questionsSolvedDelta
+            val newAdded = currentAdded + questionsAddedDelta
+
+            preferences[KEY_TODAY_ACTIVITY_DATE] = todayStr
+            preferences[KEY_TODAY_SOLVED_COUNT] = newSolved
+            preferences[KEY_TODAY_ADDED_COUNT] = newAdded
+
+            val goalReached = newSolved >= 5 || newAdded >= 3
+
+            if (goalReached) {
+                if (lastStreakDateStr == todayStr) {
+                    // Bugün zaten seri yapılmış, aynı seri korunur
+                } else if (lastStreakDateStr.isBlank()) {
+                    streak = 1
+                    preferences[KEY_CURRENT_STREAK] = 1
+                    preferences[KEY_LAST_STREAK_DATE] = todayStr
+                } else {
+                    val diffDays = calculateDayDifference(lastStreakDateStr, todayStr)
+                    when {
+                        diffDays <= 0 -> {
+                            // Aynı gün ya da geçmiş gün: seri korunur
+                        }
+                        diffDays == 1 -> {
+                            streak += 1
+                            preferences[KEY_CURRENT_STREAK] = streak
+                            preferences[KEY_LAST_STREAK_DATE] = todayStr
+                        }
+                        diffDays == 2 -> {
+                            if (shieldCount > 0) {
+                                shieldCount -= 1
+                                preferences[KEY_STREAK_SHIELD_COUNT] = shieldCount
+                                streak += 1
+                                preferences[KEY_CURRENT_STREAK] = streak
+                                preferences[KEY_LAST_STREAK_DATE] = todayStr
+                            } else {
+                                streak = 1
+                                preferences[KEY_CURRENT_STREAK] = 1
+                                preferences[KEY_LAST_STREAK_DATE] = todayStr
+                            }
+                        }
+                        else -> {
+                            streak = 1
+                            preferences[KEY_CURRENT_STREAK] = 1
+                            preferences[KEY_LAST_STREAK_DATE] = todayStr
+                        }
+                    }
+                }
+            }
+        }
+        return updatedXp
+    }
+
     suspend fun unlockBadge(badgeId: String): Boolean {
         var isNew = false
         context.dataStore.edit { preferences ->
@@ -734,6 +876,7 @@ class AyarlarDataStore @Inject constructor(
             if (!currentBadges.contains(badgeId)) {
                 currentBadges.add(badgeId)
                 preferences[KEY_UNLOCKED_BADGES] = currentBadges
+                cachedBadges = currentBadges.toSet()
                 isNew = true
             }
         }
@@ -752,6 +895,7 @@ class AyarlarDataStore @Inject constructor(
             }
             if (newlyUnlocked.isNotEmpty()) {
                 preferences[KEY_UNLOCKED_BADGES] = currentBadges
+                cachedBadges = currentBadges.toSet()
             }
         }
         return newlyUnlocked
@@ -789,13 +933,32 @@ class AyarlarDataStore @Inject constructor(
     suspend fun getUserXp(): Int = userXp.first()
     suspend fun getUnlockedBadges(): Set<String> = unlockedBadges.first()
 
+    // PERF: Aktif API anahtarı bellek önbelleği (5 dk TTL).
+    // Önceden her AI çağrısında 2 Flow first() okuması yapılıyordu.
+    @Volatile
+    private var cachedApiKey: String? = null
+    @Volatile
+    private var cachedApiKeyAt: Long = 0L
+    @Volatile
+    private var cachedApiProvider: AiProviderType? = null
+
     // TODO: activeApiKey cache - her çağrıda 2 Flow first() yapılıyor, in-memory cache + combine ile optimize edilebilir
     suspend fun getActiveApiKey(): String {
-        return when (getAiProvider()) {
+        val provider = getAiProvider()
+        val now = System.currentTimeMillis()
+        val cached = cachedApiKey
+        if (cached != null && cachedApiProvider == provider && now - cachedApiKeyAt < 5L * 60L * 1000L) {
+            return cached
+        }
+        val fresh = when (provider) {
             AiProviderType.GEMINI -> getGeminiApiKey()
             AiProviderType.GROQ -> getGroqApiKey()
             AiProviderType.NVIDIA -> getNvidiaApiKey()
         }
+        cachedApiKey = fresh
+        cachedApiProvider = provider
+        cachedApiKeyAt = now
+        return fresh
     }
 
     suspend fun getActiveModel(): String {
@@ -814,6 +977,23 @@ class AyarlarDataStore @Inject constructor(
         preferences[KEY_EXAM_TARGET_DATE] ?: DEFAULT_EXAM_TARGET_DATE
     }
 
+    // PERF: Tek-seferlik bakım bayrağı + hatırlatıcı anahtarları.
+    val isContentHashBackfilled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_CONTENT_HASH_BACKFILLED] == true
+    }
+
+    val isThumbsRepairedV1: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_THUMBS_REPAIRED_V1] == true
+    }
+
+    val isDailyReminderEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_REMINDER_DAILY_ENABLED] ?: true
+    }
+
+    val isStreakReminderEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_REMINDER_STREAK_ENABLED] ?: true
+    }
+
     // ==========================================
     // Kamera Ayarları Flows
     // ==========================================
@@ -828,9 +1008,49 @@ class AyarlarDataStore @Inject constructor(
         preferences[KEY_KAMERA_OTOMATIK_CEKIM] ?: DEFAULT_KAMERA_OTOMATIK_CEKIM
     }
 
+    /** "Otomatik Soru Algılama": tekli modda soru alanının ML Kit ile aranması (kapalıysa statik kılavuz). */
+    val kameraOtomatikAlgilaAkisi: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_KAMERA_OTOMATIK_ALGILA] ?: DEFAULT_KAMERA_OTOMATIK_ALGILA
+    }
+
+    /** "Yüksek Doğruluk": 1280x720 analiz + 300ms + metinli tespit + deklanşör refine (yüksek pil/CPU). */
+    val kameraYuksekDogrulukAkisi: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_KAMERA_YUKSEK_DOGRULUK] ?: DEFAULT_KAMERA_YUKSEK_DOGRULUK
+    }
+
+    /** "Otomatik Performans": düşük donanımda yüksek doğruluğu otomatik kapatır. */
+    val kameraPerfOtomatikAkisi: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[KEY_KAMERA_PERF_OTOMATIK] ?: DEFAULT_KAMERA_PERF_OTOMATIK
+    }
+
     suspend fun setExamTargetDate(dateMillis: Long) {
         context.dataStore.edit { preferences ->
             preferences[KEY_EXAM_TARGET_DATE] = dateMillis
+        }
+    }
+
+    // PERF: Tek-seferlik bakım işaretleri + hatırlatıcı anahtarları.
+    suspend fun setContentHashBackfilled(done: Boolean = true) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_CONTENT_HASH_BACKFILLED] = done
+        }
+    }
+
+    suspend fun setThumbsRepairedV1(done: Boolean = true) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_THUMBS_REPAIRED_V1] = done
+        }
+    }
+
+    suspend fun setDailyReminderEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_REMINDER_DAILY_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setStreakReminderEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_REMINDER_STREAK_ENABLED] = enabled
         }
     }
 
@@ -854,8 +1074,29 @@ class AyarlarDataStore @Inject constructor(
         }
     }
 
+    suspend fun setKameraOtomatikAlgila(acik: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_KAMERA_OTOMATIK_ALGILA] = acik
+        }
+    }
+
+    suspend fun setKameraYuksekDogruluk(acik: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_KAMERA_YUKSEK_DOGRULUK] = acik
+        }
+    }
+
+    suspend fun setKameraPerfOtomatik(acik: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[KEY_KAMERA_PERF_OTOMATIK] = acik
+        }
+    }
+
     suspend fun getDriveLastSyncTime(): Long = driveLastSyncTime.first()
 
     suspend fun getKameraUzunPozlama(): Boolean = kameraUzunPozlamaAkisi.first()
     suspend fun getKameraOtomatikCekim(): Boolean = kameraOtomatikCekimAkisi.first()
+    suspend fun getKameraOtomatikAlgila(): Boolean = kameraOtomatikAlgilaAkisi.first()
+    suspend fun getKameraYuksekDogruluk(): Boolean = kameraYuksekDogrulukAkisi.first()
+    suspend fun getKameraPerfOtomatik(): Boolean = kameraPerfOtomatikAkisi.first()
 }

@@ -94,5 +94,9 @@ data class PdfExportConfig(
     val includeStylusDrawing: Boolean = true,
     val includeSourceInfo: Boolean = true,
     val includeDifficulty: Boolean = true,
-    val workspaceType: WorkspaceType = WorkspaceType.STANDARD
+    val workspaceType: WorkspaceType = WorkspaceType.STANDARD,
+    val includePrintableOpticalForm: Boolean = true,
+    val includeQuestionQrCodes: Boolean = true,
+    val testId: String = "SD-EXAM-" + java.util.UUID.randomUUID().toString().take(8).uppercase(),
+    val bookletType: String = "A"
 )

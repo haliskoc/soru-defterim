@@ -47,6 +47,8 @@ data class SoruEklemeUiState(
     val kaynakDeneme: String = "",
     val kaynakYil: String = "",
     val kaynakSoruNo: String = "",
+    val denemeId: Long? = null,
+    val denemeSoruNo: String = "",
     val topicSuggestions: List<String> = emptyList(),
     val catalogUnits: List<KonuUnite> = emptyList(),
     val frequentTopics: List<String> = emptyList(),
@@ -122,8 +124,10 @@ class SoruEklemeViewModel @Inject constructor(
 
     public override fun onCleared() {
         super.onCleared()
-        // OcrHelper lifecycle: TextRecognizer close
-        try { ocrHelper.close() } catch (_: Exception) {}
+        // PERF: OcrHelper @Singleton'dur; ekran kapanınca kapatılmaz.
+        // Önceden burada close() vardı: ortak tanıyıcı kapanıyor, sonraki
+        // OCR'da model yeniden yükleniyordu (getRecognizer zaten kapalıysa
+        // yeniden açar; açık istek kaldıysa yıkılıyordu).
 
         if (!_uiState.value.isSaved) {
             val pathsToDelete = synchronized(sessionCreatedImagePaths) {
@@ -526,7 +530,75 @@ class SoruEklemeViewModel @Inject constructor(
     }
 
     fun setKaynakSoruNo(no: String) {
-        _uiState.update { it.copy(kaynakSoruNo = no) }
+        _uiState.update {
+            it.copy(
+                kaynakSoruNo = no,
+                denemeSoruNo = if (it.denemeId != null && it.denemeSoruNo.isBlank()) no else it.denemeSoruNo
+            )
+        }
+    }
+
+    fun setDenemeSoruNo(no: String) {
+        _uiState.update {
+            it.copy(
+                denemeSoruNo = no,
+                kaynakSoruNo = no
+            )
+        }
+    }
+
+    /**
+     * Deneme sınavından veya OMR optik sonuç ekranından doğrudan yanlış/boş soru eklenirken
+     * deneme kimliğini, yayın/deneme adını, kitapçık soru numarasını ve varsa ders/konu/cevap
+     * bilgilerini otomatik doldurur.
+     */
+    fun setDenemeContext(
+        denemeId: Long? = null,
+        denemeBaslik: String? = null,
+        denemeYayin: String? = null,
+        denemeSoruNo: Int? = null,
+        examType: String? = null,
+        subjectId: String? = null,
+        topic: String? = null,
+        correctAnswer: String? = null,
+        studentAnswer: String? = null
+    ) {
+        _uiState.update { current ->
+            val resolvedExamType = examType?.takeIf { it.isNotBlank() } ?: current.examType
+            val subjects = DersTaksonomisi.getDersler(resolvedExamType, current.userAlan)
+            val resolvedSubjectId = when {
+                !subjectId.isNullOrBlank() && subjects.any { it.id.equals(subjectId, ignoreCase = true) } ->
+                    subjects.first { it.id.equals(subjectId, ignoreCase = true) }.id
+                !subjectId.isNullOrBlank() -> subjectId
+                subjects.any { it.id == current.subjectId } -> current.subjectId
+                else -> subjects.firstOrNull()?.id ?: current.subjectId
+            }
+            val soruNoStr = denemeSoruNo?.takeIf { it > 0 }?.toString() ?: current.denemeSoruNo
+
+            current.copy(
+                denemeId = denemeId ?: current.denemeId,
+                kaynakDeneme = denemeBaslik?.takeIf { it.isNotBlank() } ?: current.kaynakDeneme,
+                kaynakYayin = denemeYayin?.takeIf { it.isNotBlank() } ?: current.kaynakYayin,
+                denemeSoruNo = soruNoStr,
+                kaynakSoruNo = soruNoStr.ifBlank { current.kaynakSoruNo },
+                examType = resolvedExamType,
+                availableSubjects = subjects,
+                subjectId = resolvedSubjectId,
+                topic = topic?.takeIf { it.isNotBlank() } ?: current.topic,
+                correctAnswer = correctAnswer?.takeIf { it.isNotBlank() } ?: current.correctAnswer,
+                studentAnswer = studentAnswer?.takeIf { it.isNotBlank() } ?: current.studentAnswer
+            )
+        }
+        updateTopicSuggestions()
+    }
+
+    fun clearDenemeContext() {
+        _uiState.update {
+            it.copy(
+                denemeId = null,
+                denemeSoruNo = ""
+            )
+        }
     }
 
     fun openCropper(isSolution: Boolean) {
@@ -580,7 +652,8 @@ class SoruEklemeViewModel @Inject constructor(
             closeBatchCropper()
             return
         }
-        viewModelScope.launch {
+        // PERF: Dosya taşıma/karşılaştırma IO'dadır (önceden Main'de jank).
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 val permanentPaths = paths.map { p ->
                     try {
@@ -617,6 +690,8 @@ class SoruEklemeViewModel @Inject constructor(
         if (remaining.isNotEmpty()) {
             val nextPath = remaining.first()
             val nextRemaining = remaining.drop(1)
+            val nextSoruNoStr = (state.denemeSoruNo.toIntOrNull() ?: state.kaynakSoruNo.toIntOrNull())
+                ?.let { (it + 1).toString() } ?: ""
             _uiState.update {
                 it.copy(
                     soruImagePath = nextPath,
@@ -624,6 +699,8 @@ class SoruEklemeViewModel @Inject constructor(
                     extractedText = null,
                     correctAnswer = null,
                     studentAnswer = null,
+                    denemeSoruNo = if (it.denemeId != null && nextSoruNoStr.isNotBlank()) nextSoruNoStr else it.denemeSoruNo,
+                    kaynakSoruNo = if (nextSoruNoStr.isNotBlank()) nextSoruNoStr else it.kaynakSoruNo,
                     pendingBatchImages = nextRemaining,
                     currentBatchIndex = it.currentBatchIndex + 1,
                     isSaved = false
@@ -681,7 +758,9 @@ class SoruEklemeViewModel @Inject constructor(
                         kaynakYayin = soru.kaynakYayin ?: "",
                         kaynakDeneme = soru.kaynakDeneme ?: "",
                         kaynakYil = soru.kaynakYil?.toString() ?: "",
-                        kaynakSoruNo = soru.kaynakSoruNo?.toString() ?: "",
+                        kaynakSoruNo = (soru.kaynakSoruNo ?: soru.denemeSoruNo)?.toString() ?: "",
+                        denemeId = soru.denemeId,
+                        denemeSoruNo = (soru.denemeSoruNo ?: soru.kaynakSoruNo)?.toString() ?: "",
                         extractedText = soru.ocrMetni ?: soru.questionText,
                         sendImageToAi = !soru.isOcrUsed
                     )
@@ -695,6 +774,7 @@ class SoruEklemeViewModel @Inject constructor(
 
     fun saveSoru(onSuccess: () -> Unit) {
         val state = _uiState.value
+        if (state.isSaving || state.isSaved) return
         val imagePath = state.soruImagePath
         if (imagePath.isNullOrBlank()) {
             _uiState.update { it.copy(errorMessage = "Lütfen bir soru fotoğrafı ekleyin.") }
@@ -704,12 +784,16 @@ class SoruEklemeViewModel @Inject constructor(
             _uiState.update { it.copy(errorMessage = "Lütfen bir konu başlığı seçin veya yazın.") }
             return
         }
+        _uiState.update { it.copy(isSaving = true, errorMessage = null) }
         viewModelScope.launch {
-            _uiState.update { it.copy(isSaving = true, errorMessage = null) }
             try {
                 val yilParsed = state.kaynakYil.trim().toIntOrNull()
                 val soruNoParsed = state.kaynakSoruNo.trim().toIntOrNull()
                 val existingSoru = state.editingSoruId?.let { soruRepository.getSoru(it) }
+                val denemeSoruNoParsed = state.denemeSoruNo.trim().toIntOrNull()
+                    ?: soruNoParsed
+                    ?: existingSoru?.denemeSoruNo
+                val finalDenemeId = state.denemeId ?: existingSoru?.denemeId
                 val soru = Soru(
                     id = state.editingSoruId ?: 0L,
                     imagePath = imagePath,
@@ -732,12 +816,22 @@ class SoruEklemeViewModel @Inject constructor(
                     kaynakYayin = state.kaynakYayin.trim().ifBlank { null },
                     kaynakDeneme = state.kaynakDeneme.trim().ifBlank { null },
                     kaynakYil = yilParsed,
-                    kaynakSoruNo = soruNoParsed,
+                    kaynakSoruNo = soruNoParsed ?: denemeSoruNoParsed,
                     ocrMetni = state.extractedText?.trim()?.ifBlank { null },
                     isOcrUsed = !state.extractedText.isNullOrBlank() && !state.sendImageToAi,
                     questionText = state.extractedText?.trim()?.ifBlank { null },
+                    audioPath = existingSoru?.audioPath,
+                    fsrsStability = existingSoru?.fsrsStability,
+                    fsrsDifficulty = existingSoru?.fsrsDifficulty,
+                    fsrsReps = existingSoru?.fsrsReps ?: 0,
+                    fsrsLapses = existingSoru?.fsrsLapses ?: 0,
                     createdAt = existingSoru?.createdAt ?: System.currentTimeMillis(),
-                    updatedAt = System.currentTimeMillis()
+                    updatedAt = System.currentTimeMillis(),
+                    contentHash = existingSoru?.contentHash ?: "",
+                    evrenselId = existingSoru?.evrenselId ?: "",
+                    isDeleted = existingSoru?.isDeleted ?: 0,
+                    denemeId = finalDenemeId,
+                    denemeSoruNo = denemeSoruNoParsed
                 )
                 if (state.editingSoruId != null) {
                     if (existingSoru != null) {

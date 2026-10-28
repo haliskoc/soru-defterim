@@ -92,6 +92,9 @@ fun FullScreenImageViewer(
                 SubcomposeAsyncImage(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(imageModel)
+                        // PERF: 5× zoom ekran çözünürlüğüne uygulanıyordu (bulanık +
+                        // gereksiz). Ekran genişliğinin 2×'ı istenir; zoom GPU ölçeğidir.
+                        .size(2160)
                         .crossfade(true)
                         .build(),
                     contentDescription = title,

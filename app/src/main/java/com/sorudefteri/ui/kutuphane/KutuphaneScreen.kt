@@ -23,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
 import androidx.paging.compose.LazyPagingItems
@@ -85,6 +86,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -108,6 +110,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
 import com.sorudefteri.data.pdf.PdfDenemeKitapcikGenerator
 import com.sorudefteri.ui.kutuphane.components.PdfExportDialog
 import com.sorudefteri.domain.DersTaksonomisi
@@ -238,6 +241,10 @@ fun KutuphaneScreen(
         )
     }
 
+    val showBottomBar by remember(uiState.isSelectionMode, uiState.selectedSoruIds) {
+        derivedStateOf { uiState.isSelectionMode && uiState.selectedSoruIds.isNotEmpty() }
+    }
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -357,16 +364,19 @@ fun KutuphaneScreen(
                                 onDismissRequest = { overflowMenuExpanded = false }
                             ) {
                                 DropdownMenuItem(
-                                    text = { Text("📄 Filtrelenen Soruları PDF Yap (${uiState.filteredSorular.size})") },
+                                    text = { Text("📄 Filtrelenen Soruları PDF Yap (${pagedSorular.itemCount})") },
                                     onClick = {
                                         overflowMenuExpanded = false
-                                        if (uiState.filteredSorular.isEmpty()) {
-                                            coroutineScope.launch {
-                                                snackbarHostState.showSnackbar("Dışa aktarılacak soru bulunamadı.")
+                                        coroutineScope.launch {
+                                            val questionsToExport = withContext(Dispatchers.IO) {
+                                                viewModel.getFilteredSorularForExport()
                                             }
-                                        } else {
-                                            questionsForPdfExport = uiState.filteredSorular
-                                            showPdfExportDialog = true
+                                            if (questionsToExport.isEmpty()) {
+                                                snackbarHostState.showSnackbar("Dışa aktarılacak soru bulunamadı.")
+                                            } else {
+                                                questionsForPdfExport = questionsToExport
+                                                showPdfExportDialog = true
+                                            }
                                         }
                                     }
                                 )
@@ -375,7 +385,9 @@ fun KutuphaneScreen(
                                     onClick = {
                                         overflowMenuExpanded = false
                                         coroutineScope.launch {
-                                            val questionsToExport = uiState.filteredSorular
+                                            val questionsToExport = withContext(Dispatchers.IO) {
+                                                viewModel.getFilteredSorularForExport()
+                                            }
                                             if (questionsToExport.isEmpty()) {
                                                 snackbarHostState.showSnackbar("Dışa aktarılacak soru bulunamadı.")
                                                 return@launch
@@ -408,26 +420,30 @@ fun KutuphaneScreen(
             }
         },
         bottomBar = {
-            if (uiState.isSelectionMode && uiState.selectedSoruIds.isNotEmpty()) {
+            if (showBottomBar) {
                 // TELEFON: taşmayan 2 satırlı seçim çubuğu (tablet de kullanır — küçük düzeltme)
                 PhoneSecimAltBar(
                     seciliSayi = uiState.selectedSoruIds.size,
                     onCozuldu = { viewModel.batchMarkSolvedSelected(true) },
                     onYildizla = { viewModel.batchStarSelected(true) },
                     onPdf = {
-                        val selectedQuestions = uiState.filteredSorular.filter { it.id in uiState.selectedSoruIds }
-                        if (selectedQuestions.isEmpty()) {
-                            coroutineScope.launch {
-                                snackbarHostState.showSnackbar("Lütfen en az bir soru seçin.")
+                        coroutineScope.launch {
+                            val selectedQuestions = withContext(Dispatchers.IO) {
+                                viewModel.getSelectedSorular()
                             }
-                        } else {
-                            questionsForPdfExport = selectedQuestions
-                            showPdfExportDialog = true
+                            if (selectedQuestions.isEmpty()) {
+                                snackbarHostState.showSnackbar("Lütfen en az bir soru seçin.")
+                            } else {
+                                questionsForPdfExport = selectedQuestions
+                                showPdfExportDialog = true
+                            }
                         }
                     },
                     onAnki = {
                         coroutineScope.launch {
-                            val selectedQuestions = uiState.filteredSorular.filter { it.id in uiState.selectedSoruIds }
+                            val selectedQuestions = withContext(Dispatchers.IO) {
+                                viewModel.getSelectedSorular()
+                            }
                             if (selectedQuestions.isEmpty()) {
                                 snackbarHostState.showSnackbar("Lütfen en az bir soru seçin.")
                                 return@launch
@@ -461,6 +477,13 @@ fun KutuphaneScreen(
         }
     ) { innerPadding ->
         if (isExpandedScreen) {
+            // PERF: Tam liste yok; aktif soru Paging snapshot'ından alınır.
+            val activeSoru = remember(selectedTabletSoruId, pagedSorular.itemSnapshotList) {
+                pagedSorular.itemSnapshotList.items
+                    .firstOrNull { it.id == selectedTabletSoruId }
+                    ?: pagedSorular.itemSnapshotList.items.firstOrNull()
+            }
+
             // TABLET RESPONSIVE 2-COLUMN (List-Detail Pane) LAYOUT
             Row(
                 modifier = Modifier
@@ -486,7 +509,8 @@ fun KutuphaneScreen(
                         },
                         onOpenBottomSheet = { showBottomSheet = true },
                         onStartDueTest = onStartDueTest,
-                        minGridSize = 140.dp
+                        minGridSize = 220.dp,
+                        activePreviewSoruId = activeSoru?.id
                     )
                 }
 
@@ -499,9 +523,6 @@ fun KutuphaneScreen(
                 )
 
                 // Sağ Sütun: Seçili Soru Detay Önizleme Paneli
-                val activeSoru = uiState.filteredSorular.find { it.id == selectedTabletSoruId }
-                    ?: uiState.filteredSorular.firstOrNull()
-
                 Box(
                     modifier = Modifier
                         .weight(1.3f)
@@ -540,7 +561,10 @@ fun KutuphaneScreen(
                     }
                 },
                 onOpenBottomSheet = { showBottomSheet = true },
-                onStartDueTest = onStartDueTest
+                onStartDueTest = onStartDueTest,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
             )
         }
 
@@ -723,7 +747,8 @@ private fun PhoneKutuphaneIcerik(
     viewModel: KutuphaneViewModel,
     onSoruSelected: (Long) -> Unit,
     onOpenBottomSheet: () -> Unit,
-    onStartDueTest: () -> Unit = {}
+    onStartDueTest: () -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val focusManager = LocalFocusManager.current
     var localSearchText by rememberSaveable { mutableStateOf(uiState.searchQuery) }
@@ -743,7 +768,7 @@ private fun PhoneKutuphaneIcerik(
             (if (uiState.onlyFavorites) 1 else 0) +
             (if (uiState.onlyDueReview) 1 else 0)
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = modifier.fillMaxSize()) {
         // Adım 1 — Ara (nefes alan, 56dp, sonuç rozetli)
         PhoneAramaCubugu(
             value = localSearchText,
@@ -854,22 +879,23 @@ private fun PhoneKutuphaneIcerik(
                         )
                     }
                 }
-                // TELEFON DİKEY LİSTE: paging verisini index anahtarlı tekil item'larla dizer
-                // (LazyListScope.items(count) yerine for+item: derleyici çıkarım sorunu yok)
-                for (index in 0 until pagedSorular.itemCount) {
-                    item(key = pagedSorular[index]?.id ?: index) {
-                        val soru = pagedSorular[index]
-                        if (soru != null) {
-                            PhoneSoruListeKarti(
-                                soru = soru,
-                                onClick = { onSoruSelected(soru.id) },
-                                onLongClick = { viewModel.toggleSelectSoru(soru.id) },
-                                isSelected = uiState.selectedSoruIds.contains(soru.id),
-                                isSelectionMode = uiState.isSelectionMode,
-                                onToggleSolved = { viewModel.toggleSolved(soru) },
-                                onToggleFavorite = { viewModel.toggleFavorite(soru) }
-                            )
-                        }
+                // TELEFON DİKEY LİSTE: paging items() formu (prefetch + key + contentType ile akıcı kaydırma)
+                items(
+                    count = pagedSorular.itemCount,
+                    key = pagedSorular.itemKey { it.id },
+                    contentType = { "soru" }
+                ) { index ->
+                    val soru = pagedSorular[index]
+                    if (soru != null) {
+                        PhoneSoruListeKarti(
+                            soru = soru,
+                            onClick = { onSoruSelected(soru.id) },
+                            onLongClick = { viewModel.toggleSelectSoru(soru.id) },
+                            isSelected = uiState.selectedSoruIds.contains(soru.id),
+                            isSelectionMode = uiState.isSelectionMode,
+                            onToggleSolved = { viewModel.toggleSolved(soru) },
+                            onToggleFavorite = { viewModel.toggleFavorite(soru) }
+                        )
                     }
                 }
             }
@@ -885,7 +911,8 @@ private fun QuestionListHeaderAndGrid(
     onSoruSelected: (Long) -> Unit,
     onOpenBottomSheet: () -> Unit,
     onStartDueTest: () -> Unit = {},
-    minGridSize: androidx.compose.ui.unit.Dp
+    minGridSize: androidx.compose.ui.unit.Dp = 220.dp,
+    activePreviewSoruId: Long? = null
 ) {
     val focusManager = LocalFocusManager.current
     var localSearchText by rememberSaveable { mutableStateOf(uiState.searchQuery) }
@@ -1033,17 +1060,23 @@ private fun QuestionListHeaderAndGrid(
                 }
                 items(
                     count = pagedSorular.itemCount,
-                    key = pagedSorular.itemKey { it.id }
+                    key = pagedSorular.itemKey { it.id },
+                    contentType = { "soru" }
                 ) { index ->
                     val soru = pagedSorular[index]
                     if (soru != null) {
+                        val isCardSelected = if (uiState.isSelectionMode) {
+                            uiState.selectedSoruIds.contains(soru.id)
+                        } else {
+                            activePreviewSoruId == soru.id
+                        }
                         SoruKarti(
                             soru = soru,
                             onClick = { onSoruSelected(soru.id) },
                             onLongClick = {
                                 viewModel.toggleSelectSoru(soru.id)
                             },
-                            isSelected = uiState.selectedSoruIds.contains(soru.id),
+                            isSelected = isCardSelected,
                             isSelectionMode = uiState.isSelectionMode,
                             onToggleSolved = { viewModel.toggleSolved(soru) },
                             onToggleFavorite = { viewModel.toggleFavorite(soru) }
@@ -1189,14 +1222,24 @@ private fun TabletDetailPane(
             }
 
             // Soru Görseli
+            // PERF: Disk stat'ı composition dışında (IO) + boyut ipucu (720px).
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                val imageFile = File(soru.imagePath)
+                val imageModel = remember(soru.imagePath) { File(soru.imagePath) }
+                var imageExists by remember(soru.imagePath) { mutableStateOf<Boolean?>(null) }
+                LaunchedEffect(soru.imagePath) {
+                    imageExists = withContext(Dispatchers.IO) {
+                        try { imageModel.exists() && imageModel.length() > 0 } catch (_: Exception) { false }
+                    }
+                }
                 AsyncImage(
-                    model = if (imageFile.exists()) imageFile else soru.imagePath,
+                    model = ImageRequest.Builder(LocalContext.current)
+                        .data(if (imageExists == true) imageModel else soru.imagePath)
+                        .size(720)
+                        .build(),
                     contentDescription = "Soru Görseli",
                     contentScale = ContentScale.Fit,
                     modifier = Modifier
@@ -1218,9 +1261,18 @@ private fun TabletDetailPane(
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    val solFile = File(soru.solutionImagePath)
+                    val solModel = remember(soru.solutionImagePath) { File(soru.solutionImagePath) }
+                    var solExists by remember(soru.solutionImagePath) { mutableStateOf<Boolean?>(null) }
+                    LaunchedEffect(soru.solutionImagePath) {
+                        solExists = withContext(Dispatchers.IO) {
+                            try { solModel.exists() && solModel.length() > 0 } catch (_: Exception) { false }
+                        }
+                    }
                     AsyncImage(
-                        model = if (solFile.exists()) solFile else soru.solutionImagePath,
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(if (solExists == true) solModel else soru.solutionImagePath)
+                            .size(720)
+                            .build(),
                         contentDescription = "Çözüm Görseli",
                         contentScale = ContentScale.Fit,
                         modifier = Modifier
@@ -1275,6 +1327,8 @@ private fun TabletDetailPane(
                     Text("Tam Ekranda Aç & AI Çözüm", fontWeight = FontWeight.Bold)
                 }
             }
+
+            Spacer(modifier = Modifier.height(72.dp))
         }
     }
 }

@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -75,6 +76,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -202,20 +204,28 @@ fun IstatistikScreen(
                                 Text(
                                     text = title,
                                     style = MaterialTheme.typography.labelLarge,
-                                    fontWeight = if (selectedStatTab == index) FontWeight.Bold else FontWeight.Normal
+                                    fontWeight = if (selectedStatTab == index) FontWeight.Bold else FontWeight.Normal,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         )
                     }
                 }
 
-                Column(
+                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(scrollState)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        .verticalScroll(scrollState),
+                    contentAlignment = Alignment.TopCenter
                 ) {
+                    Column(
+                        modifier = Modifier
+                            .widthIn(max = 900.dp)
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
                     when (selectedStatTab) {
                         // ─────────────────────────────────────────────────
                         // SEKME 1 — ÖZET: kısa KPI'lar + haftalık karşılaştırma + bugün öneri + aktivite
@@ -379,6 +389,7 @@ fun IstatistikScreen(
                             .navigationBarsPadding()
                             .height(24.dp)
                     )
+                    }
                 }
             }
         }

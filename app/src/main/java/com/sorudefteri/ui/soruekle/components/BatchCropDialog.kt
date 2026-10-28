@@ -93,6 +93,16 @@ fun BatchCropDialog(
     var loadedBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var isProcessing by remember { mutableStateOf(false) }
 
+    // PERF: Dialog kapanırken kaynak bitmap bırakılır (önceden sızıyordu).
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            try {
+                loadedBitmap?.let { if (!it.isRecycled) it.recycle() }
+            } catch (_: Exception) {}
+            loadedBitmap = null
+        }
+    }
+
     // Görseli arka planda yükle
     LaunchedEffect(imagePath) {
         withContext(Dispatchers.IO) {
@@ -105,7 +115,11 @@ fun BatchCropDialog(
                     while (opts.outWidth / sample > 2000 || opts.outHeight / sample > 2000) {
                         sample *= 2
                     }
-                    val loadOpts = BitmapFactory.Options().apply { inSampleSize = sample }
+                    // PERF: Önizleme için RGB_565 (2× daha az RAM; kayıt JPEG'e).
+                    val loadOpts = BitmapFactory.Options().apply {
+                        inSampleSize = sample
+                        inPreferredConfig = Bitmap.Config.RGB_565
+                    }
                     val bmp = BitmapFactory.decodeFile(imagePath, loadOpts)
                     if (bmp != null) {
                         // EXIF döndürme kontrolü
@@ -121,7 +135,9 @@ fun BatchCropDialog(
                             ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
                         }
                         loadedBitmap = if (!matrix.isIdentity) {
-                            Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                            val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                            if (rotated !== bmp && !bmp.isRecycled) bmp.recycle()
+                            rotated
                         } else bmp
                     }
                 }
@@ -385,11 +401,16 @@ fun BatchCropDialog(
                                             rect.width.toInt(),
                                             rect.height.toInt()
                                         )
-                                        val destFile = File(filesDir, "soru_crop_${System.currentTimeMillis()}_$index.jpg")
-                                        FileOutputStream(destFile).use { out ->
-                                            croppedBmp.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                                        try {
+                                            val destFile = File(filesDir, "soru_crop_${System.currentTimeMillis()}_$index.jpg")
+                                            FileOutputStream(destFile).use { out ->
+                                                croppedBmp.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                                            }
+                                            croppedPaths.add(destFile.absolutePath)
+                                        } finally {
+                                            // PERF: Üretilen crop bitmap'i yazıldıktan sonra bırakılır.
+                                            try { if (!croppedBmp.isRecycled) croppedBmp.recycle() } catch (_: Exception) {}
                                         }
-                                        croppedPaths.add(destFile.absolutePath)
                                     }
 
                                     withContext(Dispatchers.Main) {

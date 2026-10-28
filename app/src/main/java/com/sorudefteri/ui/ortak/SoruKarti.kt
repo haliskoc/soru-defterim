@@ -44,6 +44,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -58,7 +59,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import coil3.compose.SubcomposeAsyncImage
 import coil3.request.ImageRequest
 import coil3.request.crossfade
 import com.sorudefteri.data.images.GorselDepo
@@ -141,34 +141,21 @@ fun SoruKarti(
                     }
                 }
 
-                SubcomposeAsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
+                val context = LocalContext.current
+                val imageRequest = remember(soru.id, displayPath) {
+                    ImageRequest.Builder(context)
                         .data(imageModel)
-                        .crossfade(true)
-                        .build(),
+                        .size(480, 300)
+                        .memoryCacheKey("kart_${soru.id}")
+                        .build()
+                }
+
+                // PERF: Izgarada SubcomposeAsyncImage yerine AsyncImage.
+                AsyncImage(
+                    model = imageRequest,
                     contentDescription = "${dersAdi} dersi, ${soru.topic} konulu soru görseli",
                     contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                    loading = {
-                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
-                        }
-                    },
-                    error = {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ImageNotSupported,
-                                contentDescription = "Görsel yüklenemedi",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
-                    }
+                    modifier = Modifier.fillMaxSize()
                 )
 
                 // Görsel Üzerindeki Rozetler (Top-Start: Seçim veya TYT/AYT, Top-End: Favori & AI)
@@ -405,11 +392,15 @@ fun SoruKarti(
                         shape = RoundedCornerShape(8.dp),
                         color = solvedBgColor,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(8.dp))
                             .then(
                                 if (onToggleSolved != null) {
-                                    Modifier.clickable { onToggleSolved() }
-                                } else Modifier
+                                    Modifier
+                                        .minimumInteractiveComponentSize()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onToggleSolved() }
+                                } else {
+                                    Modifier.clip(RoundedCornerShape(8.dp))
+                                }
                             )
                     ) {
                         Row(
@@ -425,7 +416,7 @@ fun SoruKarti(
                             )
                             Text(
                                 text = if (soru.isSolved) "Çözüldü" else "Çözülmedi",
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                                 color = solvedTextColor,
                                 maxLines = 1,

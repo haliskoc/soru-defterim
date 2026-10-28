@@ -921,8 +921,7 @@ class SoruDetayViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        try {
-            ocrHelper.close()
-        } catch (_: Exception) {}
+        // PERF: OcrHelper @Singleton'dur; ekran kapanınca kapatılmaz
+        // (bkz. SoruEklemeViewModel.onCleared).
     }
 }

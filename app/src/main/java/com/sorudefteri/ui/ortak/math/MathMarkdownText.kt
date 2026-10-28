@@ -137,6 +137,72 @@ fun MathMarkdownText(
     }
 }
 
+/**
+ * PERF: Yapay Zeka açıklamasını bölüm kartlarına ayırıp TEK WebView'de
+ * renderlayan birleştirilmiş görüntüleyici.
+ *
+ * [MathMarkdownText] bölüm başına ayrı `SmartMathContent` (yani bölüm sayısı
+ * kadar WebView) üretiyordu; bu sürüm tüm bölümleri tek HTML gövdesinde
+ * birleştirip tek [KaTeXMathView] çağırır. Hiç matematik içermeyen metinlerde
+ * WebView hiç açılmaz (doğrudan [RenderFormattedLines]).
+ *
+ * Bölüm tipi sıralaması [SectionType.ordinal] ile taşınır; kart renkleri
+ * [KaTeXHtmlGenerator.combinedCardsCss] içindedir.
+ */
+@Composable
+fun CombinedMathMarkdownText(
+    text: String,
+    modifier: Modifier = Modifier,
+    fontSizeSp: Float = 15f,
+    textColor: Color = MaterialTheme.colorScheme.onSurface
+) {
+    if (text.isBlank()) return
+
+    val sections = remember(text) { parseAiExplanationSections(text) }
+    val anyMath = remember(sections) {
+        sections.any { MathDisplayHelper.hasMathOrLatex(it.content) || MathDisplayHelper.hasMathOrLatex(it.title) }
+    }
+
+    if (!anyMath) {
+        Column(
+            modifier = modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            sections.forEach { section ->
+                when (section.type) {
+                    SectionType.CORRECT_ANSWER -> CorrectAnswerCard(section, fontSizeSp, textColor)
+                    SectionType.FORMULAS -> FormulasCard(section, fontSizeSp, textColor)
+                    SectionType.STEPS -> StepsCard(section, fontSizeSp, textColor)
+                    SectionType.MISTAKES -> MistakesCard(section, fontSizeSp, textColor)
+                    SectionType.TIPS -> TipsCard(section, fontSizeSp, textColor)
+                    SectionType.GENERAL -> GeneralTextCard(section, fontSizeSp, textColor)
+                }
+            }
+        }
+        return
+    }
+
+    val combinedBody = remember(sections) {
+        KaTeXHtmlGenerator.generateCombinedHtml(
+            sections.map { Triple(it.type.ordinal, it.title, it.content) }
+        )
+    }
+    val textColorHex = KaTeXHtmlGenerator.colorToHex(textColor)
+    val cardsCss = remember(textColorHex) { KaTeXHtmlGenerator.combinedCardsCss(textColorHex) }
+
+    KaTeXMathView(
+        content = text,
+        modifier = modifier,
+        fontSizeSp = fontSizeSp,
+        textColor = textColor,
+        combinedBodyHtml = combinedBody,
+        combinedCss = cardsCss,
+        fallback = {
+            MathMarkdownText(text = text, modifier = modifier, fontSizeSp = fontSizeSp, textColor = textColor)
+        }
+    )
+}
+
 private enum class SectionType {
     CORRECT_ANSWER,
     FORMULAS,

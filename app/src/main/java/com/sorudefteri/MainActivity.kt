@@ -3,6 +3,7 @@ package com.sorudefteri
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import android.content.Intent
@@ -12,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
 import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -51,8 +53,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         deepLinkTarget = extractDeepLinkTarget(intent)
         enableEdgeToEdge()
-        // Widget'ı (streak/tekrar/sınav geri sayımı) her açılışta tazele
-        SoruWidgetUpdater.updateAllNowAsync(this)
+        // PERF: Widget her açılışta tazelenmez (pil). Yalnızca veri değişiminde
+        // (soru ekleme/test bitirme/sınav tarihi) SoruWidgetUpdater çağrılmalı.
         setContent {
             val windowSizeClass = calculateWindowSizeClass(this)
             val themeMode by ayarlarDataStore.themeMode.collectAsStateWithLifecycle(initialValue = 0)
@@ -62,6 +64,27 @@ class MainActivity : ComponentActivity() {
                 1 -> false
                 2 -> true
                 else -> isSystemInDarkTheme()
+            }
+
+            LaunchedEffect(isDark) {
+                enableEdgeToEdge(
+                    statusBarStyle = if (isDark) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT
+                        )
+                    },
+                    navigationBarStyle = if (isDark) {
+                        SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                    } else {
+                        SystemBarStyle.light(
+                            android.graphics.Color.TRANSPARENT,
+                            android.graphics.Color.TRANSPARENT
+                        )
+                    }
+                )
             }
 
             SoruDefteriTheme(darkTheme = isDark) {

@@ -1,10 +1,6 @@
 package com.sorudefteri.ui.ortak
 
 import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,13 +25,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
  * Günlük Seri (Streak) ve Seri Kalkanı gösterge rozeti.
- * Canlı nabız (pulse) animasyonu ve kalkan göstergesi içerir.
+ *
+ * PERF: Sürekli nabız animasyonu KALDIRILDI (boşta CPU/GPU + pil).
+ * Seri sayısı değiştiğinde tek seferlik kısa bir büyüme oynar, sonra durur.
  */
 @Composable
 fun StreakBadge(
@@ -46,16 +45,19 @@ fun StreakBadge(
 ) {
     var showDialog by remember { mutableStateOf(false) }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "streakTransition")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = if (streakCount > 0) 1.06f else 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1200, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "streakPulse"
-    )
+    // PERF: Statik rozet. streakCount değiştiğinde tek seferlik kısa büyüme
+    // oynar (Animatable + LaunchedEffect, sonsuz tekrar YOK).
+    val bump = remember { androidx.compose.animation.core.Animatable(1f) }
+    androidx.compose.runtime.LaunchedEffect(streakCount) {
+        if (streakCount > 0) {
+            bump.snapTo(1.12f)
+            bump.animateTo(
+                1f,
+                animationSpec = tween(durationMillis = 350, easing = FastOutSlowInEasing)
+            )
+        }
+    }
+    val pulseScale = bump.value
 
     val containerColor = if (streakCount > 0) {
         Color(0xFFFF9800).copy(alpha = 0.15f)
@@ -69,8 +71,9 @@ fun StreakBadge(
         MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)
     }
 
+    val isDark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
     val textColor = if (streakCount > 0) {
-        Color(0xFFE65100)
+        if (isDark) Color(0xFFFFB74D) else Color(0xFFE65100)
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant
     }

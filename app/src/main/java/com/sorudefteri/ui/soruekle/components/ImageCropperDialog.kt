@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -179,31 +180,42 @@ fun ImageCropperDialog(
     }
 
     // Döndürme işlevi (+90° CW veya -90° CCW)
+    // PERF: createBitmap ana iplikte jank yapıyordu; Default'a taşındı.
     fun rotateImage(clockwise: Boolean) {
         val bmp = currentBitmap ?: return
-        if (bmp.isRecycled) return
+        if (bmp.isRecycled || isProcessing) return
+        isProcessing = true
         val degrees = if (clockwise) 90f else -90f
-        try {
-            val matrix = Matrix().apply { postRotate(degrees) }
-            val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
-            if (currentBitmap !== baseBitmap && currentBitmap?.isRecycled == false) {
-                try { currentBitmap?.recycle() } catch (_: Exception) {}
+        coroutineScope.launch {
+            val rotated = withContext(Dispatchers.Default) {
+                try {
+                    val matrix = Matrix().apply { postRotate(degrees) }
+                    Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                } catch (oom: OutOfMemoryError) {
+                    oom.printStackTrace()
+                    null
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    null
+                }
             }
-            currentBitmap = rotated
-            // Döndürme sonrası kırpma alanını ortala ve yeniden boyutlandır
-            cropRectNorm = Rect(0.04f, 0.04f, 0.96f, 0.96f)
-            if (selectedAspectRatio != CropAspectRatio.FREE) {
-                cropRectNorm = applyAspectRatioToRect(
-                    cropRectNorm,
-                    selectedAspectRatio,
-                    rotated.width.toFloat(),
-                    rotated.height.toFloat()
-                )
+            if (rotated != null) {
+                if (currentBitmap !== baseBitmap && currentBitmap?.isRecycled == false) {
+                    try { currentBitmap?.recycle() } catch (_: Exception) {}
+                }
+                currentBitmap = rotated
+                // Döndürme sonrası kırpma alanını ortala ve yeniden boyutlandır
+                cropRectNorm = Rect(0.04f, 0.04f, 0.96f, 0.96f)
+                if (selectedAspectRatio != CropAspectRatio.FREE) {
+                    cropRectNorm = applyAspectRatioToRect(
+                        cropRectNorm,
+                        selectedAspectRatio,
+                        rotated.width.toFloat(),
+                        rotated.height.toFloat()
+                    )
+                }
             }
-        } catch (oom: OutOfMemoryError) {
-            oom.printStackTrace()
-        } catch (e: Exception) {
-            e.printStackTrace()
+            isProcessing = false
         }
     }
 
@@ -292,7 +304,7 @@ fun ImageCropperDialog(
                         onClick = onDismiss,
                         modifier = Modifier
                             .background(Color.White.copy(alpha = 0.15f), CircleShape)
-                            .size(38.dp)
+                            .size(44.dp)
                     ) {
                         Icon(Icons.Default.Close, contentDescription = "Kapat", tint = Color.White)
                     }
@@ -310,7 +322,7 @@ fun ImageCropperDialog(
                             enabled = currentBitmap != null && !isLoading && !isProcessing,
                             modifier = Modifier
                                 .background(Color.White.copy(alpha = 0.15f), CircleShape)
-                                .size(38.dp)
+                                .size(44.dp)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.RotateLeft, contentDescription = "Sola Döndür (-90°)", tint = Color.White)
                         }
@@ -320,7 +332,7 @@ fun ImageCropperDialog(
                             enabled = currentBitmap != null && !isLoading && !isProcessing,
                             modifier = Modifier
                                 .background(Color.White.copy(alpha = 0.15f), CircleShape)
-                                .size(38.dp)
+                                .size(44.dp)
                         ) {
                             Icon(Icons.AutoMirrored.Filled.RotateRight, contentDescription = "Sağa Döndür (+90°)", tint = Color.White)
                         }
@@ -414,6 +426,7 @@ fun ImageCropperDialog(
                         val isSelected = selectedAspectRatio == aspect
                         Surface(
                             modifier = Modifier
+                                .heightIn(min = 44.dp)
                                 .clip(RoundedCornerShape(16.dp))
                                 .clickable {
                                     selectedAspectRatio = aspect
@@ -430,13 +443,17 @@ fun ImageCropperDialog(
                             color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.10f),
                             border = if (isSelected) null else BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
                         ) {
-                            Text(
-                                text = aspect.title,
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else Color.White,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                            ) {
+                                Text(
+                                    text = aspect.title,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else Color.White
+                                )
+                            }
                         }
                     }
                 }
@@ -462,6 +479,7 @@ fun ImageCropperDialog(
                         val isSelected = selectedFilter == filter
                         Surface(
                             modifier = Modifier
+                                .heightIn(min = 44.dp)
                                 .clip(RoundedCornerShape(16.dp))
                                 .clickable { selectedFilter = filter },
                             shape = RoundedCornerShape(16.dp),
@@ -469,7 +487,7 @@ fun ImageCropperDialog(
                             border = if (isSelected) null else BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
                         ) {
                             Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 if (isSelected) {

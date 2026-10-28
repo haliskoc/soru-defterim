@@ -165,6 +165,28 @@ class GorselDepo @Inject constructor(
     }
 
     /**
+     * PERF: Eski/senkronla gelmiş görsellerin eksik thumb'larını topluca üretir.
+     * Açılışta tek seferlik çağrılır (chunk 25, IO). Grid tam çözünürlük
+     * dosyaları çözmek yerine thumb kullanır.
+     * @return üretilen thumb sayısı.
+     */
+    suspend fun repairMissingThumbnails(imagePaths: List<String>): Int = withContext(Dispatchers.IO) {
+        var uretilen = 0
+        imagePaths.chunked(25).forEach { chunk ->
+            chunk.forEach { yol ->
+                try {
+                    val thumb = Companion.getThumbnailPath(yol)
+                    if (thumb == null || thumb == yol) {
+                        val out = generateThumbnailIfMissing(yol)
+                        if (out != yol) uretilen++
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+        uretilen
+    }
+
+    /**
      * Galeri veya dosya URI'sinden soru görselini işleyip yerel depolamaya kaydeder.
      * @return Kaydedilen dosyanın mutlak yolu (absolute path)
      */

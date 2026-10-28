@@ -7,6 +7,7 @@ import com.sorudefteri.domain.model.GunlukAktivite
 import com.sorudefteri.domain.model.HataTipiDagilimi
 import com.sorudefteri.domain.model.IstatistikOzetWrapper
 import com.sorudefteri.domain.model.SimilarQuestionResult
+import com.sorudefteri.domain.model.KutuphaneMeta
 import com.sorudefteri.domain.model.Soru
 import kotlinx.coroutines.flow.Flow
 
@@ -20,6 +21,13 @@ interface SoruRepository {
     val unsolvedCount: Flow<Int>
 
     fun getAllSorular(): Flow<List<Soru>>
+
+    /**
+     * PERF: Reels gibi tek-seferlik snapshot isteyen ekranlar için.
+     * Sürekli Flow dinlemek yerine tabloyu bir kez okur; DB yazışları
+     * feed'i baştan map'lemez.
+     */
+    suspend fun getAllSorularOnce(): List<Soru> = emptyList()
 
     fun getFilteredSorular(
         examType: String? = null,
@@ -87,6 +95,8 @@ interface SoruRepository {
     suspend fun updateReviewStatus(id: Long, stage: Int, nextReviewDate: Long?, lastReviewedAt: Long)
     suspend fun advanceReviewStage(id: Long)
     suspend fun regressReviewStage(id: Long)
+    /** PERF: Test bitiminde N tekil advance yerine tek batch sorgu. */
+    suspend fun advanceReviewStageBatch(ids: List<Long>) { ids.forEach { advanceReviewStage(it) } }
     suspend fun regressReviewStageBatch(ids: List<Long>)
     suspend fun deleteSorularByIds(ids: List<Long>)
     suspend fun updateSolvedStatusBatch(ids: List<Long>, isSolved: Boolean)
@@ -111,10 +121,44 @@ interface SoruRepository {
         isSolved: Boolean? = null,
         isFavorite: Boolean? = null,
         onlyDueReview: Boolean? = null,
-        kaynak: String? = null
+        kaynak: String? = null,
+        sortOrder: String = "DATE_DESC"
     ): Flow<androidx.paging.PagingData<Soru>>
 
     fun getDistinctTopics(subjectId: String): Flow<List<String>>
+
+    /**
+     * PERF: Kütüphane meta sayıları + "Tümünü Seç" id listesi.
+     * Tam tabloyu belleğe çekmeden tekil sorgularla hesaplanır.
+     */
+    suspend fun getKutuphaneMeta(): KutuphaneMeta = KutuphaneMeta()
+
+    /**
+     * PERF: DB her değiştiğinde metayı yeniden yayınlayan akış.
+     * Kütüphane başlığı tam liste çekmeden güncel kalır.
+     */
+    fun getKutuphaneMetaFlow(): Flow<KutuphaneMeta> = kotlinx.coroutines.flow.flowOf(KutuphaneMeta())
+
+    suspend fun getFilteredSoruIds(
+        query: String? = null,
+        examType: String? = null,
+        subjectId: String? = null,
+        mistakeType: String? = null,
+        isSolved: Boolean? = null,
+        isFavorite: Boolean? = null,
+        onlyDueReview: Boolean? = null,
+        kaynak: String? = null
+    ): List<Long> = emptyList()
+
+    /** PERF: İd listesinden tam satırlar (export/seçim çubuğu tek-seferlik okuma). */
+    suspend fun getSorularByIds(ids: List<Long>): List<Soru> = emptyList()
+
+    /** PERF: Açılış thumb onarımı için hafif yol listesi (tam satır yok). */
+    suspend fun getAllImagePaths(): List<String> = emptyList()
+
+    /** PERF: Haftalık aktivite/karşılaştırma SQL COUNT'ları. */
+    suspend fun countAddedBetween(start: Long, end: Long): Int = 0
+    suspend fun countSolvedBetween(start: Long, end: Long): Int = 0
 
     fun getIstatistikler(): Flow<IstatistikOzetWrapper>
 
@@ -136,8 +180,14 @@ interface SoruRepository {
     suspend fun insertChatMessage(message: com.sorudefteri.data.local.entity.SoruChatMessageEntity): Long
     suspend fun clearChatMessagesForSoru(soruId: Long)
 
-    // Deneme Sınavı Takibi
+    // Deneme Sınavı Takibi ve Çift Yönlü Soru Bağı
     fun getAllDenemeler(): Flow<List<com.sorudefteri.data.local.entity.DenemeSinaviEntity>>
+    fun getDenemeByIdFlow(id: Long): Flow<com.sorudefteri.data.local.entity.DenemeSinaviEntity?> = kotlinx.coroutines.flow.flowOf(null)
+    suspend fun getDenemeById(id: Long): com.sorudefteri.data.local.entity.DenemeSinaviEntity? = null
+    suspend fun getDenemeByTestId(testId: String): com.sorudefteri.data.local.entity.DenemeSinaviEntity? = null
     suspend fun insertDeneme(entity: com.sorudefteri.data.local.entity.DenemeSinaviEntity): Long
+    suspend fun updateDeneme(entity: com.sorudefteri.data.local.entity.DenemeSinaviEntity) {}
     suspend fun deleteDeneme(id: Long)
+    fun getSorularByDenemeId(denemeId: Long): Flow<List<Soru>> = kotlinx.coroutines.flow.flowOf(emptyList())
+    suspend fun getSorularByDenemeIdList(denemeId: Long): List<Soru> = emptyList()
 }

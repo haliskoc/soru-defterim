@@ -40,7 +40,15 @@ data class Soru(
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
     /** İçerik parmak izi (akıllı içe aktarma/dedup için) — boş = hesaplanamadı. */
-    val contentHash: String = ""
+    val contentHash: String = "",
+    /** Cihazlar-arası evrensel kimlik (UUID v4, değişmez) — boş = henüz atanmadı. */
+    val evrenselId: String = "",
+    /** Soft-delete (0/1) — eşleşmede silme yayılımı için. */
+    val isDeleted: Int = 0,
+    /** Deneme sınavı ile çift yönlü ilişki (denemeler.id). */
+    val denemeId: Long? = null,
+    /** Deneme kitapçığındaki soru numarası (1..120). */
+    val denemeSoruNo: Int? = null
 ) {
     /**
      * Sorunun tekrar zamanının gelip gelmediğini kontrol eder.
@@ -51,4 +59,18 @@ data class Soru(
             return System.currentTimeMillis() >= next
         }
 }
+
+/**
+ * PERF: Kütüphane başlık/meta sayıları — tam liste çekmeden tekil
+ * Room `@Query`leri ile hesaplanır (bkz. `SoruRepository.getKutuphaneMeta`).
+ */
+data class KutuphaneMeta(
+    val totalCount: Int = 0,
+    val solvedCount: Int = 0,
+    val unsolvedCount: Int = 0,
+    val favoriteCount: Int = 0,
+    val dueReviewCount: Int = 0,
+    val availablePublishers: List<String> = emptyList(),
+    val availableExamNames: List<String> = emptyList()
+)
 

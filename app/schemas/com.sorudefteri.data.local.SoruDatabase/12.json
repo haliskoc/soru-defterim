@@ -1,0 +1,733 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 12,
+    "identityHash": "6ba10200e0c33ea0724e4668ae4d7351",
+    "entities": [
+      {
+        "tableName": "sorular",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `imagePath` TEXT NOT NULL, `solutionImagePath` TEXT, `correctAnswer` TEXT, `examType` TEXT NOT NULL, `subjectId` TEXT NOT NULL, `topic` TEXT NOT NULL, `mistakeType` TEXT, `note` TEXT, `isSolved` INTEGER NOT NULL, `solvedAt` INTEGER, `aiExplanation` TEXT, `isFavorite` INTEGER NOT NULL, `reviewStage` INTEGER NOT NULL, `nextReviewDate` INTEGER, `lastReviewedAt` INTEGER, `kaynakYayin` TEXT, `kaynakDeneme` TEXT, `kaynakYil` INTEGER, `kaynakSoruNo` INTEGER, `studentAnswer` TEXT, `difficulty` TEXT, `ocrMetni` TEXT, `isOcrUsed` INTEGER NOT NULL, `questionText` TEXT, `audioPath` TEXT, `fsrsStability` REAL, `fsrsDifficulty` REAL, `fsrsReps` INTEGER NOT NULL, `fsrsLapses` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `updatedAt` INTEGER NOT NULL, `contentHash` TEXT NOT NULL, `evrenselId` TEXT NOT NULL, `isDeleted` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "imagePath",
+            "columnName": "imagePath",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "solutionImagePath",
+            "columnName": "solutionImagePath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "correctAnswer",
+            "columnName": "correctAnswer",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "examType",
+            "columnName": "examType",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "subjectId",
+            "columnName": "subjectId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "topic",
+            "columnName": "topic",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "mistakeType",
+            "columnName": "mistakeType",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isSolved",
+            "columnName": "isSolved",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "solvedAt",
+            "columnName": "solvedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "aiExplanation",
+            "columnName": "aiExplanation",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isFavorite",
+            "columnName": "isFavorite",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "reviewStage",
+            "columnName": "reviewStage",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextReviewDate",
+            "columnName": "nextReviewDate",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lastReviewedAt",
+            "columnName": "lastReviewedAt",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "kaynakYayin",
+            "columnName": "kaynakYayin",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "kaynakDeneme",
+            "columnName": "kaynakDeneme",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "kaynakYil",
+            "columnName": "kaynakYil",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "kaynakSoruNo",
+            "columnName": "kaynakSoruNo",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "studentAnswer",
+            "columnName": "studentAnswer",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "difficulty",
+            "columnName": "difficulty",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "ocrMetni",
+            "columnName": "ocrMetni",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isOcrUsed",
+            "columnName": "isOcrUsed",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "questionText",
+            "columnName": "questionText",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "audioPath",
+            "columnName": "audioPath",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "fsrsStability",
+            "columnName": "fsrsStability",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "fsrsDifficulty",
+            "columnName": "fsrsDifficulty",
+            "affinity": "REAL",
+            "notNull": false
+          },
+          {
+            "fieldPath": "fsrsReps",
+            "columnName": "fsrsReps",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "fsrsLapses",
+            "columnName": "fsrsLapses",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "updatedAt",
+            "columnName": "updatedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "contentHash",
+            "columnName": "contentHash",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "evrenselId",
+            "columnName": "evrenselId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isDeleted",
+            "columnName": "isDeleted",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sorular_examType",
+            "unique": false,
+            "columnNames": [
+              "examType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sorular_examType` ON `${TABLE_NAME}` (`examType`)"
+          },
+          {
+            "name": "index_sorular_subjectId",
+            "unique": false,
+            "columnNames": [
+              "subjectId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sorular_subjectId` ON `${TABLE_NAME}` (`subjectId`)"
+          },
+          {
+            "name": "index_sorular_topic",
+            "unique": false,
+            "columnNames": [
+              "topic"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sorular_topic` ON `${TABLE_NAME}` (`topic`)"
+          },
+          {
+            "name": "index_sorular_mistakeType",
+            "unique": false,
+            "columnNames": [
+              "mistakeType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sorular_mistakeType` ON `${TABLE_NAME}` (`mistakeType`)"
+          },
+          {
+            "name": "index_sorular_isSolved",
+            "unique": false,
+            "columnNames": [
+              "isSolved"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sorular_isSolved` ON `${TABLE_NAME}` (`isSolved`)"
+          },
+          {
+            "name": "index_sorular_isFavorite",
+            "unique": false,
+            "columnNames": [
+              "isFavorite"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sorular_isFavorite` ON `${TABLE_NAME}` (`isFavorite`)"
+          },
+          {
+            "name": "index_sorular_createdAt",
+            "unique": false,
+            "columnNames": [
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sorular_createdAt` ON `${TABLE_NAME}` (`createdAt`)"
+          },
+          {
+            "name": "index_sorular_nextReviewDate",
+            "unique": false,
+            "columnNames": [
+              "nextReviewDate"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sorular_nextReviewDate` ON `${TABLE_NAME}` (`nextReviewDate`)"
+          },
+          {
+            "name": "index_sorular_reviewStage",
+            "unique": false,
+            "columnNames": [
+              "reviewStage"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sorular_reviewStage` ON `${TABLE_NAME}` (`reviewStage`)"
+          },
+          {
+            "name": "index_sorular_contentHash",
+            "unique": false,
+            "columnNames": [
+              "contentHash"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sorular_contentHash` ON `${TABLE_NAME}` (`contentHash`)"
+          },
+          {
+            "name": "index_sorular_evrenselId",
+            "unique": true,
+            "columnNames": [
+              "evrenselId"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_sorular_evrenselId` ON `${TABLE_NAME}` (`evrenselId`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "test_sonuclari",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `totalQuestions` INTEGER NOT NULL, `correctCount` INTEGER NOT NULL, `wrongCount` INTEGER NOT NULL, `emptyCount` INTEGER NOT NULL, `netCount` REAL NOT NULL, `successRate` INTEGER NOT NULL, `totalTimeSeconds` INTEGER NOT NULL, `examType` TEXT, `completedAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalQuestions",
+            "columnName": "totalQuestions",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "correctCount",
+            "columnName": "correctCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wrongCount",
+            "columnName": "wrongCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "emptyCount",
+            "columnName": "emptyCount",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "netCount",
+            "columnName": "netCount",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "successRate",
+            "columnName": "successRate",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "totalTimeSeconds",
+            "columnName": "totalTimeSeconds",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "examType",
+            "columnName": "examType",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "completedAt",
+            "columnName": "completedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_test_sonuclari_completedAt",
+            "unique": false,
+            "columnNames": [
+              "completedAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_sonuclari_completedAt` ON `${TABLE_NAME}` (`completedAt`)"
+          },
+          {
+            "name": "index_test_sonuclari_examType",
+            "unique": false,
+            "columnNames": [
+              "examType"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_test_sonuclari_examType` ON `${TABLE_NAME}` (`examType`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "soru_chat_mesajlari",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `soruId` INTEGER NOT NULL, `sender` TEXT NOT NULL, `messageText` TEXT NOT NULL, `timestamp` INTEGER NOT NULL, FOREIGN KEY(`soruId`) REFERENCES `sorular`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "soruId",
+            "columnName": "soruId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sender",
+            "columnName": "sender",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "messageText",
+            "columnName": "messageText",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "timestamp",
+            "columnName": "timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_soru_chat_mesajlari_soruId",
+            "unique": false,
+            "columnNames": [
+              "soruId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_soru_chat_mesajlari_soruId` ON `${TABLE_NAME}` (`soruId`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "sorular",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "soruId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "ftsVersion": "FTS4",
+        "ftsOptions": {
+          "tokenizer": "simple",
+          "tokenizerArgs": [],
+          "contentTable": "sorular",
+          "languageIdColumnName": "",
+          "matchInfo": "FTS4",
+          "notIndexedColumns": [],
+          "prefixSizes": [],
+          "preferredOrder": "ASC"
+        },
+        "contentSyncTriggers": [
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_sorular_fts_BEFORE_UPDATE BEFORE UPDATE ON `sorular` BEGIN DELETE FROM `sorular_fts` WHERE `docid`=OLD.`rowid`; END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_sorular_fts_BEFORE_DELETE BEFORE DELETE ON `sorular` BEGIN DELETE FROM `sorular_fts` WHERE `docid`=OLD.`rowid`; END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_sorular_fts_AFTER_UPDATE AFTER UPDATE ON `sorular` BEGIN INSERT INTO `sorular_fts`(`docid`, `topic`, `note`, `ocrMetni`, `questionText`, `aiExplanation`) VALUES (NEW.`rowid`, NEW.`topic`, NEW.`note`, NEW.`ocrMetni`, NEW.`questionText`, NEW.`aiExplanation`); END",
+          "CREATE TRIGGER IF NOT EXISTS room_fts_content_sync_sorular_fts_AFTER_INSERT AFTER INSERT ON `sorular` BEGIN INSERT INTO `sorular_fts`(`docid`, `topic`, `note`, `ocrMetni`, `questionText`, `aiExplanation`) VALUES (NEW.`rowid`, NEW.`topic`, NEW.`note`, NEW.`ocrMetni`, NEW.`questionText`, NEW.`aiExplanation`); END"
+        ],
+        "tableName": "sorular_fts",
+        "createSql": "CREATE VIRTUAL TABLE IF NOT EXISTS `${TABLE_NAME}` USING FTS4(`topic` TEXT NOT NULL, `note` TEXT, `ocrMetni` TEXT, `questionText` TEXT, `aiExplanation` TEXT, content=`sorular`)",
+        "fields": [
+          {
+            "fieldPath": "topic",
+            "columnName": "topic",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "note",
+            "columnName": "note",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "ocrMetni",
+            "columnName": "ocrMetni",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "questionText",
+            "columnName": "questionText",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "aiExplanation",
+            "columnName": "aiExplanation",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": []
+        },
+        "indices": [],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "benzer_sorular",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `soruId` INTEGER NOT NULL, `questionText` TEXT NOT NULL, `optionsJson` TEXT NOT NULL, `correctAnswer` TEXT NOT NULL, `solution` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, FOREIGN KEY(`soruId`) REFERENCES `sorular`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "soruId",
+            "columnName": "soruId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "questionText",
+            "columnName": "questionText",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "optionsJson",
+            "columnName": "optionsJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "correctAnswer",
+            "columnName": "correctAnswer",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "solution",
+            "columnName": "solution",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_benzer_sorular_soruId",
+            "unique": false,
+            "columnNames": [
+              "soruId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_benzer_sorular_soruId` ON `${TABLE_NAME}` (`soruId`)"
+          },
+          {
+            "name": "index_benzer_sorular_createdAt",
+            "unique": false,
+            "columnNames": [
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_benzer_sorular_createdAt` ON `${TABLE_NAME}` (`createdAt`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "sorular",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "soruId"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "denemeler",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `baslik` TEXT NOT NULL, `sinavTuru` TEXT NOT NULL, `tarih` INTEGER NOT NULL, `toplamNet` REAL NOT NULL, `dersNetleriJson` TEXT NOT NULL, `notlar` TEXT, `createdAt` INTEGER NOT NULL)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "baslik",
+            "columnName": "baslik",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sinavTuru",
+            "columnName": "sinavTuru",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "tarih",
+            "columnName": "tarih",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "toplamNet",
+            "columnName": "toplamNet",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dersNetleriJson",
+            "columnName": "dersNetleriJson",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "notlar",
+            "columnName": "notlar",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "createdAt",
+            "columnName": "createdAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_denemeler_sinavTuru",
+            "unique": false,
+            "columnNames": [
+              "sinavTuru"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_denemeler_sinavTuru` ON `${TABLE_NAME}` (`sinavTuru`)"
+          },
+          {
+            "name": "index_denemeler_tarih",
+            "unique": false,
+            "columnNames": [
+              "tarih"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_denemeler_tarih` ON `${TABLE_NAME}` (`tarih`)"
+          },
+          {
+            "name": "index_denemeler_createdAt",
+            "unique": false,
+            "columnNames": [
+              "createdAt"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_denemeler_createdAt` ON `${TABLE_NAME}` (`createdAt`)"
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '6ba10200e0c33ea0724e4668ae4d7351')"
+    ]
+  }
+}

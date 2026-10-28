@@ -38,11 +38,15 @@ class AutoBackupWorker @AssistedInject constructor(
         /**
          * 24 saatlik periyodik otomatik yerel yedekleme görevini kuyruğa ekler veya günceller.
          * Yerel depolama (filesDir/backups/) kullanıldığı için ağ bağlantısı gereksizdir ve internetsiz çalışır.
+         * PERF: wifiOnly=true ise UNMETERED kısıtı eklenir (parametre artık kullanılır).
          */
         fun schedulePeriodic(context: Context, wifiOnly: Boolean = false) {
             val constraints = Constraints.Builder()
                 .setRequiresBatteryNotLow(true)
                 .setRequiresStorageNotLow(true)
+                .apply {
+                    if (wifiOnly) setRequiredNetworkType(NetworkType.UNMETERED)
+                }
                 .build()
 
             val workRequest = PeriodicWorkRequestBuilder<AutoBackupWorker>(24, TimeUnit.HOURS)
@@ -75,6 +79,21 @@ class AutoBackupWorker @AssistedInject constructor(
                 return@withContext Result.success()
             }
 
+            // PERF: DB son yedekten beri değişmediyse tüm DB+medya zip'i atlanır.
+            val backupsDir = File(appContext.filesDir, "backups").apply {
+                if (!exists()) mkdirs()
+            }
+            val lastBackupTime = backupsDir.listFiles { f ->
+                f.isFile && f.name.endsWith(".sdefteri")
+            }?.maxOfOrNull { it.lastModified() } ?: 0L
+            val dbFile = appContext.getDatabasePath(com.sorudefteri.data.local.SoruDatabase.DATABASE_NAME)
+            val walFile = File(dbFile.path + "-wal")
+            val latestDbMod = maxOf(dbFile.lastModified(), walFile.takeIf { it.exists() }?.lastModified() ?: 0L)
+            if (lastBackupTime > 0 && dbFile.exists() && latestDbMod <= lastBackupTime) {
+                Log.d(TAG, "DB son yedekten beri değişmemiş, yedek atlandı.")
+                return@withContext Result.success()
+            }
+
             Log.d(TAG, "Otomatik yedekleme başlatılıyor...")
 
             // 2. Yedek paketini geçici dosyaya oluştur
@@ -88,10 +107,6 @@ class AutoBackupWorker @AssistedInject constructor(
             Log.d(TAG, "Yedek başarıyla oluşturuldu: $questionCount soru. Dosya: ${tempFile.name}")
 
             // 3. Kalıcı yedekler klasörüne (filesDir/backups/) taşı ve rotasyon uygula
-            val backupsDir = File(appContext.filesDir, "backups").apply {
-                if (!exists()) mkdirs()
-            }
-
             val destFile = File(backupsDir, tempFile.name)
             tempFile.copyTo(destFile, overwrite = true)
             tempFile.delete()

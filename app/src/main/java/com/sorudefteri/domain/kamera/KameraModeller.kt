@@ -52,3 +52,9 @@ enum class KameraModu { TEKLI, COKLU }
 
 /** Tekli mod taramasının durum makinesi durumu. */
 enum class TaramaDurumu { ARANIYOR, BULUNDU, KILITLI }
+
+/** ML Kit satırı: kutu + tanınan metin (içerik-farkındalıklı sınır için). */
+data class TarananSatir(
+    val kutu: Kutu,
+    val metin: String = ""
+)

@@ -7,16 +7,18 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -29,8 +31,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,8 +59,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -77,6 +84,15 @@ fun SoruEklemeScreen(
     onNavigateToCamera: () -> Unit,
     capturedImageUri: String? = null,
     editingSoruId: Long? = null,
+    initialDenemeId: Long? = null,
+    initialDenemeBaslik: String? = null,
+    initialDenemeYayin: String? = null,
+    initialDenemeSoruNo: Int? = null,
+    initialExamType: String? = null,
+    initialSubjectId: String? = null,
+    initialTopic: String? = null,
+    initialCorrectAnswer: String? = null,
+    initialStudentAnswer: String? = null,
     viewModel: SoruEklemeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -134,6 +150,42 @@ fun SoruEklemeScreen(
         }
     }
 
+    LaunchedEffect(
+        initialDenemeId,
+        initialDenemeBaslik,
+        initialDenemeYayin,
+        initialDenemeSoruNo,
+        initialExamType,
+        initialSubjectId,
+        initialTopic,
+        initialCorrectAnswer,
+        initialStudentAnswer
+    ) {
+        val hasDenemeInit = initialDenemeId != null ||
+            !initialDenemeBaslik.isNullOrBlank() ||
+            !initialDenemeYayin.isNullOrBlank() ||
+            initialDenemeSoruNo != null ||
+            !initialExamType.isNullOrBlank() ||
+            !initialSubjectId.isNullOrBlank() ||
+            !initialTopic.isNullOrBlank() ||
+            !initialCorrectAnswer.isNullOrBlank() ||
+            !initialStudentAnswer.isNullOrBlank()
+
+        if ((editingSoruId == null || editingSoruId <= 0L) && hasDenemeInit) {
+            viewModel.setDenemeContext(
+                denemeId = initialDenemeId,
+                denemeBaslik = initialDenemeBaslik,
+                denemeYayin = initialDenemeYayin,
+                denemeSoruNo = initialDenemeSoruNo,
+                examType = initialExamType,
+                subjectId = initialSubjectId,
+                topic = initialTopic,
+                correctAnswer = initialCorrectAnswer,
+                studentAnswer = initialStudentAnswer
+            )
+        }
+    }
+
     LaunchedEffect(uiState.errorMessage) {
         uiState.errorMessage?.let { message ->
             snackbarHostState.showSnackbar(message)
@@ -161,17 +213,117 @@ fun SoruEklemeScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .imePadding()
-                .navigationBarsPadding()
-                .bringIntoViewRequester(bringIntoViewRequester)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+                .imePadding(),
+            contentAlignment = Alignment.TopCenter
         ) {
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 720.dp)
+                    .fillMaxWidth()
+                    .bringIntoViewRequester(bringIntoViewRequester)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+            if (uiState.denemeId != null) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.7f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Link,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column {
+                                    Text(
+                                        text = "📌 Deneme Eşleşmesi Aktif: ${uiState.kaynakDeneme.ifBlank { "Deneme #${uiState.denemeId}" }}",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                    Text(
+                                        text = "(Hem Denemeye hem Soru Kütüphanesine kaydedilecek)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = { viewModel.clearDenemeContext() },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Deneme Bağlantısını Kaldır",
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = uiState.denemeSoruNo.ifBlank { uiState.kaynakSoruNo },
+                                onValueChange = { viewModel.setDenemeSoruNo(it) },
+                                label = { Text("Deneme Soru No") },
+                                placeholder = { Text("Örn: 14") },
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    imeAction = ImeAction.Done
+                                ),
+                                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.width(160.dp)
+                            )
+                            if (uiState.kaynakYayin.isNotBlank()) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.75f),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text(
+                                        text = "🏢 ${uiState.kaynakYayin}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             if (uiState.totalBatchCount > 1) {
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer,
@@ -331,6 +483,7 @@ fun SoruEklemeScreen(
             }
 
             Spacer(modifier = Modifier.height(24.dp))
+            }
         }
     }
 
@@ -369,6 +522,7 @@ fun SoruEklemeScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .imePadding()
                     .padding(horizontal = 20.dp, vertical = 12.dp)
             ) {
                 Row(
@@ -420,7 +574,7 @@ fun SoruEklemeScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(380.dp),
+                        .heightIn(min = 200.dp, max = 400.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     filteredUnits.forEach { unite ->

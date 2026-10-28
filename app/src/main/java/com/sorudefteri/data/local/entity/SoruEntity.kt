@@ -22,7 +22,11 @@ import com.sorudefteri.domain.model.Soru
         Index(value = ["nextReviewDate"]),
         Index(value = ["reviewStage"]),
         // Akıllı içe aktarma (dedup/merge): aynı içerikli sorunun hızlı tespiti için
-        Index(value = ["contentHash"])
+        Index(value = ["contentHash"]),
+        // Cihazlar-arası eşleşme: evrensel kimlik tekildir, hiç değişmez
+        Index(value = ["evrenselId"], unique = true),
+        // Deneme sınavına bağlı yanlış soruların hızlı sorgulanması için
+        Index(value = ["denemeId"])
     ]
 )
 data class SoruEntity(
@@ -66,7 +70,22 @@ data class SoruEntity(
      * değildir — böylece aynı soru farklı cihaz/yedek sürümlerinde bile tanınır.
      * Boş string = hesaplanamadı (örn. metinsiz, kaynak bilgisi yoksun soru).
      */
-    val contentHash: String = ""
+    val contentHash: String = "",
+    /**
+     * Cihazlar-arası evrensel kimlik (UUID v4). Soru oluştuğu cihazda bir kez
+     * üretilir, eşleşmeyle taşınır, HİÇ değişmez. Boş = v12 öncesi kayıt
+     * (migration geriye dönük doldurur).
+     */
+    val evrenselId: String = "",
+    /**
+     * Soft-delete bayrağı (0/1). Eşleşmede silme yayılımı (tombstone) için;
+     * kalıcı silme v2'de.
+     */
+    val isDeleted: Int = 0,
+    /** Deneme sınavı ile çift yönlü ilişki (denemeler.id). */
+    val denemeId: Long? = null,
+    /** Deneme kitapçığındaki soru numarası (1..120). */
+    val denemeSoruNo: Int? = null
 ) {
     /**
      * Entity'yi Domain modeline dönüştürür.
@@ -105,7 +124,11 @@ data class SoruEntity(
             fsrsLapses = fsrsLapses,
             createdAt = createdAt,
             updatedAt = updatedAt,
-            contentHash = contentHash
+            contentHash = contentHash,
+            evrenselId = evrenselId,
+            isDeleted = isDeleted,
+            denemeId = denemeId,
+            denemeSoruNo = denemeSoruNo
         )
     }
 }
@@ -147,7 +170,11 @@ fun Soru.toEntity(): SoruEntity {
         fsrsLapses = fsrsLapses,
         createdAt = createdAt,
         updatedAt = updatedAt,
-        contentHash = contentHash
+        contentHash = contentHash,
+        evrenselId = evrenselId,
+        isDeleted = isDeleted,
+        denemeId = denemeId,
+        denemeSoruNo = denemeSoruNo
     )
 }
 

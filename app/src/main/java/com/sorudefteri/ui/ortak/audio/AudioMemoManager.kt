@@ -51,6 +51,20 @@ class AudioMemoManager(
     val durationMs: StateFlow<Int> = _durationMs.asStateFlow()
 
     fun startRecording(soruId: Long, onAutoStop: (String) -> Unit): Boolean {
+        return startRecordingAsync(soruId, onAutoStop, blocking = false)
+    }
+
+    /**
+     * PERF: MediaRecorder.prepare() ana iplikte blokluyordu. Varsayılan
+     * async yolda IO'da hazırlanır; çağrı anında true döner, hata olursa
+     * kayıt sessizce iptal edilir. Testler/senkron çağrılar için
+     * `blocking=true` eski davranışı korur.
+     */
+    fun startRecordingAsync(
+        soruId: Long,
+        onAutoStop: (String) -> Unit,
+        blocking: Boolean = false
+    ): Boolean {
         try {
             stopPlaying()
 
@@ -67,46 +81,85 @@ class AudioMemoManager(
             // prepare()/start() patlarsa referans mediaRecorder'a atanmadığı için
             // cancelRecording() onu göremeyip native kaynak sızdırırdı.
             mediaRecorder = recorder
-            recorder.apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setAudioEncodingBitRate(128000)
-                setAudioSamplingRate(44100)
-                setOutputFile(outputFile.absolutePath)
-                prepare()
-                start()
-            }
-
             _isRecording.value = true
             _recordingSeconds.value = 0
 
-            recordingTimerJob?.cancel()
-            recordingTimerJob = coroutineScope.launch(Dispatchers.Main) {
-                while (isActive && _isRecording.value) {
-                    delay(1000)
-                    _recordingSeconds.value += 1
-                    if (_recordingSeconds.value >= MAX_RECORDING_SECONDS) {
-                        // Bu job KENDİSİNİ çağırdığı için stopRecording() içindeki
-                        // recordingTimerJob?.cancel() mevcut coroutine'ı iptal ediyordu.
-                        // Kaydı iptal etmeden bitirip callback'i güvenle çağırıyoruz.
-                        val path = finishRecording()
-                        if (path != null) {
-                            onAutoStop(path)
+            if (blocking) {
+                recorder.apply {
+                    setAudioSource(MediaRecorder.AudioSource.MIC)
+                    setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                    setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                    setAudioEncodingBitRate(128000)
+                    setAudioSamplingRate(44100)
+                    setOutputFile(outputFile.absolutePath)
+                    prepare()
+                    start()
+                }
+                beginRecordingTimer(onAutoStop)
+            } else {
+                // PERF: prepare()+start() IO'da; ana iplik bloklanmaz.
+                coroutineScope.launch(Dispatchers.IO) {
+                    try {
+                        if (!_isRecording.value || mediaRecorder !== recorder) {
+                            try { recorder.release() } catch (_: Exception) {}
+                            try { outputFile.delete() } catch (_: Exception) {}
+                            return@launch
                         }
-                        break
+                        recorder.apply {
+                            setAudioSource(MediaRecorder.AudioSource.MIC)
+                            setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                            setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                            setAudioEncodingBitRate(128000)
+                            setAudioSamplingRate(44100)
+                            setOutputFile(outputFile.absolutePath)
+                            prepare()
+                            start()
+                        }
+                        if (!_isRecording.value || mediaRecorder !== recorder) {
+                            try { recorder.stop() } catch (_: Exception) {}
+                            try { recorder.release() } catch (_: Exception) {}
+                            try { outputFile.delete() } catch (_: Exception) {}
+                            return@launch
+                        }
+                        beginRecordingTimer(onAutoStop)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Kayıt başlatılamadı", e)
+                        try { recorder.release() } catch (_: Exception) {}
+                        try { outputFile.delete() } catch (_: Exception) {}
+                        cancelRecording()
                     }
                 }
-                // Kendi job'ımızı temizle (artık cancel() çağırıp kendimizi iptal etmeyelim).
-                if (recordingTimerJob === currentCoroutineContext()[Job]) {
-                    recordingTimerJob = null
-                }
             }
+
             return true
         } catch (e: Exception) {
             Log.e(TAG, "Kayıt başlatılamadı", e)
             cancelRecording()
             return false
+        }
+    }
+
+    private fun beginRecordingTimer(onAutoStop: (String) -> Unit) {
+        recordingTimerJob?.cancel()
+        recordingTimerJob = coroutineScope.launch(Dispatchers.Main) {
+            while (isActive && _isRecording.value) {
+                delay(1000)
+                _recordingSeconds.value += 1
+                if (_recordingSeconds.value >= MAX_RECORDING_SECONDS) {
+                    // Bu job KENDİSİNİ çağırdığı için stopRecording() içindeki
+                    // recordingTimerJob?.cancel() mevcut coroutine'ı iptal ediyordu.
+                    // Kaydı iptal etmeden bitirip callback'i güvenle çağırıyoruz.
+                    val path = finishRecording()
+                    if (path != null) {
+                        onAutoStop(path)
+                    }
+                    break
+                }
+            }
+            // Kendi job'ımızı temizle (artık cancel() çağırıp kendimizi iptal etmeyelim).
+            if (recordingTimerJob === currentCoroutineContext()[Job]) {
+                recordingTimerJob = null
+            }
         }
     }
 
@@ -175,30 +228,57 @@ class AudioMemoManager(
             val actualFile = if (file.exists()) file else File(context.filesDir, filePath)
             if (!actualFile.exists()) return
 
-            mediaPlayer = MediaPlayer().apply {
-                setDataSource(actualFile.absolutePath)
-                prepare()
-                _durationMs.value = duration
-                _currentPositionMs.value = 0
-                setOnCompletionListener {
-                    _isPlaying.value = false
-                    _currentPositionMs.value = 0
-                    progressJob?.cancel()
+            // PERF: prepare() ana iplikte blokluyordu; prepareAsync + IO.
+            val player = MediaPlayer()
+            player.setDataSource(actualFile.absolutePath)
+            player.setOnPreparedListener { p ->
+                if (mediaPlayer !== p) {
+                    try { p.release() } catch (_: Exception) {}
+                    return@setOnPreparedListener
                 }
-                start()
-            }
-
-            _isPlaying.value = true
-
-            progressJob?.cancel()
-            progressJob = coroutineScope.launch(Dispatchers.Main) {
-                while (isActive && _isPlaying.value) {
-                    mediaPlayer?.let { player ->
-                        if (player.isPlaying) {
-                            _currentPositionMs.value = player.currentPosition
+                try {
+                    _durationMs.value = p.duration
+                    _currentPositionMs.value = 0
+                    p.start()
+                    _isPlaying.value = true
+                    progressJob?.cancel()
+                    progressJob = coroutineScope.launch(Dispatchers.Main) {
+                        while (isActive && _isPlaying.value) {
+                            mediaPlayer?.let { pl ->
+                                if (pl.isPlaying) {
+                                    _currentPositionMs.value = pl.currentPosition
+                                }
+                            }
+                            delay(200)
                         }
                     }
-                    delay(200)
+                } catch (_: Exception) {
+                    stopPlaying()
+                }
+            }
+            player.setOnCompletionListener {
+                // PERF: Bitişte oynatıcı serbest bırakılır (önceden release yoktu).
+                _isPlaying.value = false
+                _currentPositionMs.value = 0
+                progressJob?.cancel()
+                progressJob = null
+                try { player.release() } catch (_: Exception) {}
+                if (mediaPlayer === player) mediaPlayer = null
+            }
+            player.setOnErrorListener { _, _, _ ->
+                stopPlaying()
+                true
+            }
+            mediaPlayer = player
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    if (mediaPlayer !== player) {
+                        try { player.release() } catch (_: Exception) {}
+                        return@launch
+                    }
+                    player.prepareAsync()
+                } catch (_: Exception) {
+                    stopPlaying()
                 }
             }
         } catch (e: Exception) {

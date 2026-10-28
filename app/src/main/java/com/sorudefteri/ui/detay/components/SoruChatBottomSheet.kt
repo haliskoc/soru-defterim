@@ -71,7 +71,7 @@ import androidx.compose.ui.unit.sp
 import com.sorudefteri.data.local.entity.SoruChatMessageEntity
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.Soru
-import com.sorudefteri.ui.ortak.math.MathMarkdownText
+import com.sorudefteri.ui.ortak.math.CombinedMathMarkdownText
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -464,7 +464,7 @@ private fun ChatBubbleItem(
             } else {
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.65f)
             },
-            modifier = Modifier.widthIn(max = 320.dp)
+            modifier = Modifier.widthIn(max = 460.dp)
         ) {
             Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
                 if (!isUser) {
@@ -487,8 +487,8 @@ private fun ChatBubbleItem(
                         )
                     }
 
-                    // Markdown & KaTeX render
-                    MathMarkdownText(
+                    // Markdown & KaTeX render (PERF: tek WebView)
+                    CombinedMathMarkdownText(
                         text = message.messageText,
                         fontSizeSp = 14f,
                         textColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -505,9 +505,9 @@ private fun ChatBubbleItem(
                 Text(
                     text = timeStr,
                     style = MaterialTheme.typography.labelSmall,
-                    fontSize = 10.sp,
-                    color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f)
-                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    fontSize = 11.sp,
+                    color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                     modifier = Modifier.align(Alignment.End)
                 )
             }

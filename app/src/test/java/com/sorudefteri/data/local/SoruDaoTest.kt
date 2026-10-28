@@ -2,6 +2,7 @@ package com.sorudefteri.data.local
 
 import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.data.local.dao.MistakeCountTuple
+import com.sorudefteri.data.local.dao.EslestirmeOzetTuple
 import com.sorudefteri.data.local.dao.SoruDao
 import com.sorudefteri.data.local.dao.SubjectCountTuple
 import com.sorudefteri.data.local.dao.SubjectSolvedCountTuple
@@ -388,9 +389,65 @@ class FakeSoruDao : SoruDao {
         }
     }
 
+    override suspend fun updateContentHashes(hashes: List<Pair<Long, String>>) {
+        val now = System.currentTimeMillis()
+        hashes.forEach { (id, hash) ->
+            data[id]?.let { current ->
+                data[id] = current.copy(contentHash = hash, updatedAt = now)
+            }
+        }
+        emit()
+    }
+
     override suspend fun updateEntityFull(soru: SoruEntity) {
         data[soru.id] = soru
         emit()
+    }
+
+    // ===== Cihazlar-arası eşleşme metotları =====
+    override suspend fun getEslestirmeOzeti(): List<EslestirmeOzetTuple> {
+        return data.values.map {
+            EslestirmeOzetTuple(it.evrenselId, it.updatedAt, it.contentHash, it.isDeleted)
+        }
+    }
+
+    override suspend fun getByEvrenselIdler(ids: List<String>): List<SoruEntity> {
+        val wanted = ids.toSet()
+        return data.values.filter { it.evrenselId in wanted }
+    }
+
+    override suspend fun getByEvrenselId(id: String): SoruEntity? {
+        return data.values.firstOrNull { it.evrenselId == id }
+    }
+
+    override suspend fun softDeleteById(id: Long, now: Long) {
+        data[id]?.let { current ->
+            data[id] = current.copy(isDeleted = 1, updatedAt = now)
+            emit()
+        }
+    }
+
+    override fun getSorularByDenemeId(denemeId: Long): Flow<List<SoruEntity>> {
+        return flowEmitter.map { list ->
+            list.filter { it.isDeleted == 0 && it.denemeId == denemeId }
+                .sortedWith(compareBy({ it.denemeSoruNo ?: it.kaynakSoruNo ?: 9999 }, { it.createdAt }))
+        }
+    }
+
+    override suspend fun getSorularByDenemeIdList(denemeId: Long): List<SoruEntity> {
+        return data.values.filter { it.isDeleted == 0 && it.denemeId == denemeId }
+            .sortedWith(compareBy({ it.denemeSoruNo ?: it.kaynakSoruNo ?: 9999 }, { it.createdAt }))
+    }
+
+    override suspend fun getDenemeSoruSayisi(denemeId: Long): Int {
+        return data.values.count { it.isDeleted == 0 && it.denemeId == denemeId }
+    }
+
+    override fun getAllDenemeSorulari(): Flow<List<SoruEntity>> {
+        return flowEmitter.map { list ->
+            list.filter { it.isDeleted == 0 && (it.denemeId != null || !it.kaynakDeneme.isNullOrBlank()) }
+                .sortedByDescending { it.createdAt }
+        }
     }
 
     /** Testlerde toplam satır sayısı için kolay erişim. */
@@ -466,6 +523,42 @@ class FakeSoruDao : SoruDao {
 
     override suspend fun getAllSorularList(): List<SoruEntity> {
         return data.values.toList()
+    }
+
+    override suspend fun getTotalCountDirect(): Int = data.size
+
+    override suspend fun getSolvedCountDirect(): Int = data.values.count { it.isSolved }
+
+    override suspend fun getFavoriteCountDirect(): Int = data.values.count { it.isFavorite }
+
+    override suspend fun getDistinctPublishers(): List<String> {
+        return data.values.mapNotNull { it.kaynakYayin?.trim()?.takeIf { p -> p.isNotBlank() } }.distinct().sorted()
+    }
+
+    override suspend fun getDistinctExamNames(): List<String> {
+        return data.values.mapNotNull { it.kaynakDeneme?.trim()?.takeIf { d -> d.isNotBlank() } }.distinct().sorted()
+    }
+
+    override suspend fun getFilteredIds(
+        query: String?,
+        examType: String?,
+        subjectId: String?,
+        mistakeType: String?,
+        isSolved: Boolean?,
+        isFavorite: Boolean?,
+        onlyDueReview: Boolean?,
+        currentTime: Long,
+        kaynak: String?
+    ): List<Long> {
+        return data.values.filter { item ->
+            (query.isNullOrBlank() || item.topic.contains(query, ignoreCase = true) ||
+                    (item.note?.contains(query, ignoreCase = true) == true)) &&
+                    (examType == null || item.examType.equals(examType, ignoreCase = true)) &&
+                    (subjectId == null || item.subjectId.equals(subjectId, ignoreCase = true)) &&
+                    (mistakeType == null || item.mistakeType.equals(mistakeType, ignoreCase = true)) &&
+                    (isSolved == null || item.isSolved == isSolved) &&
+                    (isFavorite == null || item.isFavorite == isFavorite)
+        }.map { it.id }
     }
 
     override suspend fun getSorularByIds(ids: List<Long>): List<SoruEntity> {
@@ -584,7 +677,8 @@ class FakeSoruDao : SoruDao {
         isFavorite: Boolean?,
         onlyDueReview: Boolean?,
         currentTime: Long,
-        kaynak: String?
+        kaynak: String?,
+        sortOrder: String
     ): androidx.paging.PagingSource<Int, SoruEntity> {
         throw UnsupportedOperationException("PagingSource unit test için mock kullanılmalıdır.")
     }
@@ -598,7 +692,8 @@ class FakeSoruDao : SoruDao {
         isFavorite: Boolean?,
         onlyDueReview: Boolean?,
         currentTime: Long,
-        kaynak: String?
+        kaynak: String?,
+        sortOrder: String
     ): androidx.paging.PagingSource<Int, SoruEntity> {
         throw UnsupportedOperationException("PagingSource unit test için mock kullanılmalıdır.")
     }
@@ -613,6 +708,14 @@ class FakeSoruDao : SoruDao {
 
     override suspend fun getDueReviewCountDirect(currentTime: Long): Int {
         return data.values.count { it.nextReviewDate != null && it.nextReviewDate!! <= currentTime }
+    }
+
+    override suspend fun countAddedBetween(start: Long, end: Long): Int {
+        return data.values.count { it.createdAt in start until end }
+    }
+
+    override suspend fun countSolvedBetween(start: Long, end: Long): Int {
+        return data.values.count { it.isSolved && it.solvedAt != null && it.solvedAt in start until end }
     }
 
     override suspend fun clearAll() {
@@ -655,6 +758,17 @@ class FakeSoruDao : SoruDao {
         emit()
     }
 
+    override suspend fun advanceReviewStageBatch(ids: List<Long>, nextReviewDate: Long, now: Long) {
+        ids.forEach { id ->
+            val existing = data[id]
+            if (existing != null) {
+                val newStage = if (existing.reviewStage < 5) existing.reviewStage + 1 else 5
+                data[id] = existing.copy(reviewStage = newStage, nextReviewDate = nextReviewDate, lastReviewedAt = now, updatedAt = now)
+            }
+        }
+        emit()
+    }
+
     override suspend fun updateNoteAtomik(id: Long, note: String?, now: Long) {
         val existing = data[id] ?: return
         data[id] = existing.copy(note = note, updatedAt = now)
@@ -673,5 +787,9 @@ class FakeSoruDao : SoruDao {
 
     override suspend fun getSolvedGeometriCount(): Int {
         return data.values.count { it.isSolved && (it.subjectId.contains("geometri", ignoreCase = true) || it.topic.contains("geometri", ignoreCase = true)) }
+    }
+
+    override suspend fun getAllImagePaths(): List<String> {
+        return data.values.mapNotNull { it.imagePath.takeIf { p -> p.isNotBlank() } }
     }
 }

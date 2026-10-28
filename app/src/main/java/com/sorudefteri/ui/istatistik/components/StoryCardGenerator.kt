@@ -17,6 +17,8 @@ import com.sorudefteri.domain.model.Badge
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Instagram & WhatsApp Story 9:16 Başarı Kartı Üreticisi (Faz 5.4).
@@ -300,18 +302,37 @@ object StoryCardGenerator {
     }
 
     /**
-     * Üretilen Bitmap'i geçici PNG dosyasına kaydedip doğrudan Instagram Story veya
+     * Üretilen Bitmap'i geçici dosyaya kaydedip doğrudan Instagram Story veya
      * sistem Paylaşım Seçicisi (WhatsApp, Telegram vb.) ile paylaşır.
+     *
+     * PERF: PNG q100 encode + dosya yazma IO'dadır (önceden ana iplikte
+     * 1-3 sn donma). Kayıp-sız WebP kullanılır (daha küçük dosya).
+     * Bitmap paylaşımdan sonra recycle edilir; `shared/` klasöründeki
+     * 7 günden eski dosyalar temizlenir.
      */
-    fun shareToStory(context: Context, storyBitmap: Bitmap) {
+    suspend fun shareToStory(context: Context, storyBitmap: Bitmap) = withContext(Dispatchers.IO) {
         try {
             val sharedDir = File(context.cacheDir, "shared").apply { if (!exists()) mkdirs() }
-            val storyFile = File(sharedDir, "soru_defterim_story_${System.currentTimeMillis()}.png")
+            // Eski paylaşım artıklarını temizle (7 gün)
+            try {
+                val weekAgo = System.currentTimeMillis() - 7L * 24L * 60L * 60L * 1000L
+                sharedDir.listFiles()?.forEach { f ->
+                    try { if (f.isFile && f.lastModified() < weekAgo) f.delete() } catch (_: Exception) {}
+                }
+            } catch (_: Exception) {}
+
+            val storyFile = File(sharedDir, "soru_defterim_story_${System.currentTimeMillis()}.webp")
 
             FileOutputStream(storyFile).use { fos ->
-                storyBitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    storyBitmap.compress(Bitmap.CompressFormat.WEBP_LOSSLESS, 80, fos)
+                } else {
+                    @Suppress("DEPRECATION")
+                    storyBitmap.compress(Bitmap.CompressFormat.WEBP, 85, fos)
+                }
                 fos.flush()
             }
+            try { if (!storyBitmap.isRecycled) storyBitmap.recycle() } catch (_: Exception) {}
 
             val contentUri: Uri = FileProvider.getUriForFile(
                 context,
@@ -321,7 +342,7 @@ object StoryCardGenerator {
 
             // 1. Instagram Stories Intent Denemesi
             val instagramIntent = Intent("com.instagram.share.ADD_TO_STORY").apply {
-                setDataAndType(contentUri, "image/png")
+                setDataAndType(contentUri, "image/webp")
                 putExtra("interactive_asset_uri", contentUri)
                 putExtra("source_application", context.packageName)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -338,7 +359,7 @@ object StoryCardGenerator {
             if (hasInstagram) {
                 try {
                     context.startActivity(instagramIntent)
-                    return
+                    return@withContext
                 } catch (_: ActivityNotFoundException) {
                     // Fallback to standard share
                 }
@@ -346,7 +367,7 @@ object StoryCardGenerator {
 
             // 2. Standart Paylaşım Seçicisi (WhatsApp Durum, Telegram, Galeri vb.)
             val fallbackIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "image/png"
+                type = "image/webp"
                 putExtra(Intent.EXTRA_STREAM, contentUri)
                 putExtra(
                     Intent.EXTRA_TEXT,

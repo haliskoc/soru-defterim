@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
@@ -37,11 +38,14 @@ import java.util.Locale
 import javax.inject.Inject
 
 /**
- * Kütüphane ekranı UI durumu
+ * Kütüphane ekranı UI durumu.
+ *
+ * PERF: Tam listeler (tumSorular/filteredSorular) state'ten KALDIRILDI.
+ * Liste yalnızca Paging (`pagedSorular`) ile beslenir; meta sayılar ve
+ * filtre seçenekleri tekil Room sorgularıyla gelir. Her keystroke'ta
+ * tam listeli state yayını bitmiştir.
  */
 data class KutuphaneUiState(
-    val tumSorular: List<Soru> = emptyList(),
-    val filteredSorular: List<Soru> = emptyList(),
     val searchQuery: String = "",
     val selectedExamType: String? = null, // null: Tümü, "TYT", "AYT"
     val selectedSubjectId: String? = null,
@@ -62,10 +66,12 @@ data class KutuphaneUiState(
     val favoriteCount: Int = 0,
     val dueReviewCount: Int = 0,
     val selectedSoruIds: Set<Long> = emptySet(),
-    val isSelectionMode: Boolean = false
+    val isSelectionMode: Boolean = false,
+    /** "Tümünü Seç" yalnızca filtre eşleşen id sayısını bilir (tam liste yok). */
+    val filteredIdCount: Int = 0
 ) {
     val isAllSelected: Boolean
-        get() = filteredSorular.isNotEmpty() && selectedSoruIds.size == filteredSorular.size
+        get() = filteredIdCount > 0 && selectedSoruIds.size >= filteredIdCount
 }
 
 private data class FilterParams(
@@ -81,26 +87,13 @@ private data class FilterParams(
     val sortOrder: SortOrder
 )
 
-private data class FilteredData(
-    val tumSorular: List<Soru> = emptyList(),
-    val filteredSorular: List<Soru> = emptyList(),
-    val availableSubjects: List<Ders> = emptyList(),
-    val availablePublishers: List<String> = emptyList(),
-    val availableExamNames: List<String> = emptyList(),
-    val totalCount: Int = 0,
-    val solvedCount: Int = 0,
-    val unsolvedCount: Int = 0,
-    val favoriteCount: Int = 0,
-    val dueReviewCount: Int = 0,
-    val filters: FilterParams = FilterParams("", null, null, null, null, null, false, false, false, SortOrder.DATE_DESC)
-)
-
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class KutuphaneViewModel @Inject constructor(
     private val soruRepository: SoruRepository,
     private val ayarlarDataStore: AyarlarDataStore,
-    private val testSessionManager: TestSessionManager
+    private val testSessionManager: TestSessionManager,
+    private val defaultDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default
 ) : ViewModel() {
 
     private val _searchQuery = MutableStateFlow("")
@@ -175,12 +168,34 @@ class KutuphaneViewModel @Inject constructor(
         )
     }
 
-    // Ağır filtreleme ve sıralama işlemlerini tamamen Dispatchers.Default üzerinde çalıştır
-    private val filteredDataFlow: Flow<FilteredData> = combine(
-        soruRepository.getAllSorular(),
+    /**
+     * PERF: Tam-liste filtreleme KALDIRILDI. Liste yolu yalnızca Paging'dir.
+     * Meta sayılar + filtre seçenekleri tekil Room sorgularıyla (IO) gelir;
+     * ders listesi saf CPU işidir (Default).
+     */
+    private val metaFlow: Flow<com.sorudefteri.domain.model.KutuphaneMeta> =
+        soruRepository.totalCount
+            .flatMapLatest { soruRepository.getKutuphaneMetaFlow() }
+            .flowOn(defaultDispatcher)
+
+    // UI durumu: meta + filtre + ham arama metni + seçim (tam liste YOK)
+    val uiState: StateFlow<KutuphaneUiState> = combine(
+        metaFlow,
         filterParamsFlow,
+        _searchQuery,
+        _selectedSoruIds,
+        _isSelectionMode,
         _currentAlan
-    ) { sorular, filters, currentAlan ->
+    ) { args ->
+        @Suppress("UNCHECKED_CAST")
+        val a = args as Array<Any?>
+        val meta = a[0] as com.sorudefteri.domain.model.KutuphaneMeta
+        val filters = a[1] as FilterParams
+        val rawQuery = a[2] as String
+        @Suppress("UNCHECKED_CAST")
+        val selectedIds = a[3] as Set<Long>
+        val isSelectionMode = a[4] as Boolean
+        val currentAlan = a[5] as Alan
         val availableSubjects = when {
             currentAlan == Alan.LGS || filters.examType.equals("LGS", ignoreCase = true) -> DersTaksonomisi.lgsDersleri
             currentAlan == Alan.KPSS || filters.examType.equals("KPSS", ignoreCase = true) -> DersTaksonomisi.kpssDersleri
@@ -189,129 +204,26 @@ class KutuphaneViewModel @Inject constructor(
             }
             else -> DersTaksonomisi.getDersler(filters.examType, currentAlan)
         }.distinctBy { it.id }
-
-        // Gereksiz nesne tahsislerini önleyen tek geçişli publisher ve exam toplama
-        val availablePublishers = buildList {
-            val seen = HashSet<String>()
-            for (s in sorular) {
-                val p = s.kaynakYayin?.trim()
-                if (!p.isNullOrBlank() && seen.add(p)) {
-                    add(p)
-                }
-            }
-        }.sorted()
-
-        val availableExamNames = buildList {
-            val seen = HashSet<String>()
-            for (s in sorular) {
-                val d = s.kaynakDeneme?.trim()
-                if (!d.isNullOrBlank() && seen.add(d)) {
-                    add(d)
-                }
-            }
-        }.sorted()
-
-        val cleanQuery = filters.query.trim()
-        val hasQuery = cleanQuery.isNotBlank()
-        val normalizedQuery = if (hasQuery) DersTaksonomisi.normalizeTurkish(cleanQuery) else ""
-
-        val filtered = sorular.filter { soru ->
-            // 1. Hızlı ilkel/referans karşılaştırmaları (Short-circuit değerlendirme)
-            if (filters.onlyUnsolved && soru.isSolved) return@filter false
-            if (filters.onlyFavorites && !soru.isFavorite) return@filter false
-            if (filters.onlyDueReview && !soru.isDueForReview) return@filter false
-            if (filters.mistakeType != null && soru.mistakeType != filters.mistakeType) return@filter false
-            if (filters.examType != null && !soru.examType.equals(filters.examType, ignoreCase = true)) return@filter false
-            if (filters.subjectId != null && !soru.subjectId.equals(filters.subjectId, ignoreCase = true)) return@filter false
-            if (filters.publisher != null && !soru.kaynakYayin.equals(filters.publisher, ignoreCase = true)) return@filter false
-            if (filters.examName != null && !soru.kaynakDeneme.equals(filters.examName, ignoreCase = true)) return@filter false
-
-            // 2. Arama sorgusu yoksa hemen kabul et
-            if (!hasQuery) return@filter true
-
-            // 3. Türkçe karakter toleranslı, sıfır heap tahsisli (0-allocation) arama kriterleri
-            // Kısa alanlardan başlayarak ilk eşleşmede hemen dön (short-circuit)
-            if (DersTaksonomisi.containsTurkish(DersTaksonomisi.getNormalizedDersAdi(soru.subjectId), normalizedQuery)) return@filter true
-            if (DersTaksonomisi.containsTurkish(soru.examType, normalizedQuery)) return@filter true
-            if (DersTaksonomisi.containsTurkish(soru.topic, normalizedQuery)) return@filter true
-            if (DersTaksonomisi.containsTurkish(soru.note, normalizedQuery)) return@filter true
-            if (DersTaksonomisi.containsTurkish(soru.kaynakYayin, normalizedQuery)) return@filter true
-            if (DersTaksonomisi.containsTurkish(soru.kaynakDeneme, normalizedQuery)) return@filter true
-            if (DersTaksonomisi.containsTurkish(soru.questionText, normalizedQuery)) return@filter true
-            if (DersTaksonomisi.containsTurkish(soru.ocrMetni, normalizedQuery)) return@filter true
-            if (DersTaksonomisi.containsTurkish(soru.aiExplanation, normalizedQuery)) return@filter true
-
-            false
-        }
-
-        val sorted = when (filters.sortOrder) {
-            SortOrder.DATE_DESC -> filtered.sortedByDescending { it.createdAt }
-            SortOrder.DATE_ASC -> filtered.sortedBy { it.createdAt }
-            SortOrder.SUBJECT -> filtered.sortedWith(
-                compareBy(
-                    { it.examType },
-                    { DersTaksonomisi.getDersAdi(it.subjectId) },
-                    { -it.createdAt }
-                )
-            )
-        }
-
-        // Tek geçişte (single pass) metrik hesaplamaları
-        var solved = 0
-        var favorites = 0
-        var dueReviews = 0
-        for (s in sorular) {
-            if (s.isSolved) solved++
-            if (s.isFavorite) favorites++
-            if (s.isDueForReview) dueReviews++
-        }
-        val total = sorular.size
-        val unsolved = (total - solved).coerceAtLeast(0)
-
-        FilteredData(
-            tumSorular = sorular,
-            filteredSorular = sorted,
-            availableSubjects = availableSubjects,
-            availablePublishers = availablePublishers,
-            availableExamNames = availableExamNames,
-            totalCount = total,
-            solvedCount = solved,
-            unsolvedCount = unsolved,
-            favoriteCount = favorites,
-            dueReviewCount = dueReviews,
-            filters = filters
-        )
-    }
-
-    // UI durumu: Arka plandaki filtrelenmiş verileri, anlık arama metni ve seçim durumlarıyla anında birleştirir
-    val uiState: StateFlow<KutuphaneUiState> = combine(
-        filteredDataFlow,
-        _searchQuery,
-        _selectedSoruIds,
-        _isSelectionMode
-    ) { data, rawQuery, selectedIds, isSelectionMode ->
         KutuphaneUiState(
-            tumSorular = data.tumSorular,
-            filteredSorular = data.filteredSorular,
             searchQuery = rawQuery,
-            selectedExamType = data.filters.examType,
-            selectedSubjectId = data.filters.subjectId,
-            selectedMistakeType = data.filters.mistakeType,
-            selectedPublisher = data.filters.publisher,
-            selectedExamName = data.filters.examName,
-            onlyUnsolved = data.filters.onlyUnsolved,
-            onlyFavorites = data.filters.onlyFavorites,
-            onlyDueReview = data.filters.onlyDueReview,
-            sortOrder = data.filters.sortOrder,
+            selectedExamType = filters.examType,
+            selectedSubjectId = filters.subjectId,
+            selectedMistakeType = filters.mistakeType,
+            selectedPublisher = filters.publisher,
+            selectedExamName = filters.examName,
+            onlyUnsolved = filters.onlyUnsolved,
+            onlyFavorites = filters.onlyFavorites,
+            onlyDueReview = filters.onlyDueReview,
+            sortOrder = filters.sortOrder,
             isLoading = false,
-            availableSubjects = data.availableSubjects,
-            availablePublishers = data.availablePublishers,
-            availableExamNames = data.availableExamNames,
-            totalCount = data.totalCount,
-            solvedCount = data.solvedCount,
-            unsolvedCount = data.unsolvedCount,
-            favoriteCount = data.favoriteCount,
-            dueReviewCount = data.dueReviewCount,
+            availableSubjects = availableSubjects,
+            availablePublishers = meta.availablePublishers,
+            availableExamNames = meta.availableExamNames,
+            totalCount = meta.totalCount,
+            solvedCount = meta.solvedCount,
+            unsolvedCount = meta.unsolvedCount,
+            favoriteCount = meta.favoriteCount,
+            dueReviewCount = meta.dueReviewCount,
             selectedSoruIds = selectedIds,
             isSelectionMode = isSelectionMode
         )
@@ -332,7 +244,8 @@ class KutuphaneViewModel @Inject constructor(
                 isSolved = if (filters.onlyUnsolved) false else null,
                 isFavorite = if (filters.onlyFavorites) true else null,
                 onlyDueReview = if (filters.onlyDueReview) true else null,
-                kaynak = filters.publisher ?: filters.examName
+                kaynak = filters.publisher ?: filters.examName,
+                sortOrder = filters.sortOrder.name
             )
         }
         .cachedIn(viewModelScope)
@@ -400,6 +313,8 @@ class KutuphaneViewModel @Inject constructor(
         _selectedExamType.value = null
         _selectedSubjectId.value = null
         _selectedMistakeType.value = null
+        _selectedPublisher.value = null
+        _selectedExamName.value = null
         _onlyUnsolved.value = false
         _onlyFavorites.value = false
         _onlyDueReview.value = false
@@ -421,16 +336,71 @@ class KutuphaneViewModel @Inject constructor(
             current.add(id)
         }
         _selectedSoruIds.value = current
-        if (current.isNotEmpty()) {
-            _isSelectionMode.value = true
+        _isSelectionMode.value = current.isNotEmpty()
+    }
+
+    /**
+     * PERF: PDF/Anki dışa aktarma için filtreye uyan tam satırlar.
+     * Yalnızca kullanıcı dışa aktarmaya dokunduğunda bir kez okunur;
+     * sürekli state'te tam liste tutulmaz.
+     */
+    suspend fun getFilteredSorularForExport(): List<Soru> {
+        val f = filterParamsFlow.first()
+        return try {
+            val ids = soruRepository.getFilteredSoruIds(
+                query = f.query.ifBlank { null },
+                examType = f.examType,
+                subjectId = f.subjectId,
+                mistakeType = f.mistakeType?.name,
+                isSolved = if (f.onlyUnsolved) false else null,
+                isFavorite = if (f.onlyFavorites) true else null,
+                onlyDueReview = if (f.onlyDueReview) true else null,
+                kaynak = f.publisher ?: f.examName
+            )
+            if (ids.isEmpty()) emptyList() else soruRepository.getSorularByIds(ids)
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
+    /**
+     * PERF: Seçili id'lerin tam satırları (seçim çubuğu PDF/Anki).
+     */
+    suspend fun getSelectedSorular(): List<Soru> {
+        val ids = _selectedSoruIds.value.toList()
+        if (ids.isEmpty()) return emptyList()
+        return try {
+            soruRepository.getSorularByIds(ids)
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * PERF: "Tümünü Seç" tam liste çekmez; filtreye uyan id'leri
+     * tek DAO sorgusuyla alır.
+     */
     fun selectAll() {
-        val allIds = uiState.value.filteredSorular.map { it.id }.toSet()
-        _selectedSoruIds.value = allIds
-        if (allIds.isNotEmpty()) {
-            _isSelectionMode.value = true
+        viewModelScope.launch {
+            val f = filterParamsFlow.first()
+            val ids = try {
+                soruRepository.getFilteredSoruIds(
+                    query = f.query.ifBlank { null },
+                    examType = f.examType,
+                    subjectId = f.subjectId,
+                    mistakeType = f.mistakeType?.name,
+                    isSolved = if (f.onlyUnsolved) false else null,
+                    isFavorite = if (f.onlyFavorites) true else null,
+                    onlyDueReview = if (f.onlyDueReview) true else null,
+                    kaynak = f.publisher ?: f.examName
+                ).toSet()
+            } catch (_: Exception) {
+                emptySet()
+            }
+            _selectedSoruIds.value = ids
+            if (ids.isNotEmpty()) {
+                _isSelectionMode.value = true
+            }
         }
     }
 
