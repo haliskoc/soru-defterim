@@ -30,10 +30,14 @@ class CihazEslemeViewModel @Inject constructor(
         trustedDeviceStore?.trustedDevices ?: MutableStateFlow(emptyList())
 
     val autoProximitySyncEnabled: StateFlow<Boolean> =
-        trustedDeviceStore?.autoProximitySyncEnabled ?: MutableStateFlow(true)
+        trustedDeviceStore?.autoProximitySyncFlow ?: MutableStateFlow(true)
+
+    fun toggleAutoProximitySync(enabled: Boolean) {
+        trustedDeviceStore?.setAutoProximitySyncEnabled(enabled)
+    }
 
     fun setAutoProximitySyncEnabled(enabled: Boolean) {
-        trustedDeviceStore?.setAutoProximitySyncEnabled(enabled)
+        toggleAutoProximitySync(enabled)
     }
 
     fun removeTrustedDevice(cihazKodu: String) {

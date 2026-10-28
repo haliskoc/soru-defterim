@@ -17,6 +17,7 @@ import androidx.core.content.FileProvider
 import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.Soru
+import com.sorudefteri.domain.omr.model.OmrTemplate
 import com.sorudefteri.ui.ortak.drawing.QuestionDrawingData
 import kotlinx.serialization.json.Json
 import java.io.File
@@ -116,6 +117,14 @@ object PdfDenemeKitapcikGenerator {
                 val emptyPage = pdfDocument.startPage(emptyPageInfo)
                 drawEmptyNotice(emptyPage.canvas, config.title)
                 pdfDocument.finishPage(emptyPage)
+            }
+
+            // 2.5. TAM SAYFA A4 OKUNABİLİR OPTİK CEVAP FORMU
+            if (config.includePrintableOpticalForm && config.templateMode == PdfTemplateMode.OSYM_DENEME) {
+                val opticalPageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber++).create()
+                val opticalPage = pdfDocument.startPage(opticalPageInfo)
+                drawPrintableOpticalFormPage(opticalPage.canvas, sorular, config)
+                pdfDocument.finishPage(opticalPage)
             }
 
             // 3. ARKA KAPAK / CEVAP ANAHTARI
@@ -433,13 +442,15 @@ object PdfDenemeKitapcikGenerator {
             val pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber++).create()
             val page = pdfDocument.startPage(pageInfo)
             val canvas = page.canvas
-            drawPageRunningHeaderFooter(canvas, pageNumber - 1, config.title, false, isSingleCol, marginSide)
+            val hasFullWidth = sayfa.ogeler.any { it.genislik > TWO_COL_WIDTH + 10f }
+            val drawDivider = !isSingleCol && !hasFullWidth
+            drawPageRunningHeaderFooter(canvas, pageNumber - 1, config.title, false, isSingleCol, marginSide, drawVerticalDivider = drawDivider)
 
             for (oge in sayfa.ogeler) {
                 when (oge) {
                     is PdfSoruYerlesim.Oge.TamSoru -> {
                         val girdi = girdiler[oge.soruIndex]
-                        val olcum = if (oge.sutun < 0) girdi.tamGenislikMetriki else girdi.sutunMetriki
+                        val olcum = oge.olcumOverride ?: (if (oge.sutun < 0) girdi.tamGenislikMetriki else girdi.sutunMetriki)
                         val soru = sorular[oge.soruIndex]
                         val bitmap = if (olcum.bitmapRatio > 0f) {
                             loadQuestionBitmap(
@@ -505,29 +516,33 @@ object PdfDenemeKitapcikGenerator {
         if (config.includeSourceInfo && kaynak.isNotBlank()) ustYukseklik += 14f
         if (config.includeStudentNote && !soru.note.isNullOrBlank()) ustYukseklik += 22f
 
-        // İÇERİK: bitmap (orana göre ölçek) | metin (tek kaynaklı sarma) | placeholder
+        // İÇERİK: metin (varsa) + bitmap (varsa) | placeholder
         val satirYuksekligi = 11f
         val metinSatirlari: List<String>
         var metinIlkBosluk = 0f
         var metinSonraBosluk = 0f
-        val icerikYukseklik: Float
+        val metin = soru.questionText ?: soru.ocrMetni
+        if (!metin.isNullOrBlank()) {
+            metinSatirlari = soruMetniSatirlari(metin, genislik)
+            metinIlkBosluk = 8f
+            metinSonraBosluk = 6f
+        } else {
+            metinSatirlari = emptyList()
+        }
+        val metinYukseklik = if (metinSatirlari.isNotEmpty()) {
+            metinIlkBosluk + (metinSatirlari.size * satirYuksekligi) + metinSonraBosluk
+        } else 0f
 
+        val gorselYukseklik: Float
+        val icerikYukseklik: Float
         if (bitmapOrani > 0f) {
             val maks = bitmapMaksYukseklik(isSingleCol, config)
-            // Çizimle aynı formula: yükseklik = min(genişlik * oran, maks); artı 6f boşluk
-            icerikYukseklik = min(genislik * bitmapOrani, maks) + 6f
-            metinSatirlari = emptyList()
+            val safGorsel = min(genislik * bitmapOrani, maks)
+            gorselYukseklik = safGorsel
+            icerikYukseklik = metinYukseklik + safGorsel + 6f
         } else {
-            val metin = soru.questionText ?: soru.ocrMetni
-            if (!metin.isNullOrBlank()) {
-                metinSatirlari = soruMetniSatirlari(metin, genislik)
-                metinIlkBosluk = 8f
-                metinSonraBosluk = 6f
-                icerikYukseklik = metinIlkBosluk + (metinSatirlari.size * satirYuksekligi) + metinSonraBosluk
-            } else {
-                metinSatirlari = emptyList()
-                icerikYukseklik = 46f
-            }
+            gorselYukseklik = 0f
+            icerikYukseklik = if (metinSatirlari.isNotEmpty()) metinYukseklik else 46f
         }
 
         // ÇÖZÜM: şablona göre doğru cevap + AI kutusu + kalem alanı
@@ -563,7 +578,8 @@ object PdfDenemeKitapcikGenerator {
             satirYuksekligi = satirYuksekligi,
             metinIlkBosluk = metinIlkBosluk,
             metinSonraBosluk = metinSonraBosluk,
-            bitmapRatio = bitmapOrani
+            bitmapRatio = bitmapOrani,
+            gorselYukseklik = gorselYukseklik
         )
     }
 
@@ -686,8 +702,15 @@ object PdfDenemeKitapcikGenerator {
         val maxHeaderWidth = width - 80f
         canvas.drawText(clipText(headerText, subjectPaint, maxHeaderWidth), x + 60f, cursorY + 11.5f, subjectPaint)
 
-        // Rozetler (Sağdan Sola: Hata Tipi ve Zorluk)
+        // Rozetler (Sağdan Sola: Karekod, Hata Tipi ve Zorluk)
         var extraInfoX = x + width
+        if (config.includeQuestionQrCodes) {
+            val qrSize = 16f
+            val qrX = extraInfoX - qrSize
+            val qrY = cursorY
+            OmrMatrixCodeCodec.drawQuestionIdMatrixCode(canvas, soru.id, qrX, qrY, qrSize)
+            extraInfoX -= (qrSize + 4f)
+        }
         if (config.includeMistakeType && soru.mistakeType != null) {
             val mistakeText = soru.mistakeType.displayName
             val mPaint = Paint().apply {
@@ -776,39 +799,44 @@ object PdfDenemeKitapcikGenerator {
         }
 
         // C. SORU İÇERİĞİ (ölçüm kaydındaki değerlerle birebir: kayma olamaz)
-        if (bitmap != null && olcum.bitmapRatio > 0f) {
-            val hedefYukseklik = (olcum.icerikYukseklik - 6f).coerceAtLeast(1f)
-            val hedefGenislik = hedefYukseklik / olcum.bitmapRatio
-            val offsetX = x + max(0f, (width - hedefGenislik) / 2f)
-            val destRect = RectF(offsetX, cursorY, offsetX + hedefGenislik, cursorY + hedefYukseklik)
-            canvas.drawBitmap(bitmap, null, destRect, null)
-            cursorY += olcum.icerikYukseklik
-        } else {
-            val metin = soru.questionText ?: soru.ocrMetni
-            if (!metin.isNullOrBlank()) {
-                val qTextPaint = Paint().apply {
-                    isAntiAlias = true
-                    color = Color.rgb(30, 41, 59)
-                    textSize = 8f
-                    typeface = Typeface.SANS_SERIF
-                }
-                val gosterilecek = PdfSoruYerlesim.MetinAkisi.dilimle(olcum.metinSatirlari, satirAraligi)
-                cursorY += olcum.metinIlkBosluk
-                cursorY = PdfSoruYerlesim.MetinAkisi.ciz(canvas, gosterilecek, qTextPaint, x + 4f, cursorY, olcum.satirYuksekligi)
-                cursorY += olcum.metinSonraBosluk
-            } else {
-                val placeholderRect = RectF(x, cursorY, x + width, cursorY + 40f)
-                val pBgPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL; color = Color.rgb(248, 250, 252) }
-                canvas.drawRoundRect(placeholderRect, 4f, 4f, pBgPaint)
-                val pTextPaint = Paint().apply {
-                    isAntiAlias = true
-                    color = Color.rgb(148, 163, 184)
-                    textSize = 8f
-                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.ITALIC)
-                }
-                drawCenteredText(canvas, "📷 [Soru Görseli]", placeholderRect.centerX(), placeholderRect.centerY() + 3f, pTextPaint)
-                cursorY += 46f
+        // 1. Üstte soru metni (varsa)
+        if (olcum.metinSatirlari.isNotEmpty()) {
+            val qTextPaint = Paint().apply {
+                isAntiAlias = true
+                color = Color.rgb(30, 41, 59)
+                textSize = 8f
+                typeface = Typeface.SANS_SERIF
             }
+            val gosterilecek = PdfSoruYerlesim.MetinAkisi.dilimle(olcum.metinSatirlari, satirAraligi)
+            cursorY += olcum.metinIlkBosluk
+            cursorY = PdfSoruYerlesim.MetinAkisi.ciz(canvas, gosterilecek, qTextPaint, x + 4f, cursorY, olcum.satirYuksekligi)
+            cursorY += olcum.metinSonraBosluk
+        }
+
+        // 2. Altta soru görseli (varsa)
+        if (bitmap != null && olcum.bitmapRatio > 0f) {
+            val gorselH = if (olcum.gorselYukseklik > 0f) {
+                olcum.gorselYukseklik
+            } else {
+                (olcum.icerikYukseklik - olcum.metinBlokYuksekligi - 6f).coerceAtLeast(1f)
+            }
+            val hedefGenislik = gorselH / olcum.bitmapRatio
+            val offsetX = x + max(0f, (width - hedefGenislik) / 2f)
+            val destRect = RectF(offsetX, cursorY, offsetX + hedefGenislik, cursorY + gorselH)
+            canvas.drawBitmap(bitmap, null, destRect, null)
+            cursorY += gorselH + 6f
+        } else if (olcum.metinSatirlari.isEmpty()) {
+            val placeholderRect = RectF(x, cursorY, x + width, cursorY + 40f)
+            val pBgPaint = Paint().apply { isAntiAlias = true; style = Paint.Style.FILL; color = Color.rgb(248, 250, 252) }
+            canvas.drawRoundRect(placeholderRect, 4f, 4f, pBgPaint)
+            val pTextPaint = Paint().apply {
+                isAntiAlias = true
+                color = Color.rgb(148, 163, 184)
+                textSize = 8f
+                typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.ITALIC)
+            }
+            drawCenteredText(canvas, "📷 [Soru Görseli]", placeholderRect.centerX(), placeholderRect.centerY() + 3f, pTextPaint)
+            cursorY += 46f
         }
 
         // D. ŞABLONA GÖRE ÇÖZÜM VEYA ÇÖZÜM ALANI
@@ -1002,7 +1030,8 @@ object PdfDenemeKitapcikGenerator {
         targetTitle: String,
         isLastPage: Boolean,
         isSingleCol: Boolean,
-        marginSide: Float = MARGIN_LEFT
+        marginSide: Float = MARGIN_LEFT,
+        drawVerticalDivider: Boolean = !isSingleCol
     ) {
         val linePaint = Paint().apply {
             color = Color.rgb(203, 213, 225)
@@ -1022,8 +1051,8 @@ object PdfDenemeKitapcikGenerator {
         val rightHeaderText = "ÇALIŞMA BELGESİ"
         canvas.drawText(rightHeaderText, PAGE_WIDTH - marginSide - textPaint.measureText(rightHeaderText), MARGIN_TOP - 11f, textPaint)
 
-        // Orta dikey ayırıcı çizgi (Yalnızca 2 sütunlu modda)
-        if (!isSingleCol) {
+        // Orta dikey ayırıcı çizgi (Yalnızca 2 sütunlu modda ve tam genişlikli soru yoksa)
+        if (drawVerticalDivider) {
             val dividerPaint = Paint().apply {
                 color = Color.rgb(226, 232, 240)
                 strokeWidth = 0.8f
@@ -1065,6 +1094,214 @@ object PdfDenemeKitapcikGenerator {
     // ==========================================
     // 3. BÖLÜM: ARKA KAPAK & CEVAP ANAHTARI
     // ==========================================
+
+    /**
+     * Kamera ile taranabilir tam sayfa A4 Optik Cevap Formu.
+     *
+     * [OmrTemplate] koordinatları ve Fiducial geometriyle %100 uyumludur:
+     * - 4 Köşe Fiducial: 40x40 pt (14x14 mm) saf siyah dolu kareler (sol-üst: 25..65, sağ-üst: 530..570, sol-alt: 25..65/777..817, sağ-alt: 530..570/777..817)
+     * - Sağ-Üst Başlık: OmrMatrixCodeCodec.drawMatrixCode ile config.testId matris kodu + okunaklı "KOD: ${config.testId}" metni
+     * - Sol-Üst Başlık: Deneme Başlığı, Tarih, Kitapçık Türü [A] [B] baloncukları
+     * - 4 Sütun x 30 Satır = 120 Soru: (A) (B) (C) (D) (E) optik baloncukları
+     * - Zamanlama Rayları: Her satırın solunda 4 x 1.5 mm (11.34 x 4.25 pt) zamanlama rayları
+     */
+    fun drawPrintableOpticalFormPage(
+        canvas: Canvas,
+        sorular: List<Soru>,
+        config: PdfExportConfig
+    ) {
+        val solidBlackPaint = Paint().apply {
+            isAntiAlias = false
+            style = Paint.Style.FILL
+            color = Color.BLACK
+        }
+        val strokeBlackPaint = Paint().apply {
+            isAntiAlias = true
+            style = Paint.Style.STROKE
+            color = Color.BLACK
+            strokeWidth = 0.8f
+        }
+        val textBlackPaint = Paint().apply {
+            isAntiAlias = true
+            color = Color.BLACK
+        }
+
+        // 1. 4 KÖŞE FIDUCIAL KARELERİ (40x40 pt = 14x14 mm)
+        // Sol-Üst: 25..65, 25..65
+        canvas.drawRect(25f, 25f, 65f, 65f, solidBlackPaint)
+        // Sağ-Üst: 530..570, 25..65
+        canvas.drawRect(530f, 25f, 570f, 65f, solidBlackPaint)
+        // Sol-Alt: 25..65, 777..817
+        canvas.drawRect(25f, 777f, 65f, 817f, solidBlackPaint)
+        // Sağ-Alt: 530..570, 777..817
+        canvas.drawRect(530f, 777f, 570f, 817f, solidBlackPaint)
+
+        // 2. SAĞ ÜST: TEST ID MATRİS KODU VE OKUNAKLI KOD METNİ
+        val matrixRect = OmrMatrixCodeCodec.OPTICAL_FORM_MATRIX_RECT_PT
+        OmrMatrixCodeCodec.drawMatrixCode(canvas, matrixRect, config.testId)
+
+        textBlackPaint.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        textBlackPaint.textSize = 8f
+        drawCenteredText(canvas, "KOD: ${config.testId}", matrixRect.centerX(), matrixRect.bottom + 12f, textBlackPaint)
+
+        // 3. SOL ÜST: BAŞLIK, TARİH, KİTAPÇIK TÜRÜ [A] [B] BALONCUKLARI
+        val headerLeftX = 75f
+        var headerY = 40f
+
+        textBlackPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        textBlackPaint.textSize = 7.5f
+        textBlackPaint.color = Color.rgb(71, 85, 105)
+        canvas.drawText("T.C. • SORU DEFTERİM OPTİK CEVAP FORMU", headerLeftX, headerY, textBlackPaint)
+        headerY += 16f
+
+        textBlackPaint.typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+        textBlackPaint.textSize = 13f
+        textBlackPaint.color = Color.BLACK
+        canvas.drawText(clipText(config.title, textBlackPaint, 340f), headerLeftX, headerY, textBlackPaint)
+        headerY += 15f
+
+        val dateFormat = SimpleDateFormat("dd.MM.yyyy", Locale("tr"))
+        val tarihStr = dateFormat.format(Date())
+        textBlackPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+        textBlackPaint.textSize = 8.5f
+        textBlackPaint.color = Color.rgb(30, 41, 59)
+        canvas.drawText("TARİH: $tarihStr", headerLeftX, headerY, textBlackPaint)
+
+        val studentStr = "ÖĞRENCİ: ${config.studentName ?: "................................................"}"
+        canvas.drawText(studentStr, headerLeftX + 110f, headerY, textBlackPaint)
+        headerY += 18f
+
+        // Kitapçık Türü [A] [B]
+        textBlackPaint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        textBlackPaint.textSize = 8.5f
+        canvas.drawText("KİTAPÇIK TÜRÜ:", headerLeftX, headerY + 3f, textBlackPaint)
+
+        val bookletOptions = listOf("A", "B")
+        var bookletBubbleX = headerLeftX + 90f
+        val bookletBubbleRadius = 6.5f
+
+        for (bOpt in bookletOptions) {
+            val isSelected = config.bookletType.equals(bOpt, ignoreCase = true)
+            if (isSelected) {
+                canvas.drawCircle(bookletBubbleX, headerY, bookletBubbleRadius, solidBlackPaint)
+                val selTextPaint = Paint().apply {
+                    isAntiAlias = true
+                    color = Color.WHITE
+                    textSize = 7.5f
+                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                }
+                drawCenteredText(canvas, bOpt, bookletBubbleX, headerY + 2.5f, selTextPaint)
+            } else {
+                canvas.drawCircle(bookletBubbleX, headerY, bookletBubbleRadius, strokeBlackPaint)
+                val unselTextPaint = Paint().apply {
+                    isAntiAlias = true
+                    color = Color.BLACK
+                    textSize = 7.5f
+                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                }
+                drawCenteredText(canvas, bOpt, bookletBubbleX, headerY + 2.5f, unselTextPaint)
+            }
+            bookletBubbleX += 22f
+        }
+
+        val instructionPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 6.8f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.ITALIC)
+            color = Color.rgb(100, 116, 139)
+        }
+        canvas.drawText("Kurşun kalemle taşmayacak şekilde doldurunuz. 4 köşe referans karesini katlamayınız/karalamayınız.", headerLeftX, headerY + 18f, instructionPaint)
+
+        val dividerPaint = Paint().apply {
+            color = Color.rgb(203, 213, 225)
+            strokeWidth = 0.8f
+        }
+        canvas.drawLine(45f, 175f, 550f, 175f, dividerPaint)
+
+        // 4. 4 SÜTUN X 30 SATIR = 120 SORULUK BALONCUK GRID'İ VE ZAMANLAMA RAYLARI
+        // Timing tracks: 4 x 1.5 mm = 11.34 x 4.25 pt
+        val trackW = 11.34f
+        val trackH = 4.25f
+
+        // Baloncuk yarıçapı
+        val bubbleRadiusPt = 5.68f
+
+        val bubbleCirclePaint = Paint().apply {
+            isAntiAlias = true
+            style = Paint.Style.STROKE
+            strokeWidth = 0.8f
+            color = Color.rgb(30, 41, 59)
+        }
+        val bubbleLetterPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 6.2f
+            color = Color.rgb(51, 65, 85)
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val qNumPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 7.2f
+            color = Color.rgb(30, 41, 59)
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+        val colHeaderPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 7.5f
+            color = Color.rgb(71, 85, 105)
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        }
+
+        // Sütun Başlıkları: NO, A, B, C, D, E
+        for (col in 0 until OmrTemplate.COLUMNS) {
+            val sampleQ = col * OmrTemplate.ROWS_PER_COLUMN + 1
+            val (trackX, _) = OmrTemplate.warpToPt(OmrTemplate.getTimingTrackCenter(sampleQ).first, 0f)
+            val bubbleMap = OmrTemplate.getBubbleCenters(sampleQ)
+            val headerYPos = 192f
+
+            drawCenteredText(canvas, "NO", trackX + 16f, headerYPos, colHeaderPaint)
+
+            for (opt in OmrTemplate.OPTIONS) {
+                val optWarpX = bubbleMap[opt]?.first ?: 0f
+                val (optPtX, _) = OmrTemplate.warpToPt(optWarpX, 0f)
+                drawCenteredText(canvas, opt, optPtX, headerYPos, colHeaderPaint)
+            }
+        }
+
+        // 120 Soru için satırlar
+        for (q in 1..OmrTemplate.MAX_QUESTIONS) {
+            val (timingWarpX, timingWarpY) = OmrTemplate.getTimingTrackCenter(q)
+            val (timingPtX, timingPtY) = OmrTemplate.warpToPt(timingWarpX, timingWarpY)
+            val trackRect = RectF(
+                timingPtX - trackW / 2f,
+                timingPtY - trackH / 2f,
+                timingPtX + trackW / 2f,
+                timingPtY + trackH / 2f
+            )
+            canvas.drawRect(trackRect, solidBlackPaint)
+
+            val numStr = "$q."
+            val numX = timingPtX + trackW / 2f + 4f
+            canvas.drawText(numStr, numX, timingPtY + 2.6f, qNumPaint)
+
+            val bubbleMap = OmrTemplate.getBubbleCenters(q)
+            for (opt in OmrTemplate.OPTIONS) {
+                val warpPos = bubbleMap[opt] ?: continue
+                val (bPtX, bPtY) = OmrTemplate.warpToPt(warpPos.first, warpPos.second)
+
+                canvas.drawCircle(bPtX, bPtY, bubbleRadiusPt, bubbleCirclePaint)
+                drawCenteredText(canvas, opt, bPtX, bPtY + 2.2f, bubbleLetterPaint)
+            }
+        }
+
+        // Alt Bilgilendirme
+        val bottomInfoPaint = Paint().apply {
+            isAntiAlias = true
+            textSize = 7f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.NORMAL)
+            color = Color.rgb(100, 116, 139)
+        }
+        drawCenteredText(canvas, "Optik form kamera okuyucu tarafından otomatik algılanır • Soru Defterim OMR Motoru", PAGE_WIDTH / 2f, 770f, bottomInfoPaint)
+    }
 
     private fun drawBackCoverPage(canvas: Canvas, sorular: List<Soru>, targetTitle: String) {
         val strokePaint = Paint().apply { isAntiAlias = true; style = Paint.Style.STROKE; color = Color.BLACK }
@@ -1457,4 +1694,18 @@ object PdfDenemeKitapcikGenerator {
         val charCount = paint.breakText(text, true, maxWidth - 8f, null)
         return text.substring(0, charCount) + "..."
     }
+}
+
+/**
+ * Soru başlık şeridinde mini vektörel 2D matris kodu çizimi için pratik uzantı fonksiyonu.
+ */
+fun OmrMatrixCodeCodec.drawQuestionIdMatrixCode(
+    canvas: Canvas,
+    soruId: Long,
+    x: Float,
+    y: Float,
+    size: Float = COMPACT_HEADER_QR_SIZE_PT,
+    darkColor: Int = Color.rgb(30, 41, 59)
+) {
+    drawQuestionMatrixCode(canvas, RectF(x, y, x + size, y + size), soruId, darkColor)
 }

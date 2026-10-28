@@ -95,11 +95,16 @@ import com.sorudefteri.ui.theme.TytBadgeColor
 import com.sorudefteri.ui.theme.TytBadgeContainer
 import com.sorudefteri.ui.theme.WarningOrange
 import com.sorudefteri.ui.istatistik.components.AcilEylemMatrisiCard
+import com.sorudefteri.ui.istatistik.components.BilisselHataNetEtkisiCard
 import com.sorudefteri.ui.istatistik.components.BugunkuAkilliOnerilerCard
+import com.sorudefteri.ui.istatistik.components.DenemeDetayliAnalizCard
 import com.sorudefteri.ui.istatistik.components.DenemeEkleDialog
 import com.sorudefteri.ui.istatistik.components.DenemeTakipCard
 import com.sorudefteri.ui.istatistik.components.DiagnosticAiInsightsCard
+import com.sorudefteri.ui.istatistik.components.FsrsMemoryRetentionCard
 import com.sorudefteri.ui.istatistik.components.KonuIsiHaritasiCard
+import com.sorudefteri.ui.istatistik.components.YayineviPerformansCard
+import com.sorudefteri.ui.istatistik.components.YksHedefSimulatorCard
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import java.text.SimpleDateFormat
@@ -112,6 +117,9 @@ fun IstatistikScreen(
     onNavigateToAdd: () -> Unit = {},
     onStartTargetedTest: () -> Unit = {},
     onStartDueTest: () -> Unit = onStartTargetedTest,
+    onNavigateToDenemeDetay: (Long) -> Unit = {},
+    onNavigateToOmrScan: () -> Unit = {},
+    onNavigateToSoruEkleForDeneme: (Long, String, String, String) -> Unit = { _, _, _, _ -> },
     viewModel: IstatistikViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -245,6 +253,30 @@ fun IstatistikScreen(
                                 karsilastirma = uiState.haftalikKarsilastirma
                             )
 
+                            // FSRS Hafıza Kalıcılığı & Ebbinghaus Unutma Eğrisi Kartı
+                            FsrsMemoryRetentionCard(
+                                allQuestions = uiState.allQuestions,
+                                onStartDueTest = {
+                                    viewModel.startDueReviewTest(
+                                        onSuccess = onStartDueTest
+                                    )
+                                }
+                            )
+
+                            // YKS Dinamik Net Hedef & Sınav Simülatörü Kartı
+                            YksHedefSimulatorCard(
+                                allDenemeler = uiState.allDenemeler,
+                                allQuestions = uiState.allQuestions,
+                                onStartTargetedTest = { examType, subjectId, topic ->
+                                    viewModel.startTargetedTest(
+                                        examType = examType,
+                                        subjectId = subjectId,
+                                        topic = topic,
+                                        onSuccess = { onStartTargetedTest() }
+                                    )
+                                }
+                            )
+
                             BugunkuAkilliOnerilerCard(
                                 dueCount = uiState.dueReviewCount,
                                 allQuestions = uiState.allQuestions,
@@ -274,6 +306,11 @@ fun IstatistikScreen(
                         // SEKME 2 — DERSLER & KONULAR: nereye odaklanmalı + harita + dağılımlar
                         // ─────────────────────────────────────────────────
                         1 -> {
+                            // Bilişsel Hata Kök Neden & "Bedava Net" Geri Kazanım Kartı
+                            BilisselHataNetEtkisiCard(
+                                allQuestions = uiState.allQuestions
+                            )
+
                             if (uiState.allQuestions.isNotEmpty()) {
                                 AcilEylemMatrisiCard(
                                     allQuestions = uiState.allQuestions,
@@ -317,7 +354,45 @@ fun IstatistikScreen(
                             DenemeTakipCard(
                                 allDenemeler = uiState.allDenemeler,
                                 onAddDeneme = { showDenemeEkleDialog = true },
-                                onDeleteDeneme = { viewModel.deleteDeneme(it) }
+                                onDeleteDeneme = { viewModel.deleteDeneme(it) },
+                                onDenemeClick = onNavigateToDenemeDetay,
+                                onScanOptical = onNavigateToOmrScan,
+                                onAddQuestionForDeneme = { deneme ->
+                                    onNavigateToSoruEkleForDeneme(
+                                        deneme.id,
+                                        deneme.baslik,
+                                        deneme.yayinEvi,
+                                        deneme.sinavTuru
+                                    )
+                                },
+                                onAddDenemeQuestion = { deneme ->
+                                    onNavigateToSoruEkleForDeneme(
+                                        deneme.id,
+                                        deneme.baslik,
+                                        deneme.yayinEvi,
+                                        deneme.sinavTuru
+                                    )
+                                }
+                            )
+
+                            // YKS Konu Bazlı Net Kayıp Tablosu
+                            DenemeDetayliAnalizCard(
+                                allDenemeler = uiState.allDenemeler,
+                                allQuestions = uiState.allQuestions,
+                                onStartTargetedTest = { examType, subjectId, topic ->
+                                    viewModel.startTargetedTest(
+                                        examType = examType,
+                                        subjectId = subjectId,
+                                        topic = topic,
+                                        onSuccess = { onStartTargetedTest() }
+                                    )
+                                }
+                            )
+
+                            // Yayınevi Performans & Zorluk Kıyaslama Radarı
+                            YayineviPerformansCard(
+                                allDenemeler = uiState.allDenemeler,
+                                allQuestions = uiState.allQuestions
                             )
 
                             if (uiState.recentTestResults.isNotEmpty()) {

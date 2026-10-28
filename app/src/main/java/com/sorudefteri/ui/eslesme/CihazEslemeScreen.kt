@@ -300,6 +300,110 @@ fun CihazEslemeScreen(
             }
 
             item {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "⚡ Yan Yana Otomatik Eşleşme (Güvenilir Cihazlar)",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = autoProximitySyncEnabled,
+                                onCheckedChange = { viewModel.toggleAutoProximitySync(it) }
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Telefon ve tablet yan yana geldiğinde PIN sormadan denemeleri, optikleri, soruları ve çizimleri otomatik eşitle",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val rozetler = listOf("Sorular ✓", "Denemeler ✓", "Optik Sonuçlar ✓", "Çizimler ✓", "FSRS Tekrarlar ✓")
+                            for (rozet in rozetler) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+                                ) {
+                                    Text(
+                                        rozet,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        if (trustedDevices.isNotEmpty()) {
+                            Spacer(Modifier.height(12.dp))
+                            HorizontalDivider()
+                            Spacer(Modifier.height(8.dp))
+                            Text(
+                                "Kayıtlı Güvenilir Cihazlar (${trustedDevices.size})",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            val dateFormat = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
+                            for (cihaz in trustedDevices) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Default.CheckCircle,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(Modifier.width(8.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(cihaz.cihazAdi, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                                        val tarihMetni = if (cihaz.lastSyncedAt > 0L) {
+                                            "Son eşleşme: ${dateFormat.format(Date(cihaz.lastSyncedAt))}"
+                                        } else {
+                                            "Henüz eşleşmedi"
+                                        }
+                                        Text(tarihMetni, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    IconButton(
+                                        onClick = { viewModel.removeTrustedDevice(cihaz.cihazKodu) },
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.DeleteOutline,
+                                            contentDescription = "Kaldır",
+                                            tint = MaterialTheme.colorScheme.error,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.Devices, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                     Spacer(Modifier.width(8.dp))

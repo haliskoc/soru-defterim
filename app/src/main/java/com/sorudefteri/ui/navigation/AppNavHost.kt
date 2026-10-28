@@ -51,11 +51,14 @@ import com.sorudefteri.domain.model.TestQuestion
 import com.sorudefteri.domain.repository.SoruRepository
 import com.sorudefteri.domain.repository.TestSessionManager
 import com.sorudefteri.ui.ayarlar.AyarlarScreen
+import com.sorudefteri.ui.deneme.DenemeDetayScreen
 import com.sorudefteri.ui.detay.SoruDetayScreen
 import com.sorudefteri.ui.eslesme.CihazEslemeScreen
 import com.sorudefteri.ui.istatistik.IstatistikScreen
 import com.sorudefteri.ui.kamera.KameraScreen
 import com.sorudefteri.ui.kutuphane.KutuphaneScreen
+import com.sorudefteri.ui.omr.OmrScannerScreen
+import com.sorudefteri.ui.omr.OmrSonucScreen
 import com.sorudefteri.ui.onboarding.OnboardingScreen
 import com.sorudefteri.ui.reels.SoruReelsScreen
 import com.sorudefteri.ui.soruekle.SoruEklemeScreen
@@ -330,7 +333,16 @@ private fun AppNavGraph(
                     navController.navigate(KameraNav(isSolution = false))
                 },
                 capturedImageUri = effectiveSoruPath,
-                editingSoruId = null
+                editingSoruId = null,
+                initialDenemeId = nav.denemeId,
+                initialDenemeBaslik = nav.denemeBaslik,
+                initialDenemeYayin = nav.denemeYayin,
+                initialDenemeSoruNo = nav.denemeSoruNo,
+                initialExamType = nav.initialExamType,
+                initialSubjectId = nav.initialSubjectId,
+                initialTopic = nav.initialTopic,
+                initialCorrectAnswer = nav.initialCorrectAnswer,
+                initialStudentAnswer = nav.initialStudentAnswer
             )
 
             LaunchedEffect(capturedPath) {
@@ -477,6 +489,22 @@ private fun AppNavGraph(
                     navController.navigate(TestCozNav) {
                         launchSingleTop = true
                     }
+                },
+                onNavigateToDenemeDetay = { denemeId ->
+                    navController.navigate(DenemeDetayNav(denemeId = denemeId))
+                },
+                onNavigateToOmrScan = {
+                    navController.navigate(OmrScannerNav())
+                },
+                onNavigateToSoruEkleForDeneme = { dId, dBaslik, dYayin, sinavTuru ->
+                    navController.navigate(
+                        SoruEkleNav(
+                            denemeId = dId,
+                            denemeBaslik = dBaslik,
+                            denemeYayin = dYayin,
+                            initialExamType = sinavTuru
+                        )
+                    )
                 }
             )
         }
@@ -494,6 +522,72 @@ private fun AppNavGraph(
         composable<CihazEslemeNav> {
             CihazEslemeScreen(
                 onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // 12. Deneme Sınavı Detay & Yanlış Soru Karnesi
+        composable<DenemeDetayNav> { backStackEntry ->
+            val nav = backStackEntry.toRoute<DenemeDetayNav>()
+            DenemeDetayScreen(
+                denemeId = nav.denemeId,
+                onNavigateBack = { navController.popBackStack() },
+                onSoruClick = { soruId -> navController.navigate(SoruDetayNav(soruId)) },
+                onAddQuestionToDeneme = { dId, dBaslik, dYayin, soruNo, sinavTuru ->
+                    navController.navigate(
+                        SoruEkleNav(
+                            denemeId = dId,
+                            denemeBaslik = dBaslik,
+                            denemeYayin = dYayin,
+                            denemeSoruNo = soruNo,
+                            initialExamType = sinavTuru
+                        )
+                    )
+                },
+                onScanOpticalForm = { dId, testId ->
+                    navController.navigate(OmrScannerNav(denemeId = dId, testId = testId))
+                },
+                onStartTestSession = {
+                    navController.navigate(TestCozNav) { launchSingleTop = true }
+                }
+            )
+        }
+
+        // 13. Kamera Tabanlı Optik Okuyucu (OMR Scanner)
+        composable<OmrScannerNav> { backStackEntry ->
+            val nav = backStackEntry.toRoute<OmrScannerNav>()
+            OmrScannerScreen(
+                initialDenemeId = nav.denemeId,
+                initialTestId = nav.testId,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToSonuc = { dId -> navController.navigate(OmrSonucNav(dId)) }
+            )
+        }
+
+        // 14. Optik Okuma Sonuç & Karne
+        composable<OmrSonucNav> { backStackEntry ->
+            val nav = backStackEntry.toRoute<OmrSonucNav>()
+            OmrSonucScreen(
+                denemeId = nav.denemeId,
+                onNavigateBack = { navController.popBackStack() },
+                onNavigateToDenemeDetay = { dId ->
+                    navController.navigate(DenemeDetayNav(dId)) {
+                        popUpTo<OmrScannerNav> { inclusive = true }
+                    }
+                },
+                onAddWrongQuestion = { dId, dBaslik, dYayin, soruNo, sinavTuru, subId, cAns, sAns ->
+                    navController.navigate(
+                        SoruEkleNav(
+                            denemeId = dId,
+                            denemeBaslik = dBaslik,
+                            denemeYayin = dYayin,
+                            denemeSoruNo = soruNo,
+                            initialExamType = sinavTuru,
+                            initialSubjectId = subId,
+                            initialCorrectAnswer = cAns,
+                            initialStudentAnswer = sAns
+                        )
+                    )
+                }
             )
         }
     }

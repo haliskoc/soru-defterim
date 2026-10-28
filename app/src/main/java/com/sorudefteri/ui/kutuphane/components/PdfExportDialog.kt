@@ -485,8 +485,17 @@ fun PdfExportDialog(
                         onCheckedChange = { includeBackCover = it }
                     )
 
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "Optik Form ve Karekod Ayarları",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp)
+                    )
+
                     ToggleRow(
-                        title = "📷 Kamera ile Okunabilir Optik Cevap Formu Ekle",
+                        title = "📷 Kamera İle Okunabilir Optik Cevap Formu Sayfası Ekle",
                         subtitle = "4 köşe referans kareli, zamanlama raylı ve Test ID matris kodlu tam sayfa A4 optik kağıdı",
                         checked = includePrintableOpticalForm,
                         onCheckedChange = { includePrintableOpticalForm = it }

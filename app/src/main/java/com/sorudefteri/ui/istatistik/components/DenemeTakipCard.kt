@@ -67,9 +67,16 @@ fun DenemeTakipCard(
     denemeSoruCounts: Map<Long, Int> = emptyMap(),
     onDenemeClick: (Long) -> Unit = {},
     onScanOptical: () -> Unit = {},
-    onAddQuestionForDeneme: (DenemeSinaviEntity) -> Unit = {}
+    onAddQuestionForDeneme: (DenemeSinaviEntity) -> Unit = {},
+    onAddDenemeQuestion: (DenemeSinaviEntity) -> Unit = onAddQuestionForDeneme
 ) {
     val json = remember { Json { ignoreUnknownKeys = true } }
+    val effectiveAddQuestion: (DenemeSinaviEntity) -> Unit = { entity ->
+        onAddDenemeQuestion(entity)
+        if (onAddDenemeQuestion !== onAddQuestionForDeneme) {
+            onAddQuestionForDeneme(entity)
+        }
+    }
 
     ElevatedCard(
         shape = RoundedCornerShape(20.dp),
@@ -130,7 +137,7 @@ fun DenemeTakipCard(
                     ) {
                         Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Optik Oku", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("📷 Optik Oku", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
 
                     Button(
@@ -365,13 +372,13 @@ fun DenemeTakipCard(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     OutlinedButton(
-                                        onClick = { onAddQuestionForDeneme(deneme) },
+                                        onClick = { effectiveAddQuestion(deneme) },
                                         shape = RoundedCornerShape(8.dp),
                                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
                                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(14.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("+ Yanlış Soru Ekle", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                        Text("➕ Yanlış Soru Ekle", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                                     }
 
                                     TextButton(
@@ -379,7 +386,7 @@ fun DenemeTakipCard(
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
                                     ) {
                                         Text(
-                                            text = "Detay & Analiz →",
+                                            text = "Detaylar →",
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.primary

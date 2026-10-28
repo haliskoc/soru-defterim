@@ -376,7 +376,10 @@ class SyncDeposu @Inject constructor(
             Log.w(TAG, "Deneme paketi gönderilemedi", t)
         }
 
-        val anaDosyaDizini: File? = try { context.filesDir ?: context.cacheDir } catch (_: Exception) { null }
+        val anaDosyaDizini: File? = try {
+            context.filesDir?.takeIf { !it.path.isNullOrBlank() }
+                ?: context.cacheDir?.takeIf { !it.path.isNullOrBlank() }
+        } catch (_: Exception) { null }
 
         for ((indeks, soru) in gonderilecekler.withIndex()) {
             if (endpointId != ep) return
@@ -572,7 +575,10 @@ class SyncDeposu @Inject constructor(
             if (item.evrenselId.isBlank() || item.isDeleted != 0) return
             val mevcut = withContext(Dispatchers.IO) { soruDao.getByEvrenselId(item.evrenselId) }
 
-            val anaDosyaDizini: File? = try { context.filesDir ?: context.cacheDir } catch (_: Exception) { null }
+            val anaDosyaDizini: File? = try {
+            context.filesDir?.takeIf { !it.path.isNullOrBlank() }
+                ?: context.cacheDir?.takeIf { !it.path.isNullOrBlank() }
+        } catch (_: Exception) { null }
 
             // Görselleri, ses notunu ve çizimi bekleyen dosyalardan al
             var soruYolu = ""

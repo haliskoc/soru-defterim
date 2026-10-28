@@ -260,15 +260,18 @@ fun SoruEklemeScreen(
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Column {
+                                    val denemeAdi = uiState.kaynakDeneme.ifBlank { "Deneme #${uiState.denemeId}" }
+                                    val soruNoStr = (uiState.denemeSoruNo.ifBlank { uiState.kaynakSoruNo }).trim()
+                                    val soruNoEk = if (soruNoStr.isNotBlank()) " (Soru #$soruNoStr)" else ""
                                     Text(
-                                        text = "📌 Deneme Eşleşmesi Aktif: ${uiState.kaynakDeneme.ifBlank { "Deneme #${uiState.denemeId}" }}",
+                                        text = "📌 $denemeAdi Denemesine Soru Ekleniyor$soruNoEk",
                                         style = MaterialTheme.typography.titleSmall,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.onTertiaryContainer
                                     )
                                     Text(
-                                        text = "(Hem Denemeye hem Soru Kütüphanesine kaydedilecek)",
-                                        style = MaterialTheme.typography.labelSmall,
+                                        text = "Bu soru hem bu denemeyle eşleşecek hem Soru Kütüphanenizde yer alacaktır.",
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f)
                                     )
                                 }

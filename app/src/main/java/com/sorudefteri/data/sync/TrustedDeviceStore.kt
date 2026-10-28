@@ -57,6 +57,7 @@ class TrustedDeviceStore @Inject constructor(
 
     private val _autoProximitySyncEnabled = MutableStateFlow(true)
     val autoProximitySyncEnabled: StateFlow<Boolean> = _autoProximitySyncEnabled.asStateFlow()
+    val autoProximitySyncFlow: StateFlow<Boolean> get() = autoProximitySyncEnabled
 
     init {
         yukle()
@@ -123,6 +124,10 @@ class TrustedDeviceStore @Inject constructor(
                 else -> false
             }
         }
+    }
+
+    fun markTrusted(cihazAdiVeyaKodu: String, pinVeyaKod: String = "") {
+        addTrustedDevice(cihazKodu = pinVeyaKod, cihazAdi = cihazAdiVeyaKodu)
     }
 
     /**

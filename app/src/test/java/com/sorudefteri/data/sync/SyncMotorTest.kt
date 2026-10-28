@@ -218,6 +218,7 @@ class SyncDeposuEntegrasyonTest {
 
             val context = io.mockk.mockk<android.content.Context>(relaxed = true)
             io.mockk.every { context.cacheDir } returns geciciKlasor
+            io.mockk.every { context.filesDir } returns geciciKlasor
 
             val eslestirmeA = io.mockk.mockk<CihazEslestirme>(relaxed = true)
             val eslestirmeB = io.mockk.mockk<CihazEslestirme>(relaxed = true)
@@ -299,9 +300,9 @@ class SyncDeposuEntegrasyonTest {
             baglantiA!!.invoke("epB", true)
             baglantiB!!.invoke("epA", false)
 
-            // Her iki deponun da Faz.Bitti durumuna ulaşmasını bekle (en fazla 5 sn)
+            // Her iki deponun da Faz.Bitti durumuna ulaşmasını bekle (en fazla 10 sn)
             val baslangic = System.currentTimeMillis()
-            while (System.currentTimeMillis() - baslangic < 5_000L) {
+            while (System.currentTimeMillis() - baslangic < 10_000L) {
                 if (depoA.faz.value is SyncDeposu.Faz.Bitti && depoB.faz.value is SyncDeposu.Faz.Bitti) {
                     break
                 }

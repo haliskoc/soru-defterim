@@ -40,11 +40,11 @@ object PdfSoruYerlesim {
         fun satirlaraAyir(text: String, paint: Paint, genislik: Float): List<String> {
             if (text.isBlank()) return emptyList()
 
-            val norm = text.replace("\r\n", "\n").replace('\r', '\n').trimEnd()
+            val norm = text.replace("\r\n", "\n").replace('\r', '\n')
             if (norm.isBlank()) return emptyList()
 
             val satirlar = mutableListOf<String>()
-            val paragraflar = norm.split("\n")
+            val paragraflar = norm.trimEnd().split("\n")
 
             for (paragraf in paragraflar) {
                 if (paragraf.isBlank()) {
@@ -53,8 +53,9 @@ object PdfSoruYerlesim {
                     continue
                 }
                 var mevcut: String? = null
-                for (kelime in paragraf.trim().split(Regex("\\s+"))) {
-                    if (kelime.isBlank()) continue
+                val kelimeler = paragraf.trim().split(Regex("[ \t]+"))
+                for (kelime in kelimeler) {
+                    if (kelime.isEmpty()) continue
                     val deneme = if (mevcut == null) kelime else "$mevcut $kelime"
                     if (mevcut != null && paint.measureText(deneme) > genislik) {
                         satirlar += mevcut!!
@@ -170,7 +171,7 @@ object PdfSoruYerlesim {
             if (toplamYukseklik <= hedefKapasite + 0.01f) return this
 
             val fazla = toplamYukseklik - hedefKapasite
-            if (fazla > hedefKapasite * maxOverflowRatio) return null
+            if (fazla > maxOf(hedefKapasite * maxOverflowRatio, toplamYukseklik * maxOverflowRatio)) return null
 
             val hamGorsel = if (gorselYukseklik > 0f) {
                 gorselYukseklik

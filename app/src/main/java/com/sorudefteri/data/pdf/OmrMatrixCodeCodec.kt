@@ -69,7 +69,9 @@ object OmrMatrixCodeCodec {
         payload: String,
         darkColor: Int = Color.BLACK
     ) {
-        if (rect.width() <= 0f || rect.height() <= 0f) return
+        val rectW = if (rect.width() > 0f) rect.width() else (rect.right - rect.left)
+        val rectH = if (rect.height() > 0f) rect.height() else (rect.bottom - rect.top)
+        if (rectW <= 0f || rectH <= 0f) return
 
         val bgPaint = Paint().apply {
             isAntiAlias = false
@@ -79,8 +81,8 @@ object OmrMatrixCodeCodec {
         canvas.drawRect(rect, bgPaint)
 
         val grid = encodeMatrixGrid(payload)
-        val cellW = rect.width() / GRID_SIZE.toFloat()
-        val cellH = rect.height() / GRID_SIZE.toFloat()
+        val cellW = rectW / GRID_SIZE.toFloat()
+        val cellH = rectH / GRID_SIZE.toFloat()
 
         val darkPaint = Paint().apply {
             isAntiAlias = false

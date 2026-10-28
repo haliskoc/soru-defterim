@@ -48,45 +48,47 @@ class TestCozTimerTest {
     @Test
     fun `timer tick advances without rewriting uiState questions`() = runTest(testDispatcher) {
         val viewModel = TestCozViewModel(sessionManager, testSonucDao, badgeManager)
-        advanceUntilIdle()
+        testScheduler.runCurrent()
 
         val questionsRef = viewModel.uiState.value.questions
         advanceTimeBy(3100L)
-        advanceUntilIdle()
+        testScheduler.runCurrent()
 
         assertEquals(3L, viewModel.timerTick.value.elapsedSeconds)
         assertTrue(viewModel.uiState.value.questions === questionsRef || viewModel.uiState.value.questions == questionsRef)
+        viewModel.pauseTimer()
     }
 
     @Test
     fun `pauseTimer stops ticking and resumeTimer continues`() = runTest(testDispatcher) {
         val viewModel = TestCozViewModel(sessionManager, testSonucDao, badgeManager)
-        advanceUntilIdle()
+        testScheduler.runCurrent()
 
         advanceTimeBy(2100L)
-        advanceUntilIdle()
+        testScheduler.runCurrent()
         val frozen = viewModel.timerTick.value.elapsedSeconds
         assertTrue(frozen >= 2L)
 
         viewModel.pauseTimer()
         advanceTimeBy(5000L)
-        advanceUntilIdle()
+        testScheduler.runCurrent()
         assertEquals(frozen, viewModel.timerTick.value.elapsedSeconds)
 
         viewModel.resumeTimer()
         advanceTimeBy(1100L)
-        advanceUntilIdle()
+        testScheduler.runCurrent()
         assertTrue(viewModel.timerTick.value.elapsedSeconds > frozen)
+        viewModel.pauseTimer()
     }
 
     @Test
     fun `goToQuestion moves index and updates remaining in tick`() = runTest(testDispatcher) {
         val viewModel = TestCozViewModel(sessionManager, testSonucDao, badgeManager)
-        advanceUntilIdle()
-        assertFalse(viewModel.uiState.value.questions.isEmpty() || true)
+        testScheduler.runCurrent()
 
         viewModel.goToQuestion(0)
-        advanceUntilIdle()
+        testScheduler.runCurrent()
         assertEquals(0, viewModel.uiState.value.currentIndex)
+        viewModel.pauseTimer()
     }
 }
