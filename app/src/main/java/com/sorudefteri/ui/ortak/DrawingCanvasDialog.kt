@@ -98,7 +98,8 @@ fun DrawingCanvasDialog(
     imagePath: String,
     title: String = "Soru Üzerinde Çizim & Karalama",
     onDismiss: () -> Unit,
-    onSave: ((String) -> Unit)? = null
+    onSave: ((String) -> Unit)? = null,
+    onSaveBitmap: ((Bitmap) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -126,7 +127,7 @@ fun DrawingCanvasDialog(
 
     fun saveDrawing() {
         if (isSaving) return
-        if (onSave == null) {
+        if (onSave == null && onSaveBitmap == null) {
             onDismiss()
             return
         }
@@ -137,6 +138,7 @@ fun DrawingCanvasDialog(
         val bgColorInt = surfaceColor.toArgb()
 
         coroutineScope.launch {
+            var returnedBitmap: Bitmap? = null
             val savedPath = withContext(Dispatchers.IO) {
                 try {
                     val resultBitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -191,6 +193,9 @@ fun DrawingCanvasDialog(
                     FileOutputStream(outFile).use { fos ->
                         resultBitmap.compress(Bitmap.CompressFormat.PNG, 100, fos)
                     }
+                    if (onSaveBitmap != null) {
+                        returnedBitmap = resultBitmap.copy(Bitmap.Config.ARGB_8888, false)
+                    }
                     resultBitmap.recycle()
                     outFile.absolutePath
                 } catch (e: Exception) {
@@ -199,8 +204,11 @@ fun DrawingCanvasDialog(
                 }
             }
             isSaving = false
+            returnedBitmap?.let { bmp ->
+                onSaveBitmap?.invoke(bmp)
+            }
             if (savedPath != null) {
-                onSave.invoke(savedPath)
+                onSave?.invoke(savedPath)
             }
             onDismiss()
         }
@@ -333,7 +341,7 @@ fun DrawingCanvasDialog(
                             } else {
                                 val previewColor = when (currentTool) {
                                     DrawingTool.HIGHLIGHTER -> selectedColor.copy(alpha = 0.35f)
-                                    DrawingTool.ERASER -> surfaceColor
+                                    DrawingTool.ERASER -> Color.Transparent
                                     DrawingTool.PEN -> selectedColor
                                 }
                                 drawPath(
@@ -404,7 +412,7 @@ fun DrawingCanvasDialog(
                         )
                     }
 
-                    if (onSave != null) {
+                    if (onSave != null || onSaveBitmap != null) {
                         IconButton(
                             onClick = { saveDrawing() },
                             enabled = !isSaving && paths.isNotEmpty()

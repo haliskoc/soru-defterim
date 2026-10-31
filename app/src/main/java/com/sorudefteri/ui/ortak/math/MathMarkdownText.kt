@@ -31,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -46,7 +47,7 @@ import androidx.compose.ui.unit.sp
  */
 object MathDisplayHelper {
     private val MATH_TRIGGER_KEYWORDS = listOf(
-        "\\frac", "\\dfrac", "\\cfrac", "\\tfrac", "\\dfac", "dfac",
+        "\\frac", "\\dfrac", "\\cfrac", "\\tfrac", "\\dfac", "dfac", "\\tfac", "tfac",
         "\\sqrt", "\\int", "\\iint", "\\iiint", "\\oint",
         "\\sum", "\\prod", "\\lim", "\\begin", "\\pmatrix", "\\bmatrix", "\\matrix",
         "\\ce", "\\vec", "\\overrightarrow", "\\alpha", "\\beta", "\\gamma",
@@ -57,7 +58,7 @@ object MathDisplayHelper {
         "\\xrightarrow", "\\xleftarrow", "\\left", "\\right"
     )
 
-    private val FRACTION_PATTERN = Regex("""(?:\(\s*[a-zA-Z0-9\+\-\*\.\s]+\s*\)\s*/\s*(?:\(\s*[a-zA-Z0-9\+\-\*\.\s]+\s*\)|[a-zA-Z0-9]+)|\(\s*[a-zA-Z0-9\+\-\*\.]+\s*/\s*[a-zA-Z0-9\+\-\*\.]+\s*\)|\[\s*0\s*/\s*0\s*\]|(?<![a-zA-Z0-9/\\])\d{1,4}\s*/\s*\d{1,4}(?![a-zA-Z0-9/])|(?<![a-zA-Z])\\*dfac\b)""")
+    private val FRACTION_PATTERN = Regex("""(?:\(\s*[a-zA-Z0-9\+\-\*\.\s]+\s*\)\s*/\s*(?:\(\s*[a-zA-Z0-9\+\-\*\.\s]+\s*\)|[a-zA-Z0-9]+)|[a-zA-Z0-9]+\s*/\s*\(\s*[a-zA-Z0-9\+\-\*\.\s]+\s*\)|\(\s*[a-zA-Z0-9\+\-\*\.]+\s*/\s*[a-zA-Z0-9\+\-\*\.]+\s*\)|\[\s*0\s*/\s*0\s*\]|(?<![a-zA-Z0-9_./:\\])\d{1,4}\s*/\s*\d{1,4}(?![a-zA-Z0-9_./:\\])|(?<![a-zA-Z0-9_./:\\])[a-zA-Z]\s*/\s*[a-zA-Z0-9](?![a-zA-Z0-9_./:\\])|(?<![a-zA-Z])\\*(?:dfac|tfac)\b)""")
 
     fun hasMathOrLatex(text: String): Boolean {
         if (text.isBlank()) return false
@@ -188,13 +189,16 @@ fun CombinedMathMarkdownText(
         )
     }
     val textColorHex = KaTeXHtmlGenerator.colorToHex(textColor)
-    val cardsCss = remember(textColorHex) { KaTeXHtmlGenerator.combinedCardsCss(textColorHex) }
+    val surfaceColor = MaterialTheme.colorScheme.surface
+    val isDarkTheme = (surfaceColor.red * 0.299f + surfaceColor.green * 0.587f + surfaceColor.blue * 0.114f) < 0.5f
+    val cardsCss = remember(textColorHex, isDarkTheme) { KaTeXHtmlGenerator.combinedCardsCss(textColorHex, isDarkTheme) }
 
     KaTeXMathView(
         content = text,
         modifier = modifier,
         fontSizeSp = fontSizeSp,
         textColor = textColor,
+        isDarkTheme = isDarkTheme,
         combinedBodyHtml = combinedBody,
         combinedCss = cardsCss,
         fallback = {
@@ -430,6 +434,10 @@ private fun parseAiExplanationSections(rawText: String): List<AiSection> {
                 commitCurrentSection()
                 currentType = SectionType.FORMULAS
                 currentTitle = "📚 Temel Kavramlar & Formüller"
+                val afterTitle = trimmed.substringAfter(":", "").trim().trimStart('*').trimEnd('*').trim()
+                if (afterTitle.isNotBlank()) {
+                    currentContentLines.add(afterTitle)
+                }
             }
             normalizedHeaderCandidate.contains("📝") ||
             normalizedHeaderCandidate.contains("Aşama 2", ignoreCase = true) ||
@@ -439,6 +447,10 @@ private fun parseAiExplanationSections(rawText: String): List<AiSection> {
                 commitCurrentSection()
                 currentType = SectionType.STEPS
                 currentTitle = "📝 Adım Adım Ayrıntılı Çözüm"
+                val afterTitle = trimmed.substringAfter(":", "").trim().trimStart('*').trimEnd('*').trim()
+                if (afterTitle.isNotBlank()) {
+                    currentContentLines.add(afterTitle)
+                }
             }
             normalizedHeaderCandidate.contains("🔍") ||
             normalizedHeaderCandidate.contains("Aşama 3", ignoreCase = true) ||
@@ -448,6 +460,10 @@ private fun parseAiExplanationSections(rawText: String): List<AiSection> {
                 commitCurrentSection()
                 currentType = SectionType.MISTAKES
                 currentTitle = "🔍 Hata & Çeldirici Analizi"
+                val afterTitle = trimmed.substringAfter(":", "").trim().trimStart('*').trimEnd('*').trim()
+                if (afterTitle.isNotBlank()) {
+                    currentContentLines.add(afterTitle)
+                }
             }
             normalizedHeaderCandidate.contains("💡") ||
             normalizedHeaderCandidate.contains("Püf Noktaları", ignoreCase = true) ||
@@ -456,6 +472,10 @@ private fun parseAiExplanationSections(rawText: String): List<AiSection> {
                 commitCurrentSection()
                 currentType = SectionType.TIPS
                 currentTitle = "💡 Püf Noktaları & Sınav Taktikleri"
+                val afterTitle = trimmed.substringAfter(":", "").trim().trimStart('*').trimEnd('*').trim()
+                if (afterTitle.isNotBlank()) {
+                    currentContentLines.add(afterTitle)
+                }
             }
             else -> {
                 currentContentLines.add(line)
@@ -824,7 +844,8 @@ private fun RenderFormattedLines(
                         stripped.startsWith("Önemli", ignoreCase = true) ||
                         stripped.startsWith("Uyarı", ignoreCase = true)
 
-                val isSubHeader = (endsWithColon && isShortTitle) || (hasHeaderKeyword && endsWithColon)
+                val wasMarkdownHeading = rawTrimmed.startsWith("#") && isShortTitle
+                val isSubHeader = wasMarkdownHeading || (endsWithColon && isShortTitle) || (hasHeaderKeyword && endsWithColon)
 
                 if (isSubHeader) {
                     // Alt başlık: Madde imini kaldır, solunda primary bar olan şık alt başlık yap
@@ -916,7 +937,7 @@ private fun RenderFormattedLines(
  * ve toplam sembollerini temiz Unicode Matematik formatına dönüştürür.
  */
 private val SAFE_NEWLINE_REGEX = Regex(
-    """(?<!\\)\\n(?!(?:eq|e(?![a-zA-Z])|eg(?![a-zA-Z])|abla|otin|u(?![a-zA-Z])|ot(?![a-zA-Z])|atural|i(?![a-zA-Z])|exists|geq|leq|subseteq|supseteq|parallel|sim|cong|mid|earrow|warrow)(?![a-zA-Z]))"""
+    """(?<!\\)\\{1,2}n(?!(?:eq|e(?![a-zA-Z])|eg(?![a-zA-Z])|abla|otin|u(?![a-zA-Z])|ot(?![a-zA-Z])|atural|i(?![a-zA-Z])|exists|geq|leq|subseteq|supseteq|parallel|sim|cong|mid|earrow|warrow|ormalsize)(?![a-zA-Z]))"""
 )
 
 /**
@@ -932,6 +953,7 @@ fun normalizeSafeEscapes(str: String): String {
     text = text.replace(Regex("""(?<=\s|^|[a-zA-Z0-9$])\\?ightarrow(?![a-zA-Z])"""), "\\rightarrow")
     text = text.replace(Regex("""(?<=\s|^|[a-zA-Z0-9$])\\?ongrightarrow(?![a-zA-Z])"""), "\\longrightarrow")
     text = text.replace(Regex("""(?<=\s|^|[a-zA-Z0-9$])\\?ightleftharpoons(?![a-zA-Z])"""), "\\rightleftharpoons")
+    text = text.replace(Regex("""(?m)^(?<!#)(#{1,6})[ \t]*\n+"""), "$1 ")
     return text
 }
 
@@ -1112,10 +1134,10 @@ fun formatMathSymbols(raw: String): String {
     var text = raw
 
     // 0. Newline kaçışlarını, çoklu ters eğik çizgileri ve AI Düşünce (<think>...</think>) etiketlerini temizle
-    text = Regex("""(?<![a-zA-Z])\\*dfac(?![a-zA-Z])""").replace(text, "\\dfrac")
-    text = Regex("""\\{2,}(?=[a-zA-Z])""").replace(text, "\\")
+    text = Regex("""(?<![a-zA-Z])\\*(?:dfac|tfac|tfrac)(?![a-zA-Z])""").replace(text) { "\\dfrac" }
+    text = Regex("""\\{2,}(?=[a-zA-Z\(\)\[\]])""").replace(text) { "\\" }
     // LaTeX komutları (\nu, \neq, \nabla, \notin, \neg, \rho vb.) ile çakışmayan gerçek \n ve \r kaçışlarını dönüştür
-    text = Regex("""\\n(?!(?:u|eq|e|abla|otin|ot|atural|eg|i)(?![a-zA-Z]))""").replace(text, "\n")
+    text = SAFE_NEWLINE_REGEX.replace(text, "\n")
         .replace("\r", "")
         .replace(Regex("""\\r(?![a-zA-Z])"""), "")
     text = text.replace(THINK_REGEX, "")
@@ -1286,7 +1308,7 @@ fun formatMathSymbols(raw: String): String {
  */
 private fun convertFractionsToReadable(raw: String): String {
     var text = raw
-    val fracCmdRegex = Regex("""\\?(?:frac|dfrac|cfrac|tfrac|dfac)\b""")
+    val fracCmdRegex = Regex("""\\?(?:frac|dfrac|cfrac|tfrac|dfac|tfac)\b""")
 
     var iterations = 0
     while (iterations < 25 && fracCmdRegex.containsMatchIn(text)) {
@@ -1308,7 +1330,7 @@ private fun convertFractionsToReadable(raw: String): String {
         }
 
         // Süslü parantezsiz tekil token eşleşmesi (Örn: \frac 1 2 veya \dfrac a b)
-        val singleTokenRegex = Regex("""^\\?(?:frac|dfrac|cfrac|tfrac|dfac)\s+([0-9a-zA-Z])\s+([0-9a-zA-Z])""")
+        val singleTokenRegex = Regex("""^\\?(?:frac|dfrac|cfrac|tfrac|dfac|tfac)\s+([0-9a-zA-Z])\s+([0-9a-zA-Z])""")
         val singleMatch = singleTokenRegex.find(text.substring(cmdStart))
         if (singleMatch != null) {
             val replacement = "(${singleMatch.groupValues[1]} / ${singleMatch.groupValues[2]})"
@@ -1323,7 +1345,7 @@ private fun convertFractionsToReadable(raw: String): String {
     }
 
     // Her ihtimale karşı arta kalan yalın \dfrac veya dfac sözcüklerini temizle
-    text = text.replace(Regex("""\\?(?:frac|dfrac|cfrac|tfrac|dfac)\b"""), "")
+    text = text.replace(Regex("""\\?(?:frac|dfrac|cfrac|tfrac|dfac|tfac)\b"""), "")
 
     return text
 }

@@ -2,6 +2,7 @@ package com.sorudefteri.data.sync
 
 import android.content.Context
 import android.os.Build
+import android.os.ParcelFileDescriptor
 import android.provider.Settings
 import android.util.Log
 import com.google.android.gms.common.api.ApiException
@@ -89,6 +90,7 @@ class CihazEslestirme @Inject constructor(
     private val gelenBaglanti = ConcurrentHashMap<String, Boolean>()
     private val endpointAdlari = ConcurrentHashMap<String, String>()
     private val gelenDosyalar = ConcurrentHashMap<Long, Payload.File>()
+    private val gonderilenPfds = ConcurrentHashMap<Long, ParcelFileDescriptor>()
 
     private val cihazKodu: String by lazy {
         val id = try {
@@ -202,6 +204,9 @@ class CihazEslestirme @Inject constructor(
                 }
                 PayloadTransferUpdate.Status.SUCCESS -> {
                     _ilerleme.value = null
+                    gonderilenPfds.remove(update.payloadId)?.let {
+                        try { it.close() } catch (_: Exception) {}
+                    }
                     val pf = gelenDosyalar.remove(update.payloadId) ?: return
                     kapsam.launch {
                         val kopyalanan = dosyaCikar(update.payloadId, pf)
@@ -210,6 +215,9 @@ class CihazEslestirme @Inject constructor(
                 }
                 PayloadTransferUpdate.Status.FAILURE, PayloadTransferUpdate.Status.CANCELED -> {
                     _ilerleme.value = null
+                    gonderilenPfds.remove(update.payloadId)?.let {
+                        try { it.close() } catch (_: Exception) {}
+                    }
                     val pf = gelenDosyalar.remove(update.payloadId)
                     try { pf?.asParcelFileDescriptor()?.close() } catch (_: Exception) {}
                     if (pf != null) {
@@ -238,8 +246,9 @@ class CihazEslestirme @Inject constructor(
             Log.w(TAG, "asUri ile okuma başarısız: $payloadId", e)
         }
         try {
-            pf.asParcelFileDescriptor()?.use { pfd ->
-                FileInputStream(pfd.fileDescriptor).use { input ->
+            val pfd = try { pf.asParcelFileDescriptor() } catch (_: Exception) { null }
+            pfd?.use { fd ->
+                FileInputStream(fd.fileDescriptor).use { input ->
                     FileOutputStream(hedef).use { out -> input.copyTo(out) }
                 }
                 if (hedef.exists() && hedef.length() > 0) return hedef
@@ -249,7 +258,7 @@ class CihazEslestirme @Inject constructor(
         }
         try {
             @Suppress("DEPRECATION")
-            val jf = pf.asJavaFile()
+            val jf = try { pf.asJavaFile() } catch (_: Exception) { null }
             if (jf != null && jf.exists() && jf.length() > 0) {
                 jf.copyTo(hedef, overwrite = true)
                 try { jf.delete() } catch (_: Exception) {}
@@ -391,10 +400,15 @@ class CihazEslestirme @Inject constructor(
 
     fun dosyaGonder(endpointId: String, dosya: File): Long {
         return try {
-            val yuk = Payload.fromFile(dosya)
+            // Android 11+ dosya yolu UID sınırlarını aşmak ve zzhm.zza uyuşmazlığını
+            // önlemek için Payload.fromFile(ParcelFileDescriptor) kullanılır.
+            val pfd = ParcelFileDescriptor.open(dosya, ParcelFileDescriptor.MODE_READ_ONLY)
+            val yuk = Payload.fromFile(pfd)
+            gonderilenPfds[yuk.id] = pfd
             istemci.sendPayload(endpointId, yuk)
                 .addOnFailureListener { e ->
                     Log.e(TAG, "sendPayload(FILE) başarısız: ${hataKoduAcikla(e)}", e)
+                    gonderilenPfds.remove(yuk.id)?.let { try { it.close() } catch (_: Exception) {} }
                 }
             yuk.id
         } catch (e: Exception) {
@@ -414,6 +428,10 @@ class CihazEslestirme @Inject constructor(
             try { pf.asParcelFileDescriptor()?.close() } catch (_: Exception) {}
         }
         gelenDosyalar.clear()
+        gonderilenPfds.values.forEach { pfd ->
+            try { pfd.close() } catch (_: Exception) {}
+        }
+        gonderilenPfds.clear()
         _ilerleme.value = null
         _durum.value = BaglantiDurumu.Kapali
         _bulunanlar.value = emptyList()

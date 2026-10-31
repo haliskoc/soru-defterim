@@ -147,6 +147,7 @@ fun SoruKarti(
                         .data(imageModel)
                         .size(480, 300)
                         .memoryCacheKey("kart_${soru.id}")
+                        .crossfade(false)
                         .build()
                 }
 

@@ -6,9 +6,11 @@ import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.AiErrorType
 import com.sorudefteri.domain.model.AiException
 import com.sorudefteri.domain.model.AiProviderType
+import com.sorudefteri.domain.model.AiTaskType
 import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.Soru
+import com.sorudefteri.domain.model.TwinQuestionsResult
 import com.sorudefteri.domain.repository.AiRepository as AiRepositoryInterface
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -174,12 +176,12 @@ class AiRepository @Inject constructor(
         if (rawOcrText.isBlank()) {
             return Result.failure(AiException(AiErrorType.UNKNOWN, "Temizlenecek OCR metni boş."))
         }
-        val providerType = ayarlarDataStore.getAiProvider()
-        val cred = resolveCredentials(providerType).getOrElse { return Result.failure(it) }
-        return when (providerType) {
-            AiProviderType.GEMINI -> geminiProvider.cleanOcrText(rawOcrText, cred.model, cred.apiKey)
-            AiProviderType.GROQ -> groqProvider.cleanOcrText(rawOcrText, cred.model, cred.apiKey)
-            AiProviderType.NVIDIA -> nvidiaProvider.cleanOcrText(rawOcrText, cred.model, cred.apiKey)
+        return smartAiRouter.routeTask(AiTaskType.OCR_TEMIZLEME) { provider, apiKey, model ->
+            when (provider) {
+                AiProviderType.GEMINI -> geminiProvider.cleanOcrText(rawOcrText, model, apiKey)
+                AiProviderType.GROQ -> groqProvider.cleanOcrText(rawOcrText, model, apiKey)
+                AiProviderType.NVIDIA -> nvidiaProvider.cleanOcrText(rawOcrText, model, apiKey)
+            }
         }
     }
 
@@ -193,12 +195,12 @@ class AiRepository @Inject constructor(
         if (imageBytes.size > MAX_IMAGE_BYTES) {
             return Result.failure(AiException(AiErrorType.UNKNOWN, "Görsel boyutu çok büyük (${imageBytes.size/1024}KB)."))
         }
-        val providerType = ayarlarDataStore.getAiProvider()
-        val cred = resolveCredentials(providerType).getOrElse { return Result.failure(it) }
-        return when (providerType) {
-            AiProviderType.GEMINI -> geminiProvider.detectMetadata(imageBytes, cred.model, cred.apiKey)
-            AiProviderType.GROQ -> groqProvider.detectMetadata(imageBytes, cred.model, cred.apiKey)
-            AiProviderType.NVIDIA -> nvidiaProvider.detectMetadata(imageBytes, cred.model, cred.apiKey)
+        return smartAiRouter.routeTask(AiTaskType.ETIKETLEME) { provider, apiKey, model ->
+            when (provider) {
+                AiProviderType.GEMINI -> geminiProvider.detectMetadata(imageBytes, model, apiKey)
+                AiProviderType.GROQ -> groqProvider.detectMetadata(imageBytes, model, apiKey)
+                AiProviderType.NVIDIA -> nvidiaProvider.detectMetadata(imageBytes, model, apiKey)
+            }
         }
     }
 
@@ -217,12 +219,12 @@ class AiRepository @Inject constructor(
         if (dersAdi.isBlank() && konu.isBlank()) {
             return Result.failure(AiException(AiErrorType.UNKNOWN, "Benzer soru için ders veya konu boş olamaz."))
         }
-        val providerType = ayarlarDataStore.getAiProvider()
-        val cred = resolveCredentials(providerType).getOrElse { return Result.failure(it) }
-        return when (providerType) {
-            AiProviderType.GEMINI -> geminiProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, cred.model, cred.apiKey)
-            AiProviderType.GROQ -> groqProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, cred.model, cred.apiKey)
-            AiProviderType.NVIDIA -> nvidiaProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, cred.model, cred.apiKey)
+        return smartAiRouter.routeTask(AiTaskType.BENZER_SORU) { provider, apiKey, model ->
+            when (provider) {
+                AiProviderType.GEMINI -> geminiProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
+                AiProviderType.GROQ -> groqProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
+                AiProviderType.NVIDIA -> nvidiaProvider.generateSimilarQuestion(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
+            }
         }
     }
 
@@ -243,6 +245,79 @@ class AiRepository @Inject constructor(
     }
 
     /**
+     * Soru nesnesi üzerinden 3 soruluk soru ikizi (kardeş test) üretir.
+     */
+    override suspend fun generateTwinQuestions(
+        soru: Soru,
+        sendImage: Boolean,
+        extractedText: String?
+    ): Result<TwinQuestionsResult> {
+        val dersAdi = DersTaksonomisi.getDersAdi(soru.examType, soru.subjectId)
+        val konu = soru.topic
+
+        val imageBytes: ByteArray? = if (sendImage && soru.imagePath.isNotBlank()) {
+            try {
+                withContext(Dispatchers.IO) {
+                    val file = File(soru.imagePath)
+                    if (file.exists() && file.length() > MAX_IMAGE_BYTES) {
+                        null
+                    } else {
+                        gorselDepo.getGorselBytes(soru.imagePath)
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                null
+            }
+        } else {
+            null
+        }
+
+        val effectiveText = extractedText?.takeIf { it.isNotBlank() }
+            ?: soru.ocrMetni?.takeIf { it.isNotBlank() }
+            ?: soru.questionText?.takeIf { it.isNotBlank() }
+            ?: soru.note?.takeIf { it.isNotBlank() }
+
+        if (imageBytes == null && effectiveText.isNullOrBlank() && konu.isBlank() && dersAdi.isBlank()) {
+            return Result.failure(
+                AiException(
+                    AiErrorType.UNKNOWN,
+                    "Kardeş soru üretmek için görsel, metin, ders veya konu bilgisi gereklidir."
+                )
+            )
+        }
+
+        return generateTwinQuestions(
+            imageBytes = imageBytes,
+            dersAdi = dersAdi,
+            konu = konu,
+            soruMetni = effectiveText
+        )
+    }
+
+    /**
+     * Görsel ve/veya soru metninden yola çıkarak 3 soruluk soru ikizi (kardeş test) üretir.
+     */
+    override suspend fun generateTwinQuestions(
+        imageBytes: ByteArray?,
+        dersAdi: String,
+        konu: String,
+        soruMetni: String?
+    ): Result<TwinQuestionsResult> {
+        if (dersAdi.isBlank() && konu.isBlank()) {
+            return Result.failure(AiException(AiErrorType.UNKNOWN, "Kardeş sorular için ders veya konu boş olamaz."))
+        }
+        return smartAiRouter.routeTask(AiTaskType.BENZER_SORU) { provider, apiKey, model ->
+            when (provider) {
+                AiProviderType.GEMINI -> geminiProvider.generateTwinQuestions(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
+                AiProviderType.GROQ -> groqProvider.generateTwinQuestions(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
+                AiProviderType.NVIDIA -> nvidiaProvider.generateTwinQuestions(imageBytes, dersAdi, konu, soruMetni, model, apiKey)
+            }
+        }
+    }
+
+    /**
      * Konu ve kriterlere göre sıfırdan özgün soru üretir.
      */
     override suspend fun generateQuestion(
@@ -255,12 +330,12 @@ class AiRepository @Inject constructor(
         if (dersAdi.isBlank() || konu.isBlank()) {
             return Result.failure(AiException(AiErrorType.UNKNOWN, "Soru üretmek için ders ve konu boş olamaz."))
         }
-        val providerType = ayarlarDataStore.getAiProvider()
-        val cred = resolveCredentials(providerType).getOrElse { return Result.failure(it) }
-        return when (providerType) {
-            AiProviderType.GEMINI -> geminiProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, cred.model, cred.apiKey)
-            AiProviderType.GROQ -> groqProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, cred.model, cred.apiKey)
-            AiProviderType.NVIDIA -> nvidiaProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, cred.model, cred.apiKey)
+        return smartAiRouter.routeTask(AiTaskType.BENZER_SORU) { provider, apiKey, model ->
+            when (provider) {
+                AiProviderType.GEMINI -> geminiProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, model, apiKey)
+                AiProviderType.GROQ -> groqProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, model, apiKey)
+                AiProviderType.NVIDIA -> nvidiaProvider.generateQuestion(dersAdi, konu, zorluk, alan, sinavTipi, model, apiKey)
+            }
         }
     }
 

@@ -4,6 +4,7 @@ import com.sorudefteri.domain.model.AiProviderType
 import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.Soru
+import com.sorudefteri.domain.model.TwinQuestionsResult
 
 /**
  * AI Çözüm Üretici, Otomatik Etiketleme, Soru Üretimi, OCR Temizleme ve Soru Klonlama Repository Arayüzü.
@@ -54,6 +55,32 @@ interface AiRepository {
         dersAdi: String,
         konu: String
     ): Result<SimilarQuestionResult>
+
+    /**
+     * Yanlış yapılan veya pekiştirilmek istenen soru için 3 farklı kardeş soru (Soru İkizi) türetir.
+     * 1. Soru: Sayı & Değer Varyasyonu
+     * 2. Soru: Hikaye & Bağlam Varyasyonu
+     * 3. Soru: Tersine Akıl Yürütme & Kavram Tuzağı
+     *
+     * @param soru Kaynak soru nesnesi
+     * @param sendImage Görselin AI'ya iletilip iletilmeyeceği
+     * @param extractedText Varsa OCR ile çıkarılmış veya düzenlenmiş metin
+     */
+    suspend fun generateTwinQuestions(
+        soru: Soru,
+        sendImage: Boolean = true,
+        extractedText: String? = null
+    ): Result<TwinQuestionsResult> = Result.success(TwinQuestionsResult())
+
+    /**
+     * Görsel ve/veya soru metninden yola çıkarak 3 soruluk soru ikizi (kardeş test) üretir.
+     */
+    suspend fun generateTwinQuestions(
+        imageBytes: ByteArray?,
+        dersAdi: String,
+        konu: String,
+        soruMetni: String? = null
+    ): Result<TwinQuestionsResult> = Result.failure(UnsupportedOperationException())
 
     /**
      * Konu, zorluk, alan ve sınav tipine göre sıfırdan özgün soru üretir.

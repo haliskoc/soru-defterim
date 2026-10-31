@@ -130,7 +130,13 @@ fun AppNavHost(
     // DeepLink handling (notification -> test / test_due, dosya -> yedek içe aktarma)
     LaunchedEffect(deepLinkTarget, initialOnboardingSeen) {
         if (deepLinkTarget != null && initialOnboardingSeen) {
-            if (deepLinkTarget.startsWith("import::")) {
+            if (deepLinkTarget.startsWith("soru::")) {
+                // AI çözüm bildirimi -> ilgili soru detayı
+                val id = deepLinkTarget.removePrefix("soru::").toLongOrNull()
+                if (id != null && id > 0) {
+                    navController.navigate(SoruDetayNav(soruId = id)) { launchSingleTop = true }
+                }
+            } else if (deepLinkTarget.startsWith("import::")) {
                 // SD Defteri yedek dosyasıyla açılış: Ayarlar > Yedek sekmesine git,
                 // onay dialogu için Uri'yi beklemeye al.
                 pendingImportUri = deepLinkTarget.removePrefix("import::")

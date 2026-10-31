@@ -225,4 +225,112 @@ class KaTeXMathViewTest {
         // Saf düz Türkçe metin false dönmeli
         assertFalse(com.sorudefteri.ui.ortak.math.MathDisplayHelper.hasMathOrLatex("Bu soruda doğru cevabı bulmak için paragrafı dikkatle okuyunuz."))
     }
+
+    @Test
+    fun sanitizeAiSolutionEscapes_cokluKacislarVeYazimHatalariOnarilir() {
+        // \\\\frac, \\\frac, \\frac ve \dfac, \tfrac, \tfac hataları
+        val input = """\\\\frac{1}{2} + \\\frac{3}{4} + \\frac{5}{6} + \\sqrt{16} + \\lim_{x \to 0} + \dfac{a}{b} + dfac{c}{d} + \tfrac{x}{y} + \tfac{p}{q}"""
+        val sanitized = KaTeXHtmlGenerator.sanitizeAiSolutionEscapes(input)
+
+        assertFalse("Çoklu kaçış kalmamalı (\\\\frac)", sanitized.contains("""\\frac"""))
+        assertFalse("dfac yazım hatası kalmamalı", sanitized.contains("dfac"))
+        assertFalse("tfac yazım hatası kalmamalı", sanitized.contains("tfac"))
+        assertFalse("tfrac komutu dfrac'a normalize edilmeli", sanitized.contains("""\tfrac"""))
+
+        assertTrue("Standart frac/dfrac komutlarına dönmeli", sanitized.contains("""\frac{1}{2}"""))
+        assertTrue("sqrt korunmalı", sanitized.contains("""\sqrt{16}"""))
+        assertTrue("lim korunmalı", sanitized.contains("""\lim_{x \to 0}"""))
+        assertTrue("dfac dfrac'a dönmeli", sanitized.contains("""\dfrac{a}{b}"""))
+        assertTrue("tfrac dfrac'a dönmeli", sanitized.contains("""\dfrac{x}{y}"""))
+    }
+
+    @Test
+    fun sanitizeAiSolutionEscapes_satirSonuKacislariFormulVeBasliklariBozmaz() {
+        val input = "###\\n🎯 Doğru Cevap\\n\\nAdım 1: x \\neq 0 ve \\nu frekansı.\\n\\n$$ x = 5 $$"
+        val sanitized = KaTeXHtmlGenerator.sanitizeAiSolutionEscapes(input)
+
+        // Başlık düzeltilmeli
+        assertTrue("###\\n Başlık düzeltilmeli", sanitized.contains("### 🎯 Doğru Cevap"))
+        // \neq ve \nu LaTeX komutları korunmalı
+        assertTrue("\\neq komutu korunmalı", sanitized.contains("""\neq 0"""))
+        assertTrue("\\nu komutu korunmalı", sanitized.contains("""\nu frekansı"""))
+        // \\n literali (arkasından harf gelmeyen izole newline kaçışı) kalmamalı
+        assertFalse("Literal \\n kalmamalı", Regex("""(?<![a-zA-Z\\])\\n(?![a-zA-Z])""").containsMatchIn(sanitized))
+    }
+
+    @Test
+    fun sanitizeAiSolutionEscapes_delimiterUyumsuzluklariDuzeltilir() {
+        // \\[ ... \\] ve \[ ... \] -> $$ ... $$
+        val d1 = KaTeXHtmlGenerator.sanitizeAiSolutionEscapes("""\\[ x + y = z \\]""")
+        assertTrue("\\[...\\] -> \$\$...\$\$ olmalı", d1.contains("\$\$x + y = z\$\$"))
+
+        // Mismatched: \[ ... $$ ve $$ ... \]
+        val d2 = KaTeXHtmlGenerator.sanitizeAiSolutionEscapes("""\[ a^2 + b^2 = c^2 $$""")
+        assertTrue("\\[...\$\$ -> \$\$...\$\$ olmalı", d2.contains("\$\$a^2 + b^2 = c^2\$\$"))
+
+        val d3 = KaTeXHtmlGenerator.sanitizeAiSolutionEscapes("""$$ 2x + 1 = 5 \]""")
+        assertTrue("\$\$...\\] -> \$\$...\$\$ olmalı", d3.contains("\$\$2x + 1 = 5\$\$"))
+
+        // \\( ... \\) ve \( ... \) -> $ ... $
+        val d4 = KaTeXHtmlGenerator.sanitizeAiSolutionEscapes("""\\( f(x) = 2x \\)""")
+        assertTrue("\\(...\\) -> \$...\$ olmalı", d4.contains("\$f(x) = 2x\$"))
+
+        // Mismatched: \( ... $ ve $ ... \)
+        val d5 = KaTeXHtmlGenerator.sanitizeAiSolutionEscapes("""\( x > 0 $""")
+        assertTrue("\\(...\$ -> \$...\$ olmalı", d5.contains("\$x > 0\$"))
+
+        val d6 = KaTeXHtmlGenerator.sanitizeAiSolutionEscapes("""$ y < 10 \)""")
+        assertTrue("\$...\\) -> \$...\$ olmalı", d6.contains("\$y < 10\$"))
+    }
+
+    @Test
+    fun normalizeAndWrapMath_duzMetinKesirlerVeTarihKorumasi() {
+        // a/b tekil harf bölmesi
+        val p1 = KaTeXHtmlGenerator.preprocessContent("Değer a/b oranına eşittir.")
+        assertTrue("a/b kesre dönüştürülmeli", p1.contains("""\frac{a}{b}"""))
+
+        // 3 / 4 boşluklu bölme
+        val p2 = KaTeXHtmlGenerator.preprocessContent("Olasılık 3 / 4 olur.")
+        assertTrue("3 / 4 kesre dönüştürülmeli", p2.contains("""\frac{3}{4}"""))
+
+        // (x + 2) / (x - 1)
+        val p3 = KaTeXHtmlGenerator.preprocessContent("f(x) = (x + 2) / (x - 1) kuralı vardır.")
+        assertTrue("(x + 2) / (x - 1) kesre dönüştürülmeli", p3.contains("""\frac{x + 2}{x - 1}"""))
+
+        // 2024/2025 öğretim yılı (KESİNLİKLE KESRE DÖNÜŞMEMELİ)
+        val p4 = KaTeXHtmlGenerator.preprocessContent("2024/2025 eğitim-öğretim yılı sınavı.")
+        assertTrue("2024/2025 yılı korunmalı", p4.contains("2024/2025"))
+        assertFalse("2024/2025 kesir olmamalı", p4.contains("""\frac{2024}{2025}"""))
+
+        // ve/veya Türkçe kelime içi slash (KESİNLİKLE KESRE DÖNÜŞMEMELİ)
+        val p5 = KaTeXHtmlGenerator.preprocessContent("A ve/veya B durumları incelenir.")
+        assertTrue("ve/veya korunmalı", p5.contains("ve/veya"))
+        assertFalse("ve/veya kesir olmamalı", p5.contains("""\frac{ve}{veya}"""))
+
+        // km/h birim (KESİNLİKLE KESRE DÖNÜŞMEMELİ)
+        val p6 = KaTeXHtmlGenerator.preprocessContent("Araç hızı 100 km/h olarak ölçüldü.")
+        assertTrue("km/h korunmalı", p6.contains("km/h"))
+        assertFalse("km/h kesir olmamalı", p6.contains("""\frac{km}{h}"""))
+    }
+
+    @Test
+    fun generateHtml_inlineDikeyHizalamaVeKoyuTemaCss() {
+        val html = KaTeXHtmlGenerator.generateHtml(
+            content = "\$x = 5\$",
+            isDarkTheme = true
+        )
+
+        // Dikey hizalama (baseline alignment) kuralı bulunmalı
+        assertTrue("vertical-align baseline/hizalama kuralı bulunmalı", html.contains("vertical-align: -0.08em") || html.contains("vertical-align"))
+        // Taşma ve kaydırma için overflow kontrolü
+        assertTrue("katex-display taşma kontrolü bulunmalı", html.contains("overflow-x: auto"))
+        // SVG ve kök sembolleri için kontrast garantisi
+        assertTrue("svg renk garantisi bulunmalı", html.contains("stroke:") || html.contains("stroke"))
+
+        // Koyu tema kart renkleri
+        val darkCss = KaTeXHtmlGenerator.combinedCardsCss("#E6E1E5", isDarkTheme = true)
+        assertTrue("Koyu tema yeşil başlık canlı olmalı", darkCss.contains("#66BB6A"))
+        assertTrue("Koyu tema kırmızı başlık canlı olmalı", darkCss.contains("#EF5350"))
+        assertTrue("Koyu tema turuncu başlık canlı olmalı", darkCss.contains("#FFA726"))
+    }
 }

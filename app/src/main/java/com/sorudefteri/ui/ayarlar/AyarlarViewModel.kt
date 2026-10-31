@@ -12,6 +12,8 @@ import com.sorudefteri.data.local.AyarlarDataStore
 import com.sorudefteri.data.repository.SoruRepository
 import com.sorudefteri.data.backup.GoogleDriveBackupHelper
 import com.sorudefteri.domain.model.AiProviderType
+import com.sorudefteri.domain.model.AiTaskType
+import com.sorudefteri.domain.model.AiTaskRoute
 import com.sorudefteri.domain.model.Alan
 import com.sorudefteri.domain.repository.AiRepository
 import com.sorudefteri.ui.widget.SoruWidgetUpdater
@@ -63,7 +65,10 @@ data class AyarlarUiState(
     val isStylusHapticFeedbackEnabled: Boolean = true,
     // PERF: Hatırlatıcı bildirim anahtarları (koşulsuz 2 alarm yerine).
     val isDailyReminderEnabled: Boolean = true,
-    val isStreakReminderEnabled: Boolean = true
+    val isStreakReminderEnabled: Boolean = true,
+    val autoSolveOnSave: Boolean = false,
+    val batchSolveDelaySeconds: Int = 3,
+    val taskRoutes: Map<AiTaskType, AiTaskRoute?> = emptyMap()
 )
 
 private data class DynamicModelsInfo(
@@ -110,6 +115,14 @@ class AyarlarViewModel @Inject constructor(
     private val _backupState = MutableStateFlow(BackupState())
     private val _driveSyncState = MutableStateFlow(DriveSyncState())
     private val _promptStatusState = MutableStateFlow<Pair<String?, Boolean>>(null to false)
+
+    private val aiAutomationFlow = combine(
+        ayarlarDataStore.autoSolveOnSave,
+        ayarlarDataStore.batchSolveDelaySeconds,
+        ayarlarDataStore.taskRoutes
+    ) { autoSolve, batchDelay, routes ->
+        AiAutomationPrefGroup(autoSolve, batchDelay, routes)
+    }
 
     private val preferencesFlow = combine(
         ayarlarDataStore.currentAlan,
@@ -198,8 +211,9 @@ class AyarlarViewModel @Inject constructor(
 
     val uiState: StateFlow<AyarlarUiState> = combine(
         preferencesFlow,
-        secondaryFlow
-    ) { p1, p2 ->
+        secondaryFlow,
+        aiAutomationFlow
+    ) { p1, p2, pAuto ->
         AyarlarUiState(
             currentAlan = p1.alan,
             aiProvider = p1.provider,
@@ -229,7 +243,10 @@ class AyarlarViewModel @Inject constructor(
             isStreakReminderEnabled = p2.isStreakReminderEnabled,
             stylusDoubleTapAction = p2.stylusAction,
             isStylusPalmRejectionEnabled = p2.stylusPalm,
-            isStylusHapticFeedbackEnabled = p2.stylusHaptics
+            isStylusHapticFeedbackEnabled = p2.stylusHaptics,
+            autoSolveOnSave = pAuto.autoSolveOnSave,
+            batchSolveDelaySeconds = pAuto.batchSolveDelaySeconds,
+            taskRoutes = pAuto.taskRoutes
         )
     }.stateIn(
         scope = viewModelScope,
@@ -297,6 +314,24 @@ class AyarlarViewModel @Inject constructor(
     fun setNvidiaModel(model: String) {
         viewModelScope.launch {
             ayarlarDataStore.setNvidiaModel(model)
+        }
+    }
+
+    fun setAutoSolveOnSave(enabled: Boolean) {
+        viewModelScope.launch {
+            ayarlarDataStore.setAutoSolveOnSave(enabled)
+        }
+    }
+
+    fun setBatchSolveDelaySeconds(seconds: Int) {
+        viewModelScope.launch {
+            ayarlarDataStore.setBatchSolveDelaySeconds(seconds)
+        }
+    }
+
+    fun setTaskRoute(task: AiTaskType, route: AiTaskRoute?) {
+        viewModelScope.launch {
+            ayarlarDataStore.setTaskRoute(task, route)
         }
     }
 
@@ -662,5 +697,11 @@ private data class AyarlarPrefGroup2(
     val stylusAction: StylusDoubleTapAction,
     val stylusPalm: Boolean,
     val stylusHaptics: Boolean
+)
+
+private data class AiAutomationPrefGroup(
+    val autoSolveOnSave: Boolean = false,
+    val batchSolveDelaySeconds: Int = 3,
+    val taskRoutes: Map<AiTaskType, AiTaskRoute?> = emptyMap()
 )
 

@@ -195,4 +195,140 @@ object ExternalAiPromptHelper {
             ```
         """.trimIndent()
     }
+
+    // =========================================================================
+    // 3. HARİCİ 3 SORULUK KARDEŞ TESTİ (SORU İKİZLERİ) MASTER PROMPTU
+    // =========================================================================
+
+    /**
+     * Kullanıcının harici AI chatbotuna (Gemini Web, ChatGPT, Claude) yapıştıracağı
+     * 3 Soruluk Soru İkizi (Kardeş Test) promptunu oluşturur.
+     * Çıktı formatı doğrudan `AiJsonParser.parseTwinQuestionsResult` ile %100 uyumludur.
+     */
+    fun buildExternalTwinQuestionsPrompt(
+        ders: String,
+        konu: String,
+        soruMetni: String? = null,
+        zorluk: String = "ÖSYM Tarzı",
+        sinavTuru: String = "TYT",
+        kaynakSoruMetni: String? = null,
+        dogruCevap: String? = null,
+        hataTuru: String? = null
+    ): String {
+        val safeDers = sanitize(ders)
+        val safeKonu = sanitize(konu)
+        val safeZorluk = sanitize(zorluk, 40)
+        val safeSinav = sanitize(sinavTuru, 30)
+        val safeAnswer = sanitize(dogruCevap, 10)
+        val safeMistake = sanitize(hataTuru, 100)
+        val textToUse = soruMetni ?: kaynakSoruMetni
+        val safeKaynak = if (!textToUse.isNullOrBlank()) sanitize(textToUse, MAX_LEN_TEXT) else null
+
+        val answerSection = if (safeAnswer.isNotBlank()) "\n            - Kaynak Soru Doğru Cevap: $safeAnswer" else ""
+        val mistakeSection = if (safeMistake.isNotBlank()) "\n            - Öğrencinin Düştüğü Hata/Tuzak: $safeMistake" else ""
+
+        val sourceSection = if (!safeKaynak.isNullOrBlank()) {
+            """
+            ---
+            [KAYNAK / REFERANS SORU METNİ]:
+            $safeKaynak
+            """.trimIndent()
+        } else {
+            """
+            ---
+            [KAYNAK / REFERANS SORU GÖRSELİ]:
+            (Bu prompt ile birlikte sorunun görselini paylaştım. Lütfen görseldeki soruyu incele.)
+            """.trimIndent()
+        }
+
+        return """
+            Sen ÖSYM ve MEB standartlarına tam hakim kıdemli bir $safeSinav Soru Yazarısın.
+            Öğrenci bu soruyu çözerken zorlandı veya hata yaptı. Görevin: Öğrencinin soruyu ezberlemediğini, mantığını ve kavramını gerçekten kavradığını sınamak için kaynak sorudaki KAZANIMI VE FORMÜLÜ BİREBİR KORUYAN FAKAT BİRBİRİNDEN FARKLI TAM 3 ÖZGÜN KARDEŞ SORU (SORU İKİZİ) üretmektir.
+
+            [HEDEF KRİTERLER]:
+            - Sınav Türü: $safeSinav
+            - Ders: $safeDers
+            - Konu: $safeKonu
+            - Hedef Zorluk: $safeZorluk$answerSection$mistakeSection
+
+            $sourceSection
+
+            ════════════════════════════════════════════════════════════════════════
+            3 KARDEŞ SORUNUN ROLLERİ VE KRİTERLERİ:
+            ════════════════════════════════════════════════════════════════════════
+            1. Soru (Sayı & Değer Varyasyonu - Kolay/Orta):
+               - Kaynak soru ile aynı senaryo ve düzenek. Sayılar, parametreler veya değişkenler değiştirilmiş. Temel formülün kavranışını pekiştirir.
+            2. Soru (Hikaye & Bağlam Varyasyonu - Orta):
+               - Aynı matematiksel/fen kazanımı, ancak yepyeni bir günlük hayat hikayesi veya farklı bir bağlamsal problem kurgusu.
+            3. Soru (Tersine Akıl Yürütme & Kavram Tuzağı - Orta/Zor):
+               - Sorulan ve verilen bilgilerin yer değiştirdiği (tersine çıkarım) veya öğrencilerin en çok düştüğü çeldirici tuzağı sınayan derinleştirme sorusu.
+
+            ════════════════════════════════════════════════════════════════════════
+            KATI KURALLAR VE ÇIKTI FORMATI:
+            ════════════════════════════════════════════════════════════════════════
+            1. Her soru 5 şıklı (A, B, C, D, E) olmalı ve yalnızca TEK BİR KESİN DOĞRU CEVABI bulunmalıdır.
+            2. KATI LATEX KURALLARI:
+               - Kesirli ifadeleri hem soru metninde hem de şıklarda MUTLAKA \frac{pay}{payda} formatında LaTeX ile yaz (örn: ${'$'}\frac{3}{5}${'$'}).
+               - Limit için \lim, karekök için \sqrt, belirsizlik için \frac{0}{0}, eşitsizlik için \neq, \le, \ge kullan.
+               - Formülleri satır içi ${'$'}...${'$'} içine al.
+            3. JSON GÜVENLİĞİ:
+               - JSON sözdiziminin bozulmaması için formüllerdeki ters eğik çizgileri çift ters eğik çizgi ile kaçır (\\frac, \\sqrt, \\lim, \\neq).
+               - JSON stringleri içinde ham satır sonları yerine \n kaçışı kullan.
+            4. Her soru için:
+               - "solution": Adım adım ayrıntılı çözüm (1., 2., 3. basamaklar).
+               - "trapWarning": Bu soruda öğrencinin düşebileceği kavram yanılgısı veya işlem tuzağı uyarısı.
+            5. GÖRSELSİZ VE KENDİ KENDİNE YETEN: Metin içinde "şekildeki gibi", "grafiğe göre" gibi görsel atfı KESİNLİKLE kullanma; tüm parametreleri metinle tanımla.
+            6. Yanıtını SADECE aşağıdaki geçerli JSON bloğu içinde ver. Markdown öncesi/sonrası sohbet metni ekleme:
+
+            ```json
+            {
+              "originalTopic": "$safeKonu",
+              "questions": [
+                {
+                  "id": 1,
+                  "questionText": "1. kardeş soru metni (Sayı & Değer Varyasyonu)...",
+                  "options": {
+                    "A": "A seçeneği",
+                    "B": "B seçeneği",
+                    "C": "C seçeneği",
+                    "D": "D seçeneği",
+                    "E": "E seçeneği"
+                  },
+                  "correctAnswer": "A",
+                  "solution": "1. Soru için adım adım çözüm...",
+                  "trapWarning": "Öğrencilerin bu soruda düşebileceği tuzak: ..."
+                },
+                {
+                  "id": 2,
+                  "questionText": "2. kardeş soru metni (Hikaye & Bağlam Varyasyonu)...",
+                  "options": {
+                    "A": "A seçeneği",
+                    "B": "B seçeneği",
+                    "C": "C seçeneği",
+                    "D": "D seçeneği",
+                    "E": "E seçeneği"
+                  },
+                  "correctAnswer": "B",
+                  "solution": "2. Soru için adım adım çözüm...",
+                  "trapWarning": "Öğrencilerin bu soruda düşebileceği tuzak: ..."
+                },
+                {
+                  "id": 3,
+                  "questionText": "3. kardeş soru metni (Tersine Akıl Yürütme & Kavram Tuzağı)...",
+                  "options": {
+                    "A": "A seçeneği",
+                    "B": "B seçeneği",
+                    "C": "C seçeneği",
+                    "D": "D seçeneği",
+                    "E": "E seçeneği"
+                  },
+                  "correctAnswer": "C",
+                  "solution": "3. Soru için adım adım çözüm...",
+                  "trapWarning": "Öğrencilerin bu soruda düşebileceği tuzak: ..."
+                }
+              ]
+            }
+            ```
+        """.trimIndent()
+    }
 }

@@ -11,6 +11,7 @@ import com.sorudefteri.domain.model.AiErrorType
 import com.sorudefteri.domain.model.AiException
 import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
+import com.sorudefteri.domain.model.TwinQuestionsResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -44,7 +45,7 @@ open class NvidiaProvider @Inject constructor(
     }
 ) : CozumProvider {
 
-    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
+    private val jsonMediaType = "application/json".toMediaType()
 
     companion object {
         const val FALLBACK_MODEL = "meta/llama-3.2-90b-vision-instruct"
@@ -186,6 +187,37 @@ open class NvidiaProvider @Inject constructor(
         rawResult.mapCatching { rawText ->
             val parseResult = AiJsonParser.cleanAndParseJson(rawText, SimilarQuestionResult.serializer()) { AiJsonParser.parseSimilarQuestionFallback(it) }
             parseResult.getOrThrow()
+        }
+    }
+
+    /**
+     * Kaynak sorudan 3 farklı kardeş soru (Soru İkizleri) türetir:
+     * 1. Soru: Sayı & Değer Varyasyonu
+     * 2. Soru: Hikaye & Bağlam Varyasyonu
+     * 3. Soru: Tersine Akıl Yürütme & Kavram Tuzağı
+     */
+    open suspend fun generateTwinQuestions(
+        imageBytes: ByteArray?,
+        dersAdi: String,
+        konu: String,
+        soruMetni: String? = null,
+        modelName: String,
+        apiKey: String,
+        customPromptTemplate: String? = null
+    ): Result<TwinQuestionsResult> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) return@withContext Result.failure(AiException(AiErrorType.INVALID_API_KEY, "NVIDIA API anahtarı boş olamaz."))
+        val prompt = promptManager.buildKardesSorularPrompt(dersAdi, konu, soruMetni, customPromptTemplate)
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel == "meta/llama-3.1-405b-instruct") {
+            FALLBACK_MODEL
+        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true)) {
+            FALLBACK_MODEL
+        } else {
+            rawModel
+        }
+        val rawResult = executeNvidiaWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+        rawResult.mapCatching { rawText ->
+            AiJsonParser.parseTwinQuestionsResult(rawText).getOrThrow()
         }
     }
 

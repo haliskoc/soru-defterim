@@ -64,9 +64,9 @@ object KaTeXHtmlGenerator {
     )
 
     /**
-     * Çift veya daha fazla kaçışlı ters eğik çizgileri (\\frac, \\\dfrac vb.) tek kaçışlı forma indirir.
+     * Çift veya daha fazla kaçışlı ters eğik çizgileri (\\frac, \\\dfrac, \\[ vb.) tek kaçışlı forma indirir.
      */
-    private val MULTI_ESCAPED_SLASH_REGEX = Regex("""\\{2,}(?=[a-zA-Z])""")
+    private val MULTI_ESCAPED_SLASH_REGEX = Regex("""\\{2,}(?=[a-zA-Z\(\)\[\]])""")
 
     private val HTML_ENTITY_REGEX_MAP = mapOf(
         "&lt;" to "<",
@@ -76,15 +76,16 @@ object KaTeXHtmlGenerator {
     )
 
     private val ISOLATED_NEWLINE_REGEX = Regex(
-        """(?<!\\)\\n(?!(?:eq|e(?![a-zA-Z])|eg(?![a-zA-Z])|abla|otin|u(?![a-zA-Z])|ot(?![a-zA-Z])|atural|i(?![a-zA-Z])|exists|geq|leq|subseteq|supseteq|parallel|sim|cong|mid|earrow|warrow)(?![a-zA-Z]))"""
+        """(?<!\\)\\{1,2}n(?!(?:eq|e(?![a-zA-Z])|eg(?![a-zA-Z])|abla|otin|u(?![a-zA-Z])|ot(?![a-zA-Z])|atural|i(?![a-zA-Z])|exists|geq|leq|subseteq|supseteq|parallel|sim|cong|mid|earrow|warrow|ormalsize)(?![a-zA-Z]))"""
     )
 
     /**
      * AI/harici chatbot çıktılarındaki kaçış ve HTML kalıntılarını KaTeX öncesi temizler:
      * - &lt;/&gt;/&quot; -> gerçek karakter
-     * - \dfac veya dfac -> \dfrac (yaygın model/OCR yazım hatası)
-     * - \\frac, \\\dfrac -> \frac, \dfrac (çift/çoklu kaçış indirgeme)
-     * - izole \n literalleri -> gerçek satır sonu
+     * - \dfac, dfac, \tfac, tfac, \tfrac -> \dfrac (yaygın model/OCR yazım ve ölçek hataları onarımı)
+     * - \\frac, \\\frac, \\\\frac -> \frac; \\sqrt -> \sqrt; \\lim -> \lim (çift/çoklu kaçış indirgeme)
+     * - izole \n ve \\n literalleri -> gerçek satır sonu
+     * - \[...\] ve \(...\) ile $$...$$ ve $...$ arasındaki sınır belirteci uyumsuzluklarını giderme
      */
     fun sanitizeAiSolutionEscapes(raw: String): String {
         var text = raw
@@ -94,22 +95,57 @@ object KaTeXHtmlGenerator {
         }
         // &amp; en son çözülmeli (&lt; içindeki & bozulmasın)
         text = text.replace("&amp;", "&")
-        // Olası "dfac" veya "\dfac" yazım hatalarını standart \dfrac komutuna çevir
-        text = Regex("""(?<![a-zA-Z])\\*dfac(?![a-zA-Z])""").replace(text, "\\dfrac")
-        // Çift veya çoklu kaçışlı LaTeX komutlarını teke indir (\\dfrac -> \dfrac, \\\frac -> \frac)
+
+        // 1. Olası "dfac", "\dfac", "tfac", "\tfac", "\tfrac" yazım ve küçük punto hatalarını standart \dfrac komutuna çevir
+        text = Regex("""(?<![a-zA-Z])\\*(?:dfac|tfac|tfrac)(?![a-zA-Z])""").replace(text) { "\\dfrac" }
+
+        // 2. Çift veya çoklu kaçışlı LaTeX komutlarını ve parantez/köşeli belirteçleri teke indir:
+        // \\frac, \\\frac, \\\\frac -> \frac; \\sqrt -> \sqrt; \\lim -> \lim; \\[ -> \[; \\( -> \(
         text = MULTI_ESCAPED_SLASH_REGEX.replace(text) { "\\" }
-        // \r\n literalleri ve izole \r temizliği
+
+        // 3. \r\n literalleri ve izole \r temizliği
         text = text.replace("\r\n", "\n").replace("\r", "")
         text = text.replace("\\r\\n", "\n")
         text = text.replace(Regex("""\\r(?![a-zA-Z])"""), "")
-        // Bozuk ok komutlarını onar (ightarrow -> \rightarrow, ongtarrow -> \longrightarrow)
+
+        // 4. Bozuk ok komutlarını onar (ightarrow -> \rightarrow, ongtarrow -> \longrightarrow)
         text = text.replace(Regex("""(?<![a-zA-Z\\])ightarrow\b"""), "\\rightarrow")
         text = text.replace(Regex("""(?<![a-zA-Z\\])ongrightarrow\b"""), "\\longrightarrow")
         text = text.replace(Regex("""(?<![a-zA-Z\\])ightleftharpoons\b"""), "\\rightleftharpoons")
-        // L'Hôpital yazımlarını normalize et
+
+        // 5. L'Hôpital yazımlarını normalize et
         text = text.replace(Regex("""L['’]H[\^oô]pital|L['’]Hospital""", RegexOption.IGNORE_CASE), "L'Hôpital")
-        // İzole \n -> gerçek satır sonu
+
+        // 6. Satır sonu kaçışları: LaTeX komutları (\neq, \nu, \nabla vb.) dışındaki tüm \n ve \\n kaçışlarını gerçek satır sonuna çevir
         text = ISOLATED_NEWLINE_REGEX.replace(text, "\n")
+
+        // 7. Markdown başlıkları (#, ##, ###) sonrasındaki satır atlama kaçışlarını düzelt (örn: ###\nBaşlık -> ### Başlık)
+        text = text.replace(Regex("""(?m)^(?<!#)(#{1,6})[ \t]*\n+"""), "$1 ")
+
+        // 8. Delimiter uyumsuzluklarını ve çift kaçışlı sınır belirteçlerini normalize et:
+        // \\[ ... \\] veya \[ ... \] -> $$ ... $$
+        text = text.replace(Regex("""\\{1,2}\[([\s\S]*?)\\{1,2}\]""")) { m ->
+            "$$${m.groupValues[1].trim()}$$"
+        }
+        // Mismatched: \[ ... $$ veya $$ ... \] -> $$ ... $$
+        text = text.replace(Regex("""\\{1,2}\[([\s\S]*?)\$\$""")) { m ->
+            "$$${m.groupValues[1].trim()}$$"
+        }
+        text = text.replace(Regex("""\$\$([\s\S]*?)\\{1,2}\]""")) { m ->
+            "$$${m.groupValues[1].trim()}$$"
+        }
+        // \\( ... \\) veya \( ... \) -> $ ... $
+        text = text.replace(Regex("""\\{1,2}\(([\s\S]*?)\\{1,2}\)""")) { m ->
+            "$${m.groupValues[1].trim()}$"
+        }
+        // Mismatched: \( ... $ veya $ ... \) -> $ ... $
+        text = text.replace(Regex("""\\{1,2}\(([\s\S]*?)(?<!\\)\$""")) { m ->
+            "$${m.groupValues[1].trim()}$"
+        }
+        text = text.replace(Regex("""(?<!\\)\$([\s\S]*?)\\{1,2}\)""")) { m ->
+            "$${m.groupValues[1].trim()}$"
+        }
+
         return text
     }
     fun colorToHex(color: Color): String {
@@ -177,16 +213,51 @@ object KaTeXHtmlGenerator {
                 "${'$'}\\frac{$num}{$den}${'$'}"
             }
 
-            // 4c. Parantezli kesirler: (4 / 3), (a / b), (3x + 1 / 2) -> $\frac{...}{...}$
+            // 4c. Yalın pay ve parantezli payda: 3 / (x + 1) -> $\frac{3}{x + 1}$
+            processedPart = processedPart.replace(Regex("""(?<![a-zA-Z0-9/\\\(])([a-zA-Z0-9]+)\s*/\s*\(\s*([a-zA-Z0-9\+\-\*\.\s]+)\s*\)""")) { m ->
+                val num = m.groupValues[1].trim()
+                val den = m.groupValues[2].trim()
+                "${'$'}\\frac{$num}{$den}${'$'}"
+            }
+
+            // 4d. Parantezli kesirler: (4 / 3), (a / b), (3x + 1 / 2) -> $\frac{...}{...}$
             processedPart = processedPart.replace(Regex("""(?<![a-zA-Z0-9\\])\(\s*([a-zA-Z0-9\+\-\*\.]+)\s*/\s*([a-zA-Z0-9\+\-\*\.]+)\s*\)""")) { m ->
                 val num = m.groupValues[1].trim()
                 val den = m.groupValues[2].trim()
                 "${'$'}\\frac{$num}{$den}${'$'}"
             }
 
-            // 4d. Standart yalın sayı bölme işlemleri (örn: 4/3 veya 1/2, tarih veya URL olmayanlar)
-            processedPart = processedPart.replace(Regex("""(?<![a-zA-Z0-9/\\])(\d{1,4})\s*/\s*(\d{1,4})(?![a-zA-Z0-9/])""")) { m ->
-                "${'$'}\\frac{${m.groupValues[1]}}{${m.groupValues[2]}}${'$'}"
+            // 4e. Standart yalın sayı bölme işlemleri (örn: 4/3, 3 / 4 veya 1/2)
+            // Tarih (12/05/2024), öğretim yılı (2024/2025) ve URL'lere KESİNLİKLE DOKUNMA!
+            processedPart = processedPart.replace(Regex("""(?<![a-zA-Z0-9_./:\\])(\d{1,4})\s*/\s*(\d{1,4})(?![a-zA-Z0-9_./:\\])""")) { m ->
+                val num = m.groupValues[1]
+                val den = m.groupValues[2]
+                val isYearRange = (num.length == 4 && den.length == 4 &&
+                    (num.startsWith("19") || num.startsWith("20")) &&
+                    (den.startsWith("19") || den.startsWith("20")))
+                if (isYearRange) {
+                    m.value
+                } else {
+                    "${'$'}\\frac{$num}{$den}${'$'}"
+                }
+            }
+
+            // 4f. Yalın harf/değişken bölme işlemleri: a/b, x/y veya 3x/2
+            // Türkçe kelime içi slash'lara (ve/veya, doğru/yanlış), birimlere (km/h, m/s, cal/g) ve URL'lere DOKUNMA!
+            processedPart = processedPart.replace(Regex("""(?<![a-zA-Z0-9_./:\\])([a-zA-Z0-9]{1,3})\s*/\s*([a-zA-Z0-9]{1,3})(?![a-zA-Z0-9_./:\\])""")) { m ->
+                val num = m.groupValues[1].trim()
+                val den = m.groupValues[2].trim()
+                val lowerNum = num.lowercase(Locale.ROOT)
+                val lowerDen = den.lowercase(Locale.ROOT)
+                val combined = "$lowerNum/$lowerDen"
+                val isUnitOrWord = combined in listOf("km/h", "km/s", "m/s", "cm/s", "cal/g", "mol/l", "g/mol", "rad/s", "n/m", "ve/veya")
+                val hasLetter = num.any { it.isLetter() } || den.any { it.isLetter() }
+                val isWordSlash = num.length >= 2 && den.length >= 2 && num.all { it.isLetter() } && den.all { it.isLetter() }
+                if (hasLetter && !isUnitOrWord && !isWordSlash) {
+                    "${'$'}\\frac{$num}{$den}${'$'}"
+                } else {
+                    m.value
+                }
             }
 
             sb.append(processedPart)
@@ -216,7 +287,7 @@ object KaTeXHtmlGenerator {
      * tespit edip KaTeX $...$ sınır belirteçleriyle sarar.
      */
     fun wrapUnenclosedFractions(input: String): String {
-        val fracCmdRegex = Regex("""(?<![a-zA-Z\$\\])\\(?:frac|dfrac|cfrac|tfrac|dfac)\b""")
+        val fracCmdRegex = Regex("""(?<![a-zA-Z\$\\])\\(?:frac|dfrac|cfrac|tfrac|dfac|tfac)\b""")
         val sb = StringBuilder()
         var i = 0
 
@@ -238,9 +309,9 @@ object KaTeXHtmlGenerator {
                 if (secondArg != null) {
                     val fullFrac = input.substring(cmdStart, secondArg.second)
                     val cmdName = match.value
-                    // Bozuk \dfac yazım hatasını düzelt, orijinal \frac veya \dfrac'ı koru
-                    val normalizedFrac = if (cmdName == "\\dfac") {
-                        "\\frac" + fullFrac.substring(cmdName.length)
+                    // Bozuk \dfac, \tfac ve mikro \tfrac komutlarını standart \dfrac ile normalize et
+                    val normalizedFrac = if (cmdName == "\\dfac" || cmdName == "\\tfac" || cmdName == "\\tfrac") {
+                        "\\dfrac" + fullFrac.substring(cmdName.length)
                     } else fullFrac
 
                     val alreadyInMath = isInsideDelimiters(input, cmdStart)
@@ -255,7 +326,7 @@ object KaTeXHtmlGenerator {
             }
 
             // Süslü parantezsiz tekil token eşleşmesi (Örn: \frac 1 2 veya \dfrac a b)
-            val singleTokenRegex = Regex("""^\\(?:frac|dfrac|cfrac|tfrac|dfac)\s+([0-9a-zA-Z])\s+([0-9a-zA-Z])""")
+            val singleTokenRegex = Regex("""^\\(?:frac|dfrac|cfrac|tfrac|dfac|tfac)\s+([0-9a-zA-Z])\s+([0-9a-zA-Z])""")
             val singleMatch = singleTokenRegex.find(input.substring(cmdStart))
             if (singleMatch != null) {
                 val fullFrac = "\\frac{${singleMatch.groupValues[1]}}{${singleMatch.groupValues[2]}}"
@@ -469,10 +540,10 @@ object KaTeXHtmlGenerator {
             .replace("<", "&lt;")
             .replace(">", "&gt;")
 
-        // Başlıklar
-        s = s.replace(Regex("""(?m)^###\s+(.+)$"""), "<h3>$1</h3>")
-        s = s.replace(Regex("""(?m)^##\s+(.+)$"""), "<h2>$1</h2>")
-        s = s.replace(Regex("""(?m)^#\s+(.+)$"""), "<h1>$1</h1>")
+        // Başlıklar: ###, ##, # (boşluklu veya bitişik)
+        s = s.replace(Regex("""(?m)^###[ \t]*(.+)$"""), "<h3>$1</h3>")
+        s = s.replace(Regex("""(?m)^##[ \t]*(.+)$"""), "<h2>$1</h2>")
+        s = s.replace(Regex("""(?m)^#[ \t]*(.+)$"""), "<h1>$1</h1>")
 
         // Kalın: **metin**
         s = s.replace(Regex("""\*\*(.+?)\*\*"""), "<strong>$1</strong>")
@@ -483,55 +554,82 @@ object KaTeXHtmlGenerator {
         // Üstü çizili: ~~metin~~
         s = s.replace(Regex("""~~(.+?)~~"""), "<del>$1</del>")
 
-        // Madde işaretleri (- veya •) ve paragraflar
         val lines = s.lines()
         val result = StringBuilder()
         var inList = false
+        var inOrderedList = false
         val currentParagraph = StringBuilder()
 
         fun flushParagraph() {
-            if (currentParagraph.isNotBlank()) {
-                result.append("<p>").append(currentParagraph.toString().trim()).append("</p>")
+            val content = currentParagraph.toString().trim()
+            if (content.isNotBlank()) {
+                result.append("<p>").append(content).append("</p>")
                 currentParagraph.clear()
+            }
+        }
+
+        fun closeLists() {
+            if (inList) {
+                result.append("</ul>")
+                inList = false
+            }
+            if (inOrderedList) {
+                result.append("</ol>")
+                inOrderedList = false
             }
         }
 
         for (line in lines) {
             val trimmed = line.trim()
-            if (trimmed.startsWith("<h") && (trimmed.endsWith("</h3>") || trimmed.endsWith("</h2>") || trimmed.endsWith("</h1>"))) {
+            if (trimmed.isEmpty()) {
                 flushParagraph()
-                if (inList) { result.append("</ul>"); inList = false }
+                closeLists()
+            } else if (trimmed.startsWith("<h") && (trimmed.contains("</h3>") || trimmed.contains("</h2>") || trimmed.contains("</h1>"))) {
+                flushParagraph()
+                closeLists()
                 result.append(trimmed)
+            } else if (trimmed.startsWith("___KATEX_TOKEN_") && trimmed.endsWith("___")) {
+                // KaTeX formül bloğu tek başına bir satırda ise <p> içine alıp DOM'u ve dikey boşlukları bozma
+                flushParagraph()
+                closeLists()
+                result.append("<div class=\"katex-display-line\">").append(trimmed).append("</div>")
             } else if (trimmed.startsWith("- ") || trimmed.startsWith("• ") || trimmed.startsWith("* ")) {
                 flushParagraph()
+                if (inOrderedList) {
+                    result.append("</ol>")
+                    inOrderedList = false
+                }
                 if (!inList) {
                     result.append("<ul>")
                     inList = true
                 }
                 val item = trimmed.substring(2).trim()
                 result.append("<li>").append(item).append("</li>")
-            } else if (trimmed.isEmpty()) {
-                flushParagraph()
-                if (inList) {
-                    result.append("</ul>")
-                    inList = false
-                }
             } else {
-                if (inList) {
-                    result.append("</ul>")
-                    inList = false
+                val orderMatch = Regex("""^(\d{1,2})[\.\)]\s+(.*)$""").find(trimmed)
+                if (orderMatch != null && !orderMatch.groupValues[2].startsWith("Adım", ignoreCase = true) && !orderMatch.groupValues[2].startsWith("Aşama", ignoreCase = true)) {
+                    flushParagraph()
+                    if (inList) {
+                        result.append("</ul>")
+                        inList = false
+                    }
+                    if (!inOrderedList) {
+                        result.append("<ol>")
+                        inOrderedList = true
+                    }
+                    result.append("<li>").append(orderMatch.groupValues[2].trim()).append("</li>")
+                } else {
+                    closeLists()
+                    if (currentParagraph.isNotEmpty()) {
+                        currentParagraph.append("<br/>")
+                    }
+                    currentParagraph.append(trimmed)
                 }
-                if (currentParagraph.isNotEmpty()) {
-                    currentParagraph.append("<br/>")
-                }
-                currentParagraph.append(trimmed)
             }
         }
 
         flushParagraph()
-        if (inList) {
-            result.append("</ul>")
-        }
+        closeLists()
 
         return result.toString()
     }
@@ -578,28 +676,13 @@ object KaTeXHtmlGenerator {
                     }
                     body {
                         margin: 0;
-                        /* DÜZELTME: Eski değer 4px 6px 28px 6px idi ve #math-content
-                           de 20px padding-bottom ekliyordu, üstüne Kotlin tarafında da
-                           +28.dp vardı -> her formül bloğunda ~76px boşluk. Aynı çözüm
-                           içindeki DÜZ metinli kartlarda bu boşluk 0 olduğu için
-                           bölümler hizalanmıyor, "metin kayıyor" izlenimi doğuyordu. */
-                        padding: 3px 4px 4px 4px;
+                        padding: 4px 6px 6px 6px;
                         background-color: $backgroundColorHex;
                         color: $textColorHex;
                         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                        /* DÜZELTME: Sistem yazı tipi ölçeği (fontScale) burada
-                           uygulanıyor. WebView textZoom=100 ile sistem ölçeğini
-                           yok sayıyor, Compose Text ise uyguluyordu; büyütülmüş
-                           yazıda formüller yanındaki normal metinden küçük kalıyor
-                           ve hizalama bozuluyordu. */
                         font-size: ${fontSizePx}px;
                         line-height: 1.55;
                         word-break: break-word;
-                        /* DÜZELTME: overflow-x: auto KALDIRILDI. Bu WebView
-                           NonTouchableWebView (onTouchEvent = false) olduğu için
-                           yatay kaydırma YAPILAMAZ; auto sadece geniş formülü
-                           sessizce kırpıyordu. Artık geniş içerik JS ile
-                           ölçeğe uyduruluyor (fitToWidth). */
                         overflow-x: visible;
                         overflow-y: visible;
                     }
@@ -608,34 +691,49 @@ object KaTeXHtmlGenerator {
                         transform-origin: left top;
                     }
                     .katex-display {
-                        margin: 0.5em 0;
-                        padding: 4px 0;
-                        /* DÜZELTME: auto -> visible, aynı dokunulmazlık nedeniyle. */
-                        overflow-x: visible;
-                        overflow-y: visible;
+                        margin: 0.35em 0;
+                        padding: 2px 0;
+                        overflow-x: auto;
+                        overflow-y: hidden;
+                        max-width: 100%;
+                        text-align: center;
+                        -webkit-overflow-scrolling: touch;
+                    }
+                    .katex-display > .katex {
+                        display: inline-block;
+                        max-width: 100%;
+                        text-align: center;
+                        vertical-align: middle;
+                        font-size: 1.08em;
+                    }
+                    .katex-display-line {
+                        margin: 0.35em 0;
+                        text-align: center;
                     }
                     .katex {
-                        /* DÜZELTME: 1.18em -> 1.05em. KaTeX varsayılanı zaten
-                           büyük; 1.18 ile uzun formüller panel genişliğini aşıyor
-                           ve (kaydırılamayan WebView'de) kırpılıyordu. */
                         font-size: 1.05em;
                         text-rendering: optimizeLegibility;
-                        color: $textColorHex;
+                        color: $textColorHex !important;
+                    }
+                    /* Inline KaTeX: baseline and smooth text flow */
+                    p .katex, li .katex, span .katex, .katex:not(.katex-display .katex) {
+                        display: inline-block;
+                        vertical-align: -0.08em;
+                        line-height: normal;
                     }
                     .katex .frac-line {
-                        border-bottom-color: $textColorHex;
-                        border-bottom-width: 1.5px;
+                        border-bottom-color: $textColorHex !important;
+                        border-bottom-width: 1.5px !important;
                     }
-                    .katex-html {
-                        /* DÜZELTME: white-space: normal KALDIRILDI. Bu kural
-                           KaTeX'in kendi "no-wrap" davranışını eziyor ve formülü
-                           satır ortasından bölüyordu; böylece payda/pay üsleri
-                           (baseline) hizası bozulup formül "kaymış" gibi
-                           görünüyordu. KaTeX'in varsayılanı korunuyor; geniş
-                           formüller artık fitToWidth() ile ölçekleniyor. */
+                    .katex svg {
+                        fill: $textColorHex !important;
+                        stroke: $textColorHex !important;
+                    }
+                    .katex .sqrt .svg-align {
+                        stroke: $textColorHex !important;
                     }
                     p {
-                        margin: 0.25em 0;
+                        margin: 0.22em 0;
                     }
                     ul, ol {
                         margin: 0.25em 0;
@@ -654,9 +752,12 @@ object KaTeXHtmlGenerator {
                     }
                     h1, h2, h3 {
                         margin: 0.4em 0 0.2em 0;
-                        font-size: 1.1em;
+                        font-size: 1.08em;
                         font-weight: 700;
                         color: $textColorHex;
+                    }
+                    h3 {
+                        font-size: 1.03em;
                     }
                     $extraCss
                 </style>
@@ -681,43 +782,50 @@ object KaTeXHtmlGenerator {
                             if (window.AndroidBridge && typeof window.AndroidBridge.onHeightChange === "function") {
                                 var m = document.getElementById("math-content");
                                 if (!m) return;
-                                // DÜZELTME: getBoundingClientRect() CSS dönüşümlerini
-                                // (scale) YANSITIR. fitToWidth() bloğu küçülttüğünde
-                                // buradaki değer zaten GÖRSEL gerçek yüksekliktir.
-                                // Eskiden body.scrollHeight (dönüşümsüz) kullanılıyordu
-                                // ve ölçekli blokta çok fazla yer ayrılıyordu.
                                 var h = m.getBoundingClientRect().height;
-                                // body'nin kendi dikey padding'i (3px üst + 4px alt)
-                                // ve güvenlik payı eklendi.
                                 window.AndroidBridge.onHeightChange(Math.ceil(h) + 10);
                             }
                         }
 
-                        // DÜZELTME: Bu fonksiyon DOMContentLoaded callback'i içinde
-                        // tanımlandığı için global DEĞİL; Android tarafından
-                        // evaluateJavascript("window.notifyHeight()") ile çağrılamıyordu
-                        // (sessizce hiçbir şey olmuyordu). Açıkça global'e bağlıyoruz.
                         window.notifyHeight = notifyHeight;
 
                         /* Geniş formülleri panel genişliğine sığdır.
-                           WebView dokunulmaz olduğu için yatay kaydırma imkânsız;
-                           taşan kısım kalıcı olarak kırpılıyordu (formülün yarısı
-                           hiç görünmüyordu). Bunun yerine ölçekliyoruz. */
+                           Tüm metni (açıklamaları) küçültmek yerine sadece
+                           geniş olan .katex-display formülünü ölçekler. */
                         function fitToWidth() {
-                            var m = document.getElementById("math-content");
                             var b = document.body;
-                            if (!m || !b) return;
-                            m.style.transform = "none";
+                            if (!b) return;
                             var style = window.getComputedStyle(b);
                             var avail = b.clientWidth
                                 - (parseFloat(style.paddingLeft) || 0)
                                 - (parseFloat(style.paddingRight) || 0);
-                            var w = m.scrollWidth;
-                            if (avail > 0 && w > avail) {
-                                var ratio = avail / w;
-                                // Aşırı küçültmeyi engelle (okunabilirlik)
-                                if (ratio > 0.4) {
-                                    m.style.transform = "scale(" + ratio + ")";
+                            if (avail <= 0) return;
+
+                            var displays = document.querySelectorAll(".katex-display");
+                            for (var i = 0; i < displays.length; i++) {
+                                var d = displays[i];
+                                var k = d.querySelector(".katex");
+                                if (!k) continue;
+                                k.style.transform = "none";
+                                var kw = k.scrollWidth;
+                                if (kw > avail) {
+                                    var ratio = avail / kw;
+                                    if (ratio >= 0.60) {
+                                        k.style.transformOrigin = "center top";
+                                        k.style.transform = "scale(" + ratio + ")";
+                                    }
+                                }
+                            }
+
+                            var m = document.getElementById("math-content");
+                            if (m) {
+                                m.style.transform = "none";
+                                var w = m.scrollWidth;
+                                if (w > avail) {
+                                    var ratio = avail / w;
+                                    if (ratio >= 0.75) {
+                                        m.style.transform = "scale(" + ratio + ")";
+                                    }
                                 }
                             }
                         }
@@ -735,12 +843,6 @@ object KaTeXHtmlGenerator {
                             } catch(e) {}
                         }
 
-                        // DÜZELTME: 0/30/100/250/500 ms'de gelen 5 ayrı ölçüm
-                        // zamanlayıcısı kaldırıldı. KaTeX webfont'ları yüklendiğinde
-                        // boyut değişiyor ve her ölçüm üstteki ortalanmış (Center)
-                        // kapları yerinden oynatıyordu. Artık yalnızca:
-                        //   1) ilk ölçüm, 2) font'lar hazır olduğunda, 3) ResizeObserver
-                        // Yeterli ve daha stabil.
                         fitToWidth();
                         notifyHeight();
                         if (document.fonts && document.fonts.ready) {
@@ -804,21 +906,43 @@ object KaTeXHtmlGenerator {
      * `extraCss` olarak verilir. Renkler MathMarkdownText kartlarıyla birebir
      * eşleşir (yeşil/mor/nötr/kırmızı/turuncu).
      */
-    fun combinedCardsCss(textColorHex: String): String = """
+    fun combinedCardsCss(textColorHex: String, isDarkTheme: Boolean = false): String = if (isDarkTheme) {
+        """
         .katex-card { border-radius: 14px; padding: 14px; margin: 0 0 12px 0; }
         .katex-card:last-child { margin-bottom: 0; }
-        .katex-card-title { font-size: 1.1em; font-weight: 700; margin: 0 0 8px 0; }
+        .katex-card-title { font-size: 1.08em; font-weight: 700; margin: 0 0 8px 0; }
+        .katex-card-body { color: $textColorHex; }
+        .katex-card-answer { background: rgba(76,175,80,0.14); border: 1px solid rgba(76,175,80,0.38); }
+        .katex-card-answer .katex-card-title { color: #66BB6A; }
+        .katex-card-formulas { background: rgba(187,134,252,0.12); border: 1px solid rgba(187,134,252,0.32); }
+        .katex-card-formulas .katex-card-title { color: #BB86FC; }
+        .katex-card-steps { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.18); }
+        .katex-card-steps .katex-card-title { color: #90CAF9; }
+        .katex-card-mistakes { background: rgba(239,83,80,0.12); border: 1px solid rgba(239,83,80,0.32); }
+        .katex-card-mistakes .katex-card-title { color: #EF5350; }
+        .katex-card-tips { background: rgba(255,167,38,0.12); border: 1px solid rgba(255,167,38,0.32); }
+        .katex-card-tips .katex-card-title { color: #FFA726; }
+        .katex-card-general { background: transparent; border: none; padding: 4px 0; }
+        """.trimIndent()
+    } else {
+        """
+        .katex-card { border-radius: 14px; padding: 14px; margin: 0 0 12px 0; }
+        .katex-card:last-child { margin-bottom: 0; }
+        .katex-card-title { font-size: 1.08em; font-weight: 700; margin: 0 0 8px 0; }
         .katex-card-body { color: $textColorHex; }
         .katex-card-answer { background: rgba(46,125,50,0.12); border: 1px solid rgba(46,125,50,0.35); }
         .katex-card-answer .katex-card-title { color: #2E7D32; }
         .katex-card-formulas { background: rgba(98,0,238,0.08); border: 1px solid rgba(98,0,238,0.25); }
+        .katex-card-formulas .katex-card-title { color: #6200EE; }
         .katex-card-steps { background: rgba(128,128,128,0.10); border: 1px solid rgba(128,128,128,0.30); }
+        .katex-card-steps .katex-card-title { color: #1976D2; }
         .katex-card-mistakes { background: rgba(211,47,47,0.08); border: 1px solid rgba(211,47,47,0.28); }
         .katex-card-mistakes .katex-card-title { color: #D32F2F; }
         .katex-card-tips { background: rgba(245,124,0,0.10); border: 1px solid rgba(245,124,0,0.30); }
-        .katex-card-tips .katex-card-title { color: #F57C00; }
+        .katex-card-tips .katex-card-title { color: #E65100; }
         .katex-card-general { background: transparent; border: none; padding: 4px 0; }
-    """.trimIndent()
+        """.trimIndent()
+    }
 }
 
 /**

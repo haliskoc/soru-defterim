@@ -87,7 +87,7 @@ class AyarlarDataStore @Inject constructor(
         const val DEFAULT_ALAN = "SAYISAL"
         const val DEFAULT_AI_PROVIDER = "GEMINI"
         const val DEFAULT_GEMINI_MODEL = "gemini-3.7-flash"
-        const val DEFAULT_GROQ_MODEL = "llama-3.2-11b-vision-preview"
+        const val DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b"
         const val DEFAULT_NVIDIA_MODEL = "meta/llama-3.2-90b-vision-instruct"
         const val DEFAULT_DARK_THEME = 0 // 0: Sistem, 1: Açık, 2: Koyu
         const val DEFAULT_AUTO_BACKUP_ENABLED = false
@@ -162,6 +162,8 @@ class AyarlarDataStore @Inject constructor(
     )
 
     private val encryptedListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        cachedApiKey = null
+        cachedApiKeyAt = 0L
         when (key) {
             ENC_GEMINI_API_KEY -> {
                 _geminiApiKeyFlow.value = encryptedPrefs.getString(ENC_GEMINI_API_KEY, "") ?: ""
@@ -234,7 +236,7 @@ class AyarlarDataStore @Inject constructor(
             }
         }
         val currentGroqModel = prefs[KEY_GROQ_MODEL]?.trim().orEmpty()
-        if (currentGroqModel.isBlank() || currentGroqModel.contains("llama-4-scout") || currentGroqModel.contains("llama-4-maverick")) {
+        if (currentGroqModel.isBlank() || currentGroqModel.contains("llama-4-scout") || currentGroqModel.contains("llama-4-maverick") || currentGroqModel.contains("vision-preview")) {
             context.dataStore.edit { ds ->
                 ds[KEY_GROQ_MODEL] = DEFAULT_GROQ_MODEL
             }
@@ -471,12 +473,16 @@ class AyarlarDataStore @Inject constructor(
     }
 
     suspend fun setAiProvider(provider: AiProviderType) {
+        cachedApiKey = null
+        cachedApiKeyAt = 0L
         context.dataStore.edit { preferences ->
             preferences[KEY_AI_PROVIDER] = provider.name
         }
     }
 
     suspend fun setAiProvider(providerName: String) {
+        cachedApiKey = null
+        cachedApiKeyAt = 0L
         context.dataStore.edit { preferences ->
             preferences[KEY_AI_PROVIDER] = providerName
         }
@@ -488,6 +494,8 @@ class AyarlarDataStore @Inject constructor(
             encryptedPrefs.edit().putString(ENC_GEMINI_API_KEY, trimmed).commit()
         }
         _geminiApiKeyFlow.value = trimmed
+        cachedApiKey = null
+        cachedApiKeyAt = 0L
     }
 
     suspend fun setGroqApiKey(apiKey: String) {
@@ -496,6 +504,8 @@ class AyarlarDataStore @Inject constructor(
             encryptedPrefs.edit().putString(ENC_GROQ_API_KEY, trimmed).commit()
         }
         _groqApiKeyFlow.value = trimmed
+        cachedApiKey = null
+        cachedApiKeyAt = 0L
     }
 
     suspend fun setNvidiaApiKey(apiKey: String) {
@@ -504,6 +514,8 @@ class AyarlarDataStore @Inject constructor(
             encryptedPrefs.edit().putString(ENC_NVIDIA_API_KEY, trimmed).commit()
         }
         _nvidiaApiKeyFlow.value = trimmed
+        cachedApiKey = null
+        cachedApiKeyAt = 0L
     }
 
     suspend fun setGeminiModel(model: String) {
@@ -1099,4 +1111,59 @@ class AyarlarDataStore @Inject constructor(
     suspend fun getKameraOtomatikAlgila(): Boolean = kameraOtomatikAlgilaAkisi.first()
     suspend fun getKameraYuksekDogruluk(): Boolean = kameraYuksekDogrulukAkisi.first()
     suspend fun getKameraPerfOtomatik(): Boolean = kameraPerfOtomatikAkisi.first()
+
+    // ---------- AI Otomasyon: kaydette otomatik çözüm, toplu çözüm, görev bazlı yönlendirme ----------
+
+    private val keyAutoSolveOnSave = booleanPreferencesKey("auto_solve_on_save")
+    private val keyBatchSolveDelay = intPreferencesKey("batch_solve_delay_seconds")
+    private fun taskProviderKey(task: com.sorudefteri.domain.model.AiTaskType) =
+        stringPreferencesKey("task_route_provider_${task.name}")
+    private fun taskModelKey(task: com.sorudefteri.domain.model.AiTaskType) =
+        stringPreferencesKey("task_route_model_${task.name}")
+
+    val autoSolveOnSave: Flow<Boolean> = context.dataStore.data.map { it[keyAutoSolveOnSave] ?: false }
+    suspend fun setAutoSolveOnSave(enabled: Boolean) {
+        context.dataStore.edit { it[keyAutoSolveOnSave] = enabled }
+    }
+    suspend fun getAutoSolveOnSave(): Boolean = autoSolveOnSave.first()
+
+    val batchSolveDelaySeconds: Flow<Int> =
+        context.dataStore.data.map { (it[keyBatchSolveDelay] ?: 3).coerceIn(1, 10) }
+    suspend fun setBatchSolveDelaySeconds(s: Int) {
+        context.dataStore.edit { it[keyBatchSolveDelay] = s.coerceIn(1, 10) }
+    }
+    suspend fun getBatchSolveDelaySeconds(): Int = batchSolveDelaySeconds.first()
+
+    private fun readRoute(
+        prefs: Preferences,
+        task: com.sorudefteri.domain.model.AiTaskType
+    ): com.sorudefteri.domain.model.AiTaskRoute? {
+        val providerName = prefs[taskProviderKey(task)]?.takeIf { it.isNotBlank() } ?: return null
+        val provider = AiProviderType.entries.firstOrNull { it.name == providerName } ?: return null
+        val model = prefs[taskModelKey(task)]?.trim().orEmpty().ifBlank { provider.defaultModel }
+        return com.sorudefteri.domain.model.AiTaskRoute(provider, model)
+    }
+
+    val taskRoutes: Flow<Map<com.sorudefteri.domain.model.AiTaskType, com.sorudefteri.domain.model.AiTaskRoute?>> =
+        context.dataStore.data.map { prefs ->
+            com.sorudefteri.domain.model.AiTaskType.entries.associateWith { readRoute(prefs, it) }
+        }
+
+    suspend fun getTaskRoute(task: com.sorudefteri.domain.model.AiTaskType): com.sorudefteri.domain.model.AiTaskRoute? =
+        readRoute(context.dataStore.data.first(), task)
+
+    suspend fun setTaskRoute(
+        task: com.sorudefteri.domain.model.AiTaskType,
+        route: com.sorudefteri.domain.model.AiTaskRoute?
+    ) {
+        context.dataStore.edit { ds ->
+            if (route == null) {
+                ds.remove(taskProviderKey(task))
+                ds.remove(taskModelKey(task))
+            } else {
+                ds[taskProviderKey(task)] = route.provider.name
+                ds[taskModelKey(task)] = route.model.trim()
+            }
+        }
+    }
 }

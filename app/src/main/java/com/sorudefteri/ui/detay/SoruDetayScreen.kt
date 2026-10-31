@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.School
 import com.sorudefteri.ui.detay.components.ExternalAiMode
 import com.sorudefteri.ui.detay.components.ExternalAiShareDialog
 import com.sorudefteri.ui.detay.components.ManualSimilarQuestionDialog
+import com.sorudefteri.ui.detay.components.ManualTwinQuestionsDialog
+import com.sorudefteri.ui.detay.components.TwinQuestionsTestDialog
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -414,7 +416,12 @@ fun SoruDetayScreen(
                                     onSaveToLibrary = { viewModel.saveCurrentSimilarToLibrary() },
                                     onOpenSaved = { viewModel.openSavedSimilarQuestion(it) },
                                     onDeleteSaved = { viewModel.deleteSavedSimilarQuestion(it) },
-                                    onDismissSaveMessage = { viewModel.clearSimilarSaveMessage() }
+                                    onDismissSaveMessage = { viewModel.clearSimilarSaveMessage() },
+                                    onGenerateTwinQuestions = { viewModel.generateTwinQuestions() },
+                                    isGeneratingTwinQuestions = uiState.isGeneratingTwinQuestions,
+                                    twinQuestionsError = uiState.twinQuestionsError,
+                                    onExternalAiTwinShare = { viewModel.setShowExternalAiShareDialog(true, ExternalAiMode.TWIN_QUESTIONS) },
+                                    onPasteManualTwinQuestions = { viewModel.setShowManualTwinQuestionsDialog(true) }
                                 )
                                 Spacer(modifier = Modifier.navigationBarsPadding().height(48.dp))
                             }
@@ -557,7 +564,12 @@ fun SoruDetayScreen(
                                     onSaveToLibrary = { viewModel.saveCurrentSimilarToLibrary() },
                                     onOpenSaved = { viewModel.openSavedSimilarQuestion(it) },
                                     onDeleteSaved = { viewModel.deleteSavedSimilarQuestion(it) },
-                                    onDismissSaveMessage = { viewModel.clearSimilarSaveMessage() }
+                                    onDismissSaveMessage = { viewModel.clearSimilarSaveMessage() },
+                                    onGenerateTwinQuestions = { viewModel.generateTwinQuestions() },
+                                    isGeneratingTwinQuestions = uiState.isGeneratingTwinQuestions,
+                                    twinQuestionsError = uiState.twinQuestionsError,
+                                    onExternalAiTwinShare = { viewModel.setShowExternalAiShareDialog(true, ExternalAiMode.TWIN_QUESTIONS) },
+                                    onPasteManualTwinQuestions = { viewModel.setShowManualTwinQuestionsDialog(true) }
                                 )
                             }
 
@@ -633,7 +645,31 @@ fun SoruDetayScreen(
         )
     }
 
-    // Harici AI Paylaşım Dialogu (Hem Çözüm Hem Benzer Soru Modu Destekler)
+    // Harici 3 Kardeş Soru (Soru İkizleri) Yapıştırma Dialogu
+    if (uiState.showManualTwinQuestionsDialog) {
+        ManualTwinQuestionsDialog(
+            onDismiss = { viewModel.setShowManualTwinQuestionsDialog(false) },
+            onStartTest = { twinResult ->
+                viewModel.setShowTwinQuestionsTestDialog(true, twinResult)
+            },
+            onSaveToLibrary = { twinResult ->
+                viewModel.saveTwinQuestionsToLibrary(twinResult)
+            }
+        )
+    }
+
+    // 3 Soruluk Kardeş Testi İnteraktif Çözüm Dialogu
+    if (uiState.showTwinQuestionsTestDialog && uiState.activeTwinQuestionsResult != null) {
+        TwinQuestionsTestDialog(
+            twinResult = uiState.activeTwinQuestionsResult!!,
+            onDismiss = { viewModel.setShowTwinQuestionsTestDialog(false) },
+            onSaveToLibrary = { twinResult ->
+                viewModel.saveTwinQuestionsToLibrary(twinResult)
+            }
+        )
+    }
+
+    // Harici AI Paylaşım Dialogu (Çözüm, Benzer Soru ve 3 Soru İkizi Modları)
     if (uiState.showExternalAiShareDialog) {
         ExternalAiShareDialog(
             mode = uiState.externalAiShareMode,
@@ -645,10 +681,10 @@ fun SoruDetayScreen(
             imagePath = soru.imagePath,
             onDismiss = { viewModel.setShowExternalAiShareDialog(false) },
             onOpenPasteDialog = {
-                if (uiState.externalAiShareMode == ExternalAiMode.SOLUTION) {
-                    viewModel.setShowManualSolutionDialog(true)
-                } else {
-                    viewModel.setShowManualSimilarQuestionDialog(true)
+                when (uiState.externalAiShareMode) {
+                    ExternalAiMode.SOLUTION -> viewModel.setShowManualSolutionDialog(true)
+                    ExternalAiMode.SIMILAR_QUESTION -> viewModel.setShowManualSimilarQuestionDialog(true)
+                    ExternalAiMode.TWIN_QUESTIONS -> viewModel.setShowManualTwinQuestionsDialog(true)
                 }
             }
         )

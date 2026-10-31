@@ -17,6 +17,7 @@ import com.sorudefteri.domain.model.Badge
 import com.sorudefteri.domain.model.LevelInfo
 import com.sorudefteri.domain.model.UserLevel
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +27,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -123,7 +126,7 @@ fun IstatistikScreen(
     viewModel: IstatistikViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val scrollState = rememberScrollState()
+    val lazyListState = rememberLazyListState()
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val snackbarHostState = remember { androidx.compose.material3.SnackbarHostState() }
@@ -221,98 +224,54 @@ fun IstatistikScreen(
                     }
                 }
 
-                Box(
+                LazyColumn(
+                    state = lazyListState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(scrollState),
-                    contentAlignment = Alignment.TopCenter
+                        .widthIn(max = 900.dp),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .widthIn(max = 900.dp)
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
                     when (selectedStatTab) {
                         // ─────────────────────────────────────────────────
                         // SEKME 1 — ÖZET: kısa KPI'lar + haftalık karşılaştırma + bugün öneri + aktivite
                         // ─────────────────────────────────────────────────
                         0 -> {
                             if (uiState.totalCount > 0) {
-                                KpiGridSection(
-                                    totalCount = uiState.totalCount,
-                                    solvedCount = uiState.solvedCount,
-                                    unsolvedCount = uiState.unsolvedCount,
-                                    successRate = uiState.successRate
-                                )
+                                item {
+                                    KpiGridSection(
+                                        totalCount = uiState.totalCount,
+                                        solvedCount = uiState.solvedCount,
+                                        unsolvedCount = uiState.unsolvedCount,
+                                        successRate = uiState.successRate
+                                    )
+                                }
                             }
 
                             // YENİ: son 7 gün ↔ önceki 7 gün detay karşılaştırması
-                            HaftalikKarsilastirmaCard(
-                                karsilastirma = uiState.haftalikKarsilastirma
-                            )
+                            item {
+                                HaftalikKarsilastirmaCard(
+                                    karsilastirma = uiState.haftalikKarsilastirma
+                                )
+                            }
 
                             // FSRS Hafıza Kalıcılığı & Ebbinghaus Unutma Eğrisi Kartı
-                            FsrsMemoryRetentionCard(
-                                allQuestions = uiState.allQuestions,
-                                onStartDueTest = {
-                                    viewModel.startDueReviewTest(
-                                        onSuccess = onStartDueTest
-                                    )
-                                }
-                            )
+                            item {
+                                FsrsMemoryRetentionCard(
+                                    allQuestions = uiState.allQuestions,
+                                    onStartDueTest = {
+                                        viewModel.startDueReviewTest(
+                                            onSuccess = onStartDueTest
+                                        )
+                                    }
+                                )
+                            }
 
                             // YKS Dinamik Net Hedef & Sınav Simülatörü Kartı
-                            YksHedefSimulatorCard(
-                                allDenemeler = uiState.allDenemeler,
-                                allQuestions = uiState.allQuestions,
-                                onStartTargetedTest = { examType, subjectId, topic ->
-                                    viewModel.startTargetedTest(
-                                        examType = examType,
-                                        subjectId = subjectId,
-                                        topic = topic,
-                                        onSuccess = { onStartTargetedTest() }
-                                    )
-                                }
-                            )
-
-                            BugunkuAkilliOnerilerCard(
-                                dueCount = uiState.dueReviewCount,
-                                allQuestions = uiState.allQuestions,
-                                mistakeStats = uiState.mistakeStats,
-                                recentTestResults = uiState.recentTestResults,
-                                onStartDueTest = {
-                                    viewModel.startDueReviewTest(
-                                        onSuccess = onStartDueTest
-                                    )
-                                },
-                                onStartTargetedTest = { examType, subjectId, topic ->
-                                    viewModel.startTargetedTest(
-                                        examType = examType,
-                                        subjectId = subjectId,
-                                        topic = topic,
-                                        onSuccess = { onStartTargetedTest() }
-                                    )
-                                }
-                            )
-
-                            if (uiState.weeklyActivity.isNotEmpty()) {
-                                HaftalikAktiviteCard(weeklyActivity = uiState.weeklyActivity)
-                            }
-                        }
-
-                        // ─────────────────────────────────────────────────
-                        // SEKME 2 — DERSLER & KONULAR: nereye odaklanmalı + harita + dağılımlar
-                        // ─────────────────────────────────────────────────
-                        1 -> {
-                            // Bilişsel Hata Kök Neden & "Bedava Net" Geri Kazanım Kartı
-                            BilisselHataNetEtkisiCard(
-                                allQuestions = uiState.allQuestions
-                            )
-
-                            if (uiState.allQuestions.isNotEmpty()) {
-                                AcilEylemMatrisiCard(
+                            item {
+                                YksHedefSimulatorCard(
+                                    allDenemeler = uiState.allDenemeler,
                                     allQuestions = uiState.allQuestions,
                                     onStartTargetedTest = { examType, subjectId, topic ->
                                         viewModel.startTargetedTest(
@@ -325,25 +284,87 @@ fun IstatistikScreen(
                                 )
                             }
 
-                            KonuIsiHaritasiCard(
-                                allQuestions = uiState.allQuestions,
-                                konuKatalog = viewModel.konuKatalog,
-                                onStartTestForTopic = { examType, subjectId, topic ->
-                                    viewModel.startTargetedTest(
-                                        examType = examType,
-                                        subjectId = subjectId,
-                                        topic = topic,
-                                        onSuccess = { onStartTargetedTest() }
+                            item {
+                                BugunkuAkilliOnerilerCard(
+                                    dueCount = uiState.dueReviewCount,
+                                    allQuestions = uiState.allQuestions,
+                                    mistakeStats = uiState.mistakeStats,
+                                    recentTestResults = uiState.recentTestResults,
+                                    onStartDueTest = {
+                                        viewModel.startDueReviewTest(
+                                            onSuccess = onStartDueTest
+                                        )
+                                    },
+                                    onStartTargetedTest = { examType, subjectId, topic ->
+                                        viewModel.startTargetedTest(
+                                            examType = examType,
+                                            subjectId = subjectId,
+                                            topic = topic,
+                                            onSuccess = { onStartTargetedTest() }
+                                        )
+                                    }
+                                )
+                            }
+
+                            if (uiState.weeklyActivity.isNotEmpty()) {
+                                item {
+                                    HaftalikAktiviteCard(weeklyActivity = uiState.weeklyActivity)
+                                }
+                            }
+                        }
+
+                        // ─────────────────────────────────────────────────
+                        // SEKME 2 — DERSLER & KONULAR: nereye odaklanmalı + harita + dağılımlar
+                        // ─────────────────────────────────────────────────
+                        1 -> {
+                            // Bilişsel Hata Kök Neden & "Bedava Net" Geri Kazanım Kartı
+                            item {
+                                BilisselHataNetEtkisiCard(
+                                    allQuestions = uiState.allQuestions
+                                )
+                            }
+
+                            if (uiState.allQuestions.isNotEmpty()) {
+                                item {
+                                    AcilEylemMatrisiCard(
+                                        allQuestions = uiState.allQuestions,
+                                        onStartTargetedTest = { examType, subjectId, topic ->
+                                            viewModel.startTargetedTest(
+                                                examType = examType,
+                                                subjectId = subjectId,
+                                                topic = topic,
+                                                onSuccess = { onStartTargetedTest() }
+                                            )
+                                        }
                                     )
                                 }
-                            )
+                            }
+
+                            item {
+                                KonuIsiHaritasiCard(
+                                    allQuestions = uiState.allQuestions,
+                                    konuKatalog = viewModel.konuKatalog,
+                                    onStartTestForTopic = { examType, subjectId, topic ->
+                                        viewModel.startTargetedTest(
+                                            examType = examType,
+                                            subjectId = subjectId,
+                                            topic = topic,
+                                            onSuccess = { onStartTargetedTest() }
+                                        )
+                                    }
+                                )
+                            }
 
                             if (uiState.subjectStats.isNotEmpty()) {
-                                DersDagilimiCard(subjectStats = uiState.subjectStats)
+                                item {
+                                    DersDagilimiCard(subjectStats = uiState.subjectStats)
+                                }
                             }
 
                             if (uiState.mistakeStats.isNotEmpty()) {
-                                HataTipiDagilimiCard(mistakeStats = uiState.mistakeStats)
+                                item {
+                                    HataTipiDagilimiCard(mistakeStats = uiState.mistakeStats)
+                                }
                             }
                         }
 
@@ -351,119 +372,136 @@ fun IstatistikScreen(
                         // SEKME 3 — DENEMELER & TESTLER & AI TEŞHİS
                         // ─────────────────────────────────────────────────
                         2 -> {
-                            DenemeTakipCard(
-                                allDenemeler = uiState.allDenemeler,
-                                onAddDeneme = { showDenemeEkleDialog = true },
-                                onDeleteDeneme = { viewModel.deleteDeneme(it) },
-                                onDenemeClick = onNavigateToDenemeDetay,
-                                onScanOptical = onNavigateToOmrScan,
-                                onAddQuestionForDeneme = { deneme ->
-                                    onNavigateToSoruEkleForDeneme(
-                                        deneme.id,
-                                        deneme.baslik,
-                                        deneme.yayinEvi,
-                                        deneme.sinavTuru
-                                    )
-                                },
-                                onAddDenemeQuestion = { deneme ->
-                                    onNavigateToSoruEkleForDeneme(
-                                        deneme.id,
-                                        deneme.baslik,
-                                        deneme.yayinEvi,
-                                        deneme.sinavTuru
-                                    )
-                                }
-                            )
-
-                            // YKS Konu Bazlı Net Kayıp Tablosu
-                            DenemeDetayliAnalizCard(
-                                allDenemeler = uiState.allDenemeler,
-                                allQuestions = uiState.allQuestions,
-                                onStartTargetedTest = { examType, subjectId, topic ->
-                                    viewModel.startTargetedTest(
-                                        examType = examType,
-                                        subjectId = subjectId,
-                                        topic = topic,
-                                        onSuccess = { onStartTargetedTest() }
-                                    )
-                                }
-                            )
-
-                            // Yayınevi Performans & Zorluk Kıyaslama Radarı
-                            YayineviPerformansCard(
-                                allDenemeler = uiState.allDenemeler,
-                                allQuestions = uiState.allQuestions
-                            )
-
-                            if (uiState.recentTestResults.isNotEmpty()) {
-                                SonTestlerSection(
-                                    recentTests = uiState.recentTestResults,
-                                    totalTestCount = uiState.totalTestCount,
-                                    averageNet = uiState.averageNet
+                            item {
+                                DenemeTakipCard(
+                                    allDenemeler = uiState.allDenemeler,
+                                    onAddDeneme = { showDenemeEkleDialog = true },
+                                    onDeleteDeneme = { viewModel.deleteDeneme(it) },
+                                    onDenemeClick = onNavigateToDenemeDetay,
+                                    onScanOptical = onNavigateToOmrScan,
+                                    onAddQuestionForDeneme = { deneme ->
+                                        onNavigateToSoruEkleForDeneme(
+                                            deneme.id,
+                                            deneme.baslik,
+                                            deneme.yayinEvi,
+                                            deneme.sinavTuru
+                                        )
+                                    },
+                                    onAddDenemeQuestion = { deneme ->
+                                        onNavigateToSoruEkleForDeneme(
+                                            deneme.id,
+                                            deneme.baslik,
+                                            deneme.yayinEvi,
+                                            deneme.sinavTuru
+                                        )
+                                    }
                                 )
                             }
 
-                            DiagnosticAiInsightsCard(
-                                report = uiState.diagnosticReport,
-                                isGenerating = uiState.isGeneratingDiagnostic,
-                                error = uiState.diagnosticError,
-                                onGenerateReport = { viewModel.generateDiagnosticReport() },
-                                onClearReport = { viewModel.clearDiagnosticReport() }
-                            )
+                            // YKS Konu Bazlı Net Kayıp Tablosu
+                            item {
+                                DenemeDetayliAnalizCard(
+                                    allDenemeler = uiState.allDenemeler,
+                                    allQuestions = uiState.allQuestions,
+                                    onStartTargetedTest = { examType, subjectId, topic ->
+                                        viewModel.startTargetedTest(
+                                            examType = examType,
+                                            subjectId = subjectId,
+                                            topic = topic,
+                                            onSuccess = { onStartTargetedTest() }
+                                        )
+                                    }
+                                )
+                            }
+
+                            // Yayınevi Performans & Zorluk Kıyaslama Radarı
+                            item {
+                                YayineviPerformansCard(
+                                    allDenemeler = uiState.allDenemeler,
+                                    allQuestions = uiState.allQuestions
+                                )
+                            }
+
+                            if (uiState.recentTestResults.isNotEmpty()) {
+                                item {
+                                    SonTestlerSection(
+                                        recentTests = uiState.recentTestResults,
+                                        totalTestCount = uiState.totalTestCount,
+                                        averageNet = uiState.averageNet
+                                    )
+                                }
+                            }
+
+                            item {
+                                DiagnosticAiInsightsCard(
+                                    report = uiState.diagnosticReport,
+                                    isGenerating = uiState.isGeneratingDiagnostic,
+                                    error = uiState.diagnosticError,
+                                    onGenerateReport = { viewModel.generateDiagnosticReport() },
+                                    onClearReport = { viewModel.clearDiagnosticReport() }
+                                )
+                            }
                         }
 
                         // ─────────────────────────────────────────────────
                         // SEKME 4 — KİŞİSEL: seviye, rozetler, hikaye kartı
                         // ─────────────────────────────────────────────────
                         else -> {
-                            LevelProgressCard(
-                                levelInfo = uiState.levelInfo,
-                                currentStreak = uiState.currentStreak,
-                                streakShieldCount = uiState.streakShieldCount
-                            )
+                            item {
+                                LevelProgressCard(
+                                    levelInfo = uiState.levelInfo,
+                                    currentStreak = uiState.currentStreak,
+                                    streakShieldCount = uiState.streakShieldCount
+                                )
+                            }
 
-                            BadgesShowcaseCard(
-                                unlockedBadges = uiState.unlockedBadges
-                            )
+                            item {
+                                BadgesShowcaseCard(
+                                    unlockedBadges = uiState.unlockedBadges
+                                )
+                            }
 
-                            Button(
-                                onClick = {
-                                    coroutineScope.launch {
-                                        try {
-                                            val bitmap = withContext(Dispatchers.IO) {
-                                                StoryCardGenerator.generateStoryBitmap(
-                                                    context = context,
-                                                    currentStreak = uiState.currentStreak,
-                                                    successRate = uiState.successRate,
-                                                    levelTitle = uiState.levelInfo.level.title,
-                                                    levelNumber = uiState.levelInfo.level.levelNumber,
-                                                    totalXp = uiState.userXp,
-                                                    unlockedBadges = uiState.unlockedBadges,
-                                                    studentTarget = "Hedef: Cerrahpaşa Tıp"
-                                                )
+                            item {
+                                Button(
+                                    onClick = {
+                                        coroutineScope.launch {
+                                            try {
+                                                val bitmap = withContext(Dispatchers.IO) {
+                                                    StoryCardGenerator.generateStoryBitmap(
+                                                        context = context,
+                                                        currentStreak = uiState.currentStreak,
+                                                        successRate = uiState.successRate,
+                                                        levelTitle = uiState.levelInfo.level.title,
+                                                        levelNumber = uiState.levelInfo.level.levelNumber,
+                                                        totalXp = uiState.userXp,
+                                                        unlockedBadges = uiState.unlockedBadges,
+                                                        studentTarget = "Hedef: Cerrahpaşa Tıp"
+                                                    )
+                                                }
+                                                StoryCardGenerator.shareToStory(context, bitmap)
+                                            } catch (e: Exception) {
+                                                e.printStackTrace()
                                             }
-                                            StoryCardGenerator.shareToStory(context, bitmap)
-                                        } catch (e: Exception) {
-                                            e.printStackTrace()
                                         }
-                                    }
-                                },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6A1B9A))
-                            ) {
-                                Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
-                                Spacer(modifier = Modifier.width(8.dp))
-                                Text("📱 Hikayede Paylaş (9:16)", fontWeight = FontWeight.Bold, color = Color.White)
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6A1B9A))
+                                ) {
+                                    Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.White)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("📱 Hikayede Paylaş (9:16)", fontWeight = FontWeight.Bold, color = Color.White)
+                                }
                             }
                         }
                     }
 
-                    Spacer(
-                        modifier = Modifier
-                            .navigationBarsPadding()
-                            .height(24.dp)
-                    )
+                    item {
+                        Spacer(
+                            modifier = Modifier
+                                .navigationBarsPadding()
+                                .height(24.dp)
+                        )
                     }
                 }
             }

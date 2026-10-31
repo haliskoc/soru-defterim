@@ -122,6 +122,9 @@ class ViewModelsUnitTest {
         every { mockAyarlarDataStore.stylusDoubleTapActionFlow } returns flowOf(com.sorudefteri.ui.ortak.drawing.StylusDoubleTapAction.PEN_ERASER_TOGGLE)
         every { mockAyarlarDataStore.stylusPalmRejectionFlow } returns flowOf(true)
         every { mockAyarlarDataStore.stylusHapticFeedbackFlow } returns flowOf(true)
+        every { mockAyarlarDataStore.autoSolveOnSave } returns flowOf(false)
+        every { mockAyarlarDataStore.batchSolveDelaySeconds } returns flowOf(3)
+        every { mockAyarlarDataStore.taskRoutes } returns flowOf(emptyMap())
         every { mockAyarlarDataStore.promptSoruUretimiFlow } returns flowOf("")
         every { mockAyarlarDataStore.promptCozumUretimiFlow } returns flowOf("")
         every { mockAyarlarDataStore.promptOcrTemizlemeFlow } returns flowOf("")
@@ -157,12 +160,14 @@ class ViewModelsUnitTest {
         )
         var solutionResult: Result<String> = Result.success("Fake Solution")
         var similarResult: Result<SimilarQuestionResult> = Result.success(SimilarQuestionResult("", emptyMap(), "A", ""))
+        var twinQuestionsResult: Result<com.sorudefteri.domain.model.TwinQuestionsResult> = Result.success(com.sorudefteri.domain.model.TwinQuestionsResult())
 
         override suspend fun getAiSolution(soru: Soru, sendImage: Boolean, extractedText: String?): Result<String> = solutionResult
         override suspend fun getAiSolutionFromText(dersAdi: String, konu: String, soruMetni: String, correctAnswer: String?, mistakeType: String?): Result<String> = solutionResult
         override suspend fun cleanOcrText(rawOcrText: String): Result<String> = Result.success(rawOcrText)
         override suspend fun generateSimilarQuestion(imageBytes: ByteArray?, dersAdi: String, konu: String, soruMetni: String?): Result<SimilarQuestionResult> = similarResult
         override suspend fun generateSimilarQuestion(imageBytes: ByteArray, dersAdi: String, konu: String): Result<SimilarQuestionResult> = similarResult
+        override suspend fun generateTwinQuestions(soru: Soru, sendImage: Boolean, extractedText: String?): Result<com.sorudefteri.domain.model.TwinQuestionsResult> = twinQuestionsResult
         override suspend fun generateQuestion(dersAdi: String, konu: String, zorluk: String, alan: String, sinavTipi: String): Result<SimilarQuestionResult> = similarResult
         override suspend fun detectQuestionMetadata(imageBytes: ByteArray): Result<QuestionMetadata> = metadataResult
         override suspend fun hasApiKey(): Boolean = true
@@ -407,6 +412,17 @@ class ViewModelsUnitTest {
         // Tema modu değiştirme
         viewModel.setThemeMode(2)
         coVerify(exactly = 1) { mockAyarlarDataStore.setThemeMode(2) }
+
+        // AI Otomasyon ve Görev Yönlendirme
+        viewModel.setAutoSolveOnSave(true)
+        coVerify(exactly = 1) { mockAyarlarDataStore.setAutoSolveOnSave(true) }
+
+        viewModel.setBatchSolveDelaySeconds(5)
+        coVerify(exactly = 1) { mockAyarlarDataStore.setBatchSolveDelaySeconds(5) }
+
+        val sampleRoute = com.sorudefteri.domain.model.AiTaskRoute(AiProviderType.GROQ, "qwen/qwen3.8-27b")
+        viewModel.setTaskRoute(com.sorudefteri.domain.model.AiTaskType.COZUM, sampleRoute)
+        coVerify(exactly = 1) { mockAyarlarDataStore.setTaskRoute(com.sorudefteri.domain.model.AiTaskType.COZUM, sampleRoute) }
 
         // Canlı model listesi çekme (Başarılı)
         fakeAiRepository.liveModelsResult = Result.success(

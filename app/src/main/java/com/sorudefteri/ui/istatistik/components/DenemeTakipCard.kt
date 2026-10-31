@@ -416,6 +416,9 @@ private fun NetProgressionChart(
     val minNet = remember(nets) { (nets.minOrNull() ?: 0f).coerceAtLeast(0f) }
     val maxNet = remember(nets) { (nets.maxOrNull() ?: 100f).coerceAtLeast(minNet + 10f) }
 
+    val fillPath = remember { Path() }
+    val linePath = remember { Path() }
+
     Canvas(modifier = modifier) {
         val width = size.width
         val height = size.height
@@ -440,12 +443,11 @@ private fun NetProgressionChart(
         }
 
         // Alan Gradyanı (Gradient Fill)
-        val fillPath = Path().apply {
-            moveTo(points.first().x, paddingTop + plotHeight)
-            points.forEach { lineTo(it.x, it.y) }
-            lineTo(points.last().x, paddingTop + plotHeight)
-            close()
-        }
+        fillPath.reset()
+        fillPath.moveTo(points.first().x, paddingTop + plotHeight)
+        points.forEach { fillPath.lineTo(it.x, it.y) }
+        fillPath.lineTo(points.last().x, paddingTop + plotHeight)
+        fillPath.close()
 
         drawPath(
             path = fillPath,
@@ -460,11 +462,10 @@ private fun NetProgressionChart(
         )
 
         // Çizgi
-        val linePath = Path().apply {
-            moveTo(points.first().x, points.first().y)
-            for (i in 1 until points.size) {
-                lineTo(points[i].x, points[i].y)
-            }
+        linePath.reset()
+        linePath.moveTo(points.first().x, points.first().y)
+        for (i in 1 until points.size) {
+            linePath.lineTo(points[i].x, points[i].y)
         }
 
         drawPath(

@@ -470,6 +470,10 @@ private fun EbbinghausCurveCanvas(
     val idealBoostColor = SuccessGreen
     val thresholdColor = ErrorRed
 
+    val currentPath = remember { Path() }
+    val boostPath = remember { Path() }
+    val fillPath = remember { Path() }
+
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
@@ -494,8 +498,9 @@ private fun EbbinghausCurveCanvas(
 
         // Mevcut S ile R(t) = exp(-t / S) eğrisi (t = 0..30 gün)
         val steps = 30
-        val currentPath = Path()
-        val boostPath = Path()
+        currentPath.reset()
+        boostPath.reset()
+        fillPath.reset()
         val boostedStability = (stabilityDays * 2.2f).coerceAtLeast(7f)
 
         for (day in 0..steps) {
@@ -515,12 +520,10 @@ private fun EbbinghausCurveCanvas(
             }
         }
 
-        val fillPath = Path().apply {
-            addPath(currentPath)
-            lineTo(padL + plotW, padT + plotH)
-            lineTo(padL, padT + plotH)
-            close()
-        }
+        fillPath.addPath(currentPath)
+        fillPath.lineTo(padL + plotW, padT + plotH)
+        fillPath.lineTo(padL, padT + plotH)
+        fillPath.close()
 
         drawPath(
             path = fillPath,

@@ -400,10 +400,12 @@ fun DrawingOverlayCanvas(
     ) {
         // Çizim Kanvası Katmanı
         if (isCanvasVisible) {
+            val needsOffscreen = currentTool == DrawingToolType.ERASER || strokes.any { it.toolType == DrawingToolType.ERASER }
+            val dynamicCompositingStrategy = if (needsOffscreen) CompositingStrategy.Offscreen else CompositingStrategy.Auto
             Canvas(
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)
+                    .graphicsLayer(compositingStrategy = dynamicCompositingStrategy)
                     .then(
                         if (currentDrawingActive) {
                             Modifier.pointerInteropFilter { motionEvent ->

@@ -118,6 +118,12 @@ class MainActivity : ComponentActivity() {
 
     private fun extractDeepLinkTarget(intent: Intent?): String? {
         if (intent == null) return null
+        // AI çözüm bildiriminden gelen soru detayı deep link'i
+        val openSoruId = intent.getLongExtra("open_soru_id", -1L)
+        if (openSoruId > 0) {
+            intent.removeExtra("open_soru_id")
+            return "soru::$openSoruId"
+        }
         val navigateTo = intent.getStringExtra("navigate_to")
         if (!navigateTo.isNullOrBlank()) return navigateTo
         val deepLink = intent.getStringExtra("deepLink")

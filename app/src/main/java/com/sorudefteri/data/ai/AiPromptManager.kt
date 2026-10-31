@@ -70,6 +70,66 @@ class AiPromptManager @Inject constructor(
             }
         """.trimIndent()
 
+        val PROMPT_KARDES_SORULAR_DEFAULT = """
+            Sen ÖSYM ve MEB müfredatına tam hakim kıdemli bir Soru Yazarısın.
+            Öğrenci bu soruyu çözerken zorlandı veya yanlış yaptı. Görevin, öğrencinin soruyu ezberlemediğini, mantığını ve kavramını gerçekten kavradığını sınamak için kaynak sorudaki KAZANIMI VE FORMÜLÜ BİREBİR KORUYAN FAKAT BİRBİRİNDEN FARKLI TAM 3 ÖZGÜN KARDEŞ SORU (SORU İKİZİ) üretmektir.
+
+            3 KARDEŞ SORUNUN ROLLERİ:
+            1. Soru (Sayı & Değer Varyasyonu - Kolay/Orta):
+               - Kaynak soru ile aynı senaryo ve düzenek. Sayılar, parametreler veya değişkenler değiştirilmiş. Temel formülün kavranışını pekiştirir.
+            2. Soru (Hikaye & Bağlam Varyasyonu - Orta):
+               - Aynı matematiksel/fiziksel kazanım, ancak yepyeni bir günlük hayat hikayesi veya farklı bir bağlamsal problem kurgusu.
+            3. Soru (Tersine Akıl Yürütme & Kavram Tuzağı - Orta/Zor):
+               - Sorulan ve verilen bilgilerin yer değiştirdiği (tersine çıkarım) veya öğrencilerin en çok düştüğü çeldirici tuzağı sınayan derinleştirme sorusu.
+
+            KATI KURALLAR:
+            1. Matematiksel ifadeleri standart LaTeX formatında (${'$'}...${'$'}) yaz. Kesirli ifadeleri MUTLAKA \frac{pay}{payda} şeklinde yaz (örn: ${'$'}\frac{3}{5}${'$'}). Limit için \lim, karekök için \sqrt kullan.
+            2. JSON sözdizimini bozmamak için string içindeki LaTeX ters eğik çizgilerini çift kaçışlı (\\frac, \\sqrt, \\lim, \\neq) yaz.
+            3. Her soru 5 seçenekli (A, B, C, D, E) olmalı ve TEK BİR KESİN DOĞRU CEVABI olmalıdır.
+            4. Her soru için:
+               - "solution": Adım adım anlaşılır çözüm (1., 2., 3. adımlar).
+               - "trapWarning": Bu soruda öğrencinin düşebileceği kavram yanılgısı veya işlem tuzağı uyarısı.
+            5. GÖRSELSİZ VE KENDİ KENDİNE YETEN: Metin içinde "şekildeki gibi", "grafiğe göre" gibi görsel atfı KESİNLİKLE kullanma; tüm parametreleri metinle tanımla.
+
+            ÇIKTI FORMATI:
+            SADECE aşağıdaki geçerli JSON formatında yanıt ver, fazladan sohbet veya markdown ekleme:
+            {
+              "originalTopic": "İlgili Konu / Kazanım Adı",
+              "questions": [
+                {
+                  "id": 1,
+                  "questionText": "1. kardeş soru metni...",
+                  "options": {
+                    "A": "A seçeneği",
+                    "B": "B seçeneği",
+                    "C": "C seçeneği",
+                    "D": "D seçeneği",
+                    "E": "E seçeneği"
+                  },
+                  "correctAnswer": "A",
+                  "solution": "1. Soru için adım adım çözüm...",
+                  "trapWarning": "Öğrencilerin düşebileceği tuzak: ..."
+                },
+                {
+                  "id": 2,
+                  "questionText": "2. kardeş soru metni...",
+                  "options": {"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."},
+                  "correctAnswer": "B",
+                  "solution": "2. Soru için adım adım çözüm...",
+                  "trapWarning": "Tuzak analizi: ..."
+                },
+                {
+                  "id": 3,
+                  "questionText": "3. kardeş soru metni...",
+                  "options": {"A": "...", "B": "...", "C": "...", "D": "...", "E": "..."},
+                  "correctAnswer": "C",
+                  "solution": "3. Soru için adım adım çözüm...",
+                  "trapWarning": "Tuzak analizi: ..."
+                }
+              ]
+            }
+        """.trimIndent()
+
         val PROMPT_COZUM_URETIMI_DEFAULT = """
             Sen Türkiye YKS (TYT / AYT), LGS ve KPSS sınavlarına hazırlanan öğrenciler için alanında uzman, pedagojik formasyona sahip kıdemli bir öğretmensin. 15+ yıllık deneyiminle verilen soruyu, konuyu daha önce hiç görmemiş bir öğrencinin bile tamamen anlayacağı şekilde, adım adım ve pedagojik yöntemlerle açıkla.
 
@@ -337,6 +397,35 @@ class AiPromptManager @Inject constructor(
         customTemplate: String? = null
     ): String {
         val basePrompt = customTemplate?.ifBlank { null } ?: getEffectivePrompt(AiPromptType.BENZER_SORU)
+        val safeDers = sanitize(dersAdi, MAX_LEN_DERS)
+        val safeKonu = sanitize(konu, MAX_LEN_KONU)
+        val sourceInfo = if (!kaynakSoruMetni.isNullOrBlank()) {
+            val safeSrc = sanitize(kaynakSoruMetni, MAX_LEN_SORU_METNI)
+            wrapTrustedBlock("kaynak_soru_metni", safeSrc)
+        } else {
+            "Görseldeki kaynak soruyu analiz et."
+        }
+
+        return """
+            $basePrompt
+
+            ---
+            Ders: ${wrapTrustedBlock("ders", safeDers)}
+            Konu: ${wrapTrustedBlock("konu", safeKonu)}
+            $sourceInfo
+        """.trimIndent()
+    }
+
+    /**
+     * 3 Soruluk Kardeş Testi (Soru İkizleri) için tam prompt oluşturur.
+     */
+    suspend fun buildKardesSorularPrompt(
+        dersAdi: String,
+        konu: String,
+        kaynakSoruMetni: String? = null,
+        customTemplate: String? = null
+    ): String {
+        val basePrompt = customTemplate?.ifBlank { null } ?: PROMPT_KARDES_SORULAR_DEFAULT
         val safeDers = sanitize(dersAdi, MAX_LEN_DERS)
         val safeKonu = sanitize(konu, MAX_LEN_KONU)
         val sourceInfo = if (!kaynakSoruMetni.isNullOrBlank()) {

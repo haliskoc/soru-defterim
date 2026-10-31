@@ -227,6 +227,12 @@ fun AyarlarScreen(
                             onGroqModelSelected = { viewModel.setGroqModel(it) },
                             onNvidiaModelSelected = { viewModel.setNvidiaModel(it) },
                             onFetchLiveModelsClick = { viewModel.fetchLiveModels(it) },
+                            autoSolveOnSave = uiState.autoSolveOnSave,
+                            batchSolveDelaySeconds = uiState.batchSolveDelaySeconds,
+                            taskRoutes = uiState.taskRoutes,
+                            onAutoSolveOnSaveChanged = { viewModel.setAutoSolveOnSave(it) },
+                            onBatchSolveDelayChanged = { viewModel.setBatchSolveDelaySeconds(it) },
+                            onTaskRouteChanged = { task, route -> viewModel.setTaskRoute(task, route) },
                             customPrompts = mapOf(
                                 com.sorudefteri.data.ai.AiPromptType.SORU_URETIMI to promptSoru,
                                 com.sorudefteri.data.ai.AiPromptType.COZUM_URETIMI to promptCozum,

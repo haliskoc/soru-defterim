@@ -296,4 +296,18 @@ class MathMarkdownParserTest {
         assertTrue("\\right bozulmamalı", normalized.contains("\\right"))
         assertTrue("\\frac{a}{b} bozulmamalı", normalized.contains("\\frac{a}{b}"))
     }
+
+    @Test
+    fun formatMathSymbols_dfacTfacTfracVeCokluKacislariCozumler() {
+        val raw = """\\\\frac{1}{2} + \dfac{3}{4} + \tfac{5}{6} + \tfrac{7}{8}"""
+        val formatted = formatMathSymbols(raw)
+
+        assertTrue("(1 / 2) çözülmeli", formatted.contains("(1 / 2)"))
+        assertTrue("(3 / 4) çözülmeli", formatted.contains("(3 / 4)"))
+        assertTrue("(5 / 6) çözülmeli", formatted.contains("(5 / 6)"))
+        assertTrue("(7 / 8) çözülmeli", formatted.contains("(7 / 8)"))
+        assertFalse("dfac kalmamalı", formatted.contains("dfac"))
+        assertFalse("tfac kalmamalı", formatted.contains("tfac"))
+        assertFalse("tfrac kalmamalı", formatted.contains("tfrac"))
+    }
 }

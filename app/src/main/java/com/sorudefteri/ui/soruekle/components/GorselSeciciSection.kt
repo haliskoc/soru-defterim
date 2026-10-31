@@ -334,6 +334,9 @@ fun GorselSeciciSection(
                     }
 
                     Row {
+                        IconButton(onClick = { isDrawingDialogOpen = true }) {
+                            Icon(Icons.Default.Brush, contentDescription = "Çizim Yap")
+                        }
                         IconButton(onClick = { onOpenCropper(true) }) {
                             Icon(Icons.Default.Crop, contentDescription = "Kırp")
                         }

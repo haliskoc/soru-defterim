@@ -47,6 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -65,6 +66,10 @@ enum class ExternalAiMode(val title: String, val subtitle: String) {
     SIMILAR_QUESTION(
         title = "Harici AI ile Benzer Soru Türet",
         subtitle = "Bu sorunun mantığı ve kazanımını temel alan yeni bir soru üretip uygulamaya aktarın."
+    ),
+    TWIN_QUESTIONS(
+        title = "3 Soruluk Soru İkizi (Kardeş Test)",
+        subtitle = "Yanlış çözülen konuyu pekiştirmek için 3 soruluk mini test üretin ve çözün."
     )
 }
 
@@ -102,6 +107,15 @@ fun ExternalAiShareDialog(
                     ders = dersAdi,
                     konu = topic,
                     kaynakSoruMetni = questionText
+                )
+            }
+            ExternalAiMode.TWIN_QUESTIONS -> {
+                ExternalAiPromptHelper.buildExternalTwinQuestionsPrompt(
+                    ders = dersAdi,
+                    konu = topic,
+                    soruMetni = questionText,
+                    dogruCevap = correctAnswer,
+                    hataTuru = mistakeType
                 )
             }
         }
@@ -293,26 +307,69 @@ fun ExternalAiShareDialog(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Buton 1: Promptu Kopyala & Uygulamayı Aç
-            Button(
-                onClick = {
-                    AiChatbotShareHelper.openChatbot(context, selectedBot, promptText)
-                },
-                shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.fillMaxWidth()
+            // Tek Tıkla Doğrudan Gemini ve ChatGPT Yönlendirme Butonları
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Promptu Kopyala & ${selectedBot.displayName}'i Aç",
-                    fontWeight = FontWeight.Bold
-                )
+                Button(
+                    onClick = {
+                        AiChatbotShareHelper.openChatbot(context, AiBotType.GEMINI, promptText)
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A73E8)),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Gemini'de Aç",
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+
+                Button(
+                    onClick = {
+                        AiChatbotShareHelper.openChatbot(context, AiBotType.CHATGPT, promptText)
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF10A37F)),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "ChatGPT'de Aç",
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                }
+            }
+
+            // Seçilen Diğer Chatbot Butonu (Gemini/ChatGPT dışındakiler için örn: Claude, DeepSeek)
+            if (selectedBot != AiBotType.GEMINI && selectedBot != AiBotType.CHATGPT) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
+                        AiChatbotShareHelper.openChatbot(context, selectedBot, promptText)
+                    },
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = selectedBot.color),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Promptu Kopyala & ${selectedBot.displayName}'i Aç",
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Buton 2: Soru Görseli + Prompt ile Paylaş
+            // Buton: Soru Görseli + Prompt ile Paylaş
             OutlinedButton(
                 onClick = {
                     AiChatbotShareHelper.shareWithImageAndPrompt(context, selectedBot, imagePath, promptText)
@@ -350,10 +407,11 @@ fun ExternalAiShareDialog(
                             color = MaterialTheme.colorScheme.secondary
                         )
                         Text(
-                            text = if (mode == ExternalAiMode.SOLUTION)
-                                "Chatbot'un çözümünü kopyalayıp buraya yapıştırın."
-                            else
-                                "Chatbot'un ürettiği benzer soruyu tek tıkla yapıştırın.",
+                            text = when (mode) {
+                                ExternalAiMode.SOLUTION -> "Chatbot'un çözümünü kopyalayıp buraya yapıştırın."
+                                ExternalAiMode.SIMILAR_QUESTION -> "Chatbot'un ürettiği benzer soruyu tek tıkla yapıştırın."
+                                ExternalAiMode.TWIN_QUESTIONS -> "Chatbot'un ürettiği 3 soruluk JSON testini yapıştırın."
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -370,7 +428,13 @@ fun ExternalAiShareDialog(
                     ) {
                         Icon(Icons.Default.ContentPaste, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text(if (mode == ExternalAiMode.SOLUTION) "Çözümü Yapıştır" else "Soruyu Yapıştır")
+                        Text(
+                            when (mode) {
+                                ExternalAiMode.SOLUTION -> "Çözümü Yapıştır"
+                                ExternalAiMode.SIMILAR_QUESTION -> "Soruyu Yapıştır"
+                                ExternalAiMode.TWIN_QUESTIONS -> "Testi Yapıştır"
+                            }
+                        )
                     }
                 }
             }

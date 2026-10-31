@@ -3,6 +3,12 @@ package com.sorudefteri.ui.kutuphane
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -16,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -67,6 +74,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
@@ -81,9 +89,11 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import com.sorudefteri.data.worker.BatchSolveProgress
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -172,6 +182,7 @@ fun KutuphaneScreen(
     val pagedSorular = viewModel.pagedSorular.collectAsLazyPagingItems()
     val currentStreak by viewModel.currentStreak.collectAsStateWithLifecycle()
     val streakShieldCount by viewModel.streakShieldCount.collectAsStateWithLifecycle()
+    val batchProgress by viewModel.batchProgress.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -267,6 +278,13 @@ fun KutuphaneScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { viewModel.solveSelectedWithAi() }) {
+                            Icon(
+                                imageVector = Icons.Default.AutoAwesome,
+                                contentDescription = "AI ile Çöz (${uiState.selectedSoruIds.size})",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
                         IconButton(onClick = {
                             if (uiState.isAllSelected) viewModel.clearSelection() else viewModel.selectAll()
                         }) {
@@ -333,7 +351,7 @@ fun KutuphaneScreen(
                                             )
                                         },
                                         onClick = {
-                                            viewModel.onSortOrderChange(order)
+                                            viewModel.setSortOrder(order)
                                             sortMenuExpanded = false
                                         },
                                         leadingIcon = {
@@ -420,47 +438,71 @@ fun KutuphaneScreen(
             }
         },
         bottomBar = {
-            if (showBottomBar) {
-                // TELEFON: taşmayan 2 satırlı seçim çubuğu (tablet de kullanır — küçük düzeltme)
-                PhoneSecimAltBar(
-                    seciliSayi = uiState.selectedSoruIds.size,
-                    onCozuldu = { viewModel.batchMarkSolvedSelected(true) },
-                    onYildizla = { viewModel.batchStarSelected(true) },
-                    onPdf = {
-                        coroutineScope.launch {
-                            val selectedQuestions = withContext(Dispatchers.IO) {
-                                viewModel.getSelectedSorular()
-                            }
-                            if (selectedQuestions.isEmpty()) {
-                                snackbarHostState.showSnackbar("Lütfen en az bir soru seçin.")
-                            } else {
-                                questionsForPdfExport = selectedQuestions
-                                showPdfExportDialog = true
-                            }
-                        }
-                    },
-                    onAnki = {
-                        coroutineScope.launch {
-                            val selectedQuestions = withContext(Dispatchers.IO) {
-                                viewModel.getSelectedSorular()
-                            }
-                            if (selectedQuestions.isEmpty()) {
-                                snackbarHostState.showSnackbar("Lütfen en az bir soru seçin.")
-                                return@launch
-                            }
-                            try {
-                                val ankiFile = withContext(Dispatchers.IO) {
-                                    AnkiExportHelper.exportQuestionsToAnkiPackage(context, selectedQuestions)
+            val showBatchProgress = batchProgress.running && batchProgress.total > 0
+            if (showBottomBar || showBatchProgress) {
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    AnimatedVisibility(
+                        visible = showBatchProgress,
+                        enter = fadeIn() + expandVertically(),
+                        exit = fadeOut() + shrinkVertically()
+                    ) {
+                        BatchProgressCard(
+                            progress = batchProgress,
+                            onCancel = { viewModel.cancelBatchSolve() },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 6.dp)
+                        )
+                    }
+
+                    if (showBottomBar) {
+                        // TELEFON: taşmayan 2 satırlı seçim çubuğu (tablet de kullanır — küçük düzeltme)
+                        PhoneSecimAltBar(
+                            seciliSayi = uiState.selectedSoruIds.size,
+                            onCozuldu = { viewModel.batchMarkSolvedSelected(true) },
+                            onYildizla = { viewModel.batchStarSelected(true) },
+                            onPdf = {
+                                coroutineScope.launch {
+                                    val selectedQuestions = withContext(Dispatchers.IO) {
+                                        viewModel.getSelectedSorular()
+                                    }
+                                    if (selectedQuestions.isEmpty()) {
+                                        snackbarHostState.showSnackbar("Lütfen en az bir soru seçin.")
+                                    } else {
+                                        questionsForPdfExport = selectedQuestions
+                                        showPdfExportDialog = true
+                                    }
                                 }
-                                AnkiExportHelper.shareExportedDeck(context, ankiFile)
-                                snackbarHostState.showSnackbar("Anki destesi hazırlandı (${selectedQuestions.size} soru)")
-                            } catch (e: Exception) {
-                                snackbarHostState.showSnackbar("Anki destesi oluşturulamadı: ${e.localizedMessage ?: "Bilinmeyen hata"}")
-                            }
-                        }
-                    },
-                    onSil = { showBatchDeleteDialog = true }
-                )
+                            },
+                            onAnki = {
+                                coroutineScope.launch {
+                                    val selectedQuestions = withContext(Dispatchers.IO) {
+                                        viewModel.getSelectedSorular()
+                                    }
+                                    if (selectedQuestions.isEmpty()) {
+                                        snackbarHostState.showSnackbar("Lütfen en az bir soru seçin.")
+                                        return@launch
+                                    }
+                                    try {
+                                        val ankiFile = withContext(Dispatchers.IO) {
+                                            AnkiExportHelper.exportQuestionsToAnkiPackage(context, selectedQuestions)
+                                        }
+                                        AnkiExportHelper.shareExportedDeck(context, ankiFile)
+                                        snackbarHostState.showSnackbar("Anki destesi hazırlandı (${selectedQuestions.size} soru)")
+                                    } catch (e: Exception) {
+                                        snackbarHostState.showSnackbar("Anki destesi oluşturulamadı: ${e.localizedMessage ?: "Bilinmeyen hata"}")
+                                    }
+                                }
+                            },
+                            onSil = { showBatchDeleteDialog = true },
+                            onAiCoz = { viewModel.solveSelectedWithAi() }
+                        )
+                    } else if (showBatchProgress) {
+                        Spacer(modifier = Modifier.navigationBarsPadding())
+                    }
+                }
             }
         },
         floatingActionButton = {
@@ -842,6 +884,8 @@ private fun PhoneKutuphaneIcerik(
                 uiState.selectedExamType != null ||
                 uiState.selectedSubjectId != null ||
                 uiState.selectedMistakeType != null ||
+                uiState.selectedPublisher != null ||
+                uiState.selectedExamName != null ||
                 uiState.onlyUnsolved ||
                 uiState.onlyFavorites ||
                 uiState.onlyDueReview
@@ -1011,6 +1055,8 @@ private fun QuestionListHeaderAndGrid(
                     uiState.selectedExamType != null ||
                     uiState.selectedSubjectId != null ||
                     uiState.selectedMistakeType != null ||
+                    uiState.selectedPublisher != null ||
+                    uiState.selectedExamName != null ||
                     uiState.onlyUnsolved ||
                     uiState.onlyFavorites ||
                     uiState.onlyDueReview
@@ -1329,6 +1375,102 @@ private fun TabletDetailPane(
             }
 
             Spacer(modifier = Modifier.height(72.dp))
+        }
+    }
+}
+
+/**
+ * Toplu AI çözümü arka planda sürerken gösterilen canlı ilerleme kartı.
+ */
+@Composable
+private fun BatchProgressCard(
+    progress: BatchSolveProgress,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val progressFraction = if (progress.total > 0) {
+        (progress.completed.toFloat() / progress.total.toFloat()).coerceIn(0f, 1f)
+    } else 0f
+
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f),
+        tonalElevation = 6.dp,
+        shadowElevation = 8.dp,
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+        ),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(28.dp)
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.5.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Toplu AI Çözümü",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "${progress.completed}/${progress.total} tamamlandı",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                LinearProgressIndicator(
+                    progress = { progressFraction },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            TextButton(
+                onClick = onCancel,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                )
+            ) {
+                Text(
+                    text = "Durdur",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }

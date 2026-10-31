@@ -25,11 +25,10 @@ enum class AiProviderType(
     ),
     GROQ(
         displayName = "Groq",
-        defaultModel = "llama-3.2-11b-vision-preview",
+        defaultModel = "qwen/qwen3.8-27b",
         supportedModels = listOf(
-            "llama-3.2-11b-vision-preview" to "Llama 3.2 11B Vision (Hızlı & Görsel)",
-            "llama-3.2-90b-vision-preview" to "Llama 3.2 90B Vision (Gelişmiş & Görsel)",
-            "llama-3.3-70b-versatile" to "Llama 3.3 70B Versatile (Metin)",
+            "qwen/qwen3.8-27b" to "Qwen 3.8 27B (Önerilen - Görsel & Akıl Yürütme)",
+            "llama-3.3-70b-versatile" to "Llama 3.3 70B Versatile (Hızlı & Metin)",
             "llama-3.1-8b-instant" to "Llama 3.1 8B Instant (Hafif & Hızlı)"
         ),
         consoleUrl = "https://console.groq.com/keys",
@@ -47,7 +46,7 @@ enum class AiProviderType(
             "meta/llama-3.1-70b-instruct" to "Llama 3.1 70B Instruct (Metin)",
             "nvidia/llama-3.1-nemotron-70b-instruct" to "Nemotron 70B Instruct (NVIDIA Metin)"
         ),
-        consoleUrl = "https://build.nvidia.com/explore/reasoning",
+        consoleUrl = "https://build.nvidia.com/meta/llama-3.2-90b-vision-instruct",
         consoleName = "NVIDIA Build"
     );
 

@@ -724,9 +724,16 @@ open class BackupManager @Inject constructor(
                 )
             }
             val existingByHash: MutableMap<String, SoruEntity> = HashMap<String, SoruEntity>().apply {
-                if (soruDedupDao != null) {
-                    itemHashes.filter { it.isNotBlank() }.distinct().chunked(400).forEach { batch ->
-                        putAll(soruDedupDao.getByContentHashes(batch).associateBy { it.contentHash })
+                val validHashes = itemHashes.filter { it.isNotBlank() }.distinct()
+                if (validHashes.isNotEmpty()) {
+                    if (soruDedupDao != null) {
+                        validHashes.chunked(400).forEach { batch ->
+                            putAll(soruDedupDao.getByContentHashes(batch).associateBy { it.contentHash })
+                        }
+                    } else if (soruRepository is com.sorudefteri.data.repository.SoruRepositoryImpl) {
+                        validHashes.chunked(400).forEach { batch ->
+                            putAll(soruRepository.getSoruEntitiesByContentHashes(batch).associateBy { it.contentHash })
+                        }
                     }
                 }
             }

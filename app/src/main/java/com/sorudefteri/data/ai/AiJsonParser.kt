@@ -4,6 +4,8 @@ import com.sorudefteri.domain.model.AiErrorType
 import com.sorudefteri.domain.model.AiException
 import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
+import com.sorudefteri.domain.model.TwinQuestion
+import com.sorudefteri.domain.model.TwinQuestionsResult
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.Json
 
@@ -119,6 +121,24 @@ object AiJsonParser {
                 questionText = cleanEscapedNewlines(obj.questionText),
                 options = normalizedOptions,
                 solution = cleanEscapedNewlines(obj.solution)
+            ) as T
+        }
+        if (obj is TwinQuestionsResult) {
+            val processedQuestions = obj.questions.map { q ->
+                val normalizedOptions = q.options.mapValues { (_, v) ->
+                    cleanEscapedNewlines(v)
+                }
+                q.copy(
+                    questionText = cleanEscapedNewlines(q.questionText),
+                    options = normalizedOptions,
+                    solution = cleanEscapedNewlines(q.solution),
+                    trapWarning = q.trapWarning?.let { cleanEscapedNewlines(it) }
+                )
+            }
+            @Suppress("UNCHECKED_CAST")
+            return obj.copy(
+                originalTopic = obj.originalTopic.trim(),
+                questions = processedQuestions
             ) as T
         }
         return obj
@@ -280,7 +300,7 @@ object AiJsonParser {
 
             // 2. Çözüm Ayıklama (Çözüm / Açıklama / Solution etiketinden sonrası)
             val solRegex = Regex(
-                """(?m)(?:^|\n)\s*(?:\*\*)?(?:Çözüm|Ayrıntılı\s*Çözüm|Adım\s*Adım\s*Çözüm|Detaylı\s*Çözüm|Açıklama|Solution)\s*(?:\*\*)?\s*[:：]?\s*([\s\S]*)""",
+                """(?m)(?:^|\n)\s*(?:\*\*)?(?:Çözüm|Ayrıntılı\s*Çözüm|Adım\s*Adım\s*Çözüm|Detaylı\s*Çözüm|Açıklama|Solution)\s*(?:\*\*)?\s*[:：]?\s*([\s\S]*?)(?=(?:\r?\n\s*(?:\*\*)?(?:Tuzak|Tuzak\s*Uyarısı|Tuzak\s*Analizi|Trap\s*Warning))|\Z)""",
                 RegexOption.IGNORE_CASE
             )
             val solMatch = solRegex.find(text)
@@ -296,7 +316,7 @@ object AiJsonParser {
 
             // Çok satırlı şık formatı: A) ... veya - A) ... veya **A)** ... veya A. ... veya A - ...
             val multiLineOptRegex = Regex(
-                """(?m)(?:^|\n)\s*(?:[-*•]\s*)?(?:\*\*)?(?:\[|\()?([A-Ea-e])(?:\]|\))?[\.\:\-]?\s*(?:\*\*)?\s*(.+?)(?=(?:\r?\n\s*(?:[-*•]\s*)?(?:\*\*)?(?:\[|\()?[A-Ea-e](?:\]|\))?[\.\:\-])|(?:\r?\n\s*(?:\*\*)?(?:Doğru\s*Cevap|Cevap|Doğru\s*Seçenek|Doğru\s*Şık|Yanıt|Correct\s*Answer|Çözüm|Açıklama|Solution))|\Z)""",
+                """(?m)(?:^|\n)\s*(?:[-*•]\s*)?(?:\*\*)?(?:\[|\()?([A-Ea-e])(?:(?:\]|\))|[\.\:\-])\s*(?:\*\*)?\s*(.+?)(?=(?:\r?\n\s*(?:[-*•]\s*)?(?:\*\*)?(?:\[|\()?[A-Ea-e](?:(?:\]|\))|[\.\:\-])\s*)|(?:\r?\n\s*(?:\*\*)?(?:Doğru\s*Cevap|Cevap|Doğru\s*Seçenek|Doğru\s*Şık|Yanıt|Correct\s*Answer|Çözüm|Açıklama|Solution|Tuzak))|\Z)""",
                 setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)
             )
             val matches = multiLineOptRegex.findAll(text).toList()
@@ -420,5 +440,290 @@ object AiJsonParser {
         } catch (_: Exception) {
         }
         return null
+    }
+
+    /**
+     * LLM'lerin ürettiği bozuk JSON yapılarını onarır:
+     * - Fazlalık trailing comma'ları (, } veya , ]) temizler
+     * - Eğer kök nesne dizi ([...]) ise {"questions": [...]} ile sarar
+     * - Alternatif alan isimlerini (twinQuestions, sorular -> questions) standartlaştırır
+     * - Kapanmayan tırnak ve eksik kapanış parantezlerini (}, ]) tamamlar
+     */
+    fun repairJsonStructure(jsonStr: String): String {
+        if (jsonStr.isBlank()) return ""
+        var text = jsonStr.trim()
+
+        // 1. Dizi olarak döndüyse nesneye sar
+        if (text.startsWith("[") && text.endsWith("]")) {
+            text = "{\"questions\": $text}"
+        } else if (text.startsWith("[") && !text.endsWith("}") && !text.endsWith("]")) {
+            text = "{\"questions\": $text"
+        }
+
+        // 2. Alternatif anahtar isimlerini eşle
+        text = text.replace(Regex(""""(?:twinQuestions|sorular|kardesSorular)"\s*:""", RegexOption.IGNORE_CASE), "\"questions\":")
+        text = text.replace(Regex(""""(?:konu|dersKonusu|kazanim)"\s*:""", RegexOption.IGNORE_CASE), "\"originalTopic\":")
+
+        // 3. Trailing commas (virgülden sonra doğrudan kapanan süslü veya köşeli parantez)
+        text = text.replace(Regex(""",\s*([}\]])"""), "$1")
+
+        // 4. Kapanmayan parantezleri ve köşeli parantezleri tamamla
+        var openBraces = 0
+        var openBrackets = 0
+        var inString = false
+        var isEscaped = false
+
+        for (c in text) {
+            if (isEscaped) {
+                isEscaped = false
+                continue
+            }
+            if (c == '\\') {
+                isEscaped = true
+                continue
+            }
+            if (c == '"') {
+                inString = !inString
+                continue
+            }
+            if (!inString) {
+                when (c) {
+                    '{' -> openBraces++
+                    '}' -> if (openBraces > 0) openBraces--
+                    '[' -> openBrackets++
+                    ']' -> if (openBrackets > 0) openBrackets--
+                }
+            }
+        }
+
+        if (inString) {
+            text += "\""
+        }
+        if (openBrackets > 0 || openBraces > 0) {
+            val sb = StringBuilder(text)
+            repeat(openBrackets) { sb.append("]") }
+            repeat(openBraces) { sb.append("}") }
+            text = sb.toString()
+        }
+
+        text = text.replace(Regex(""",\s*([}\]])"""), "$1")
+        return text
+    }
+
+    /**
+     * JSON metni içindeki dengeli süslü parantezli ({ ... }) en üst seviye nesneleri ayıklar.
+     * İç içe nesneleri (örn: options: { A: ... }) doğru derinlikle takip eder.
+     */
+    fun extractTopLevelJsonObjects(text: String): List<String> {
+        val objects = mutableListOf<String>()
+        var depth = 0
+        var startIndex = -1
+        var inString = false
+        var isEscaped = false
+
+        for (i in text.indices) {
+            val c = text[i]
+
+            if (isEscaped) {
+                isEscaped = false
+                continue
+            }
+
+            if (c == '\\') {
+                isEscaped = true
+                continue
+            }
+
+            if (c == '"') {
+                inString = !inString
+                continue
+            }
+
+            if (!inString) {
+                if (c == '{') {
+                    if (depth == 0) {
+                        startIndex = i
+                    }
+                    depth++
+                } else if (c == '}') {
+                    depth--
+                    if (depth == 0 && startIndex != -1) {
+                        objects.add(text.substring(startIndex, i + 1))
+                        startIndex = -1
+                    } else if (depth < 0) {
+                        depth = 0
+                    }
+                }
+            }
+        }
+        return objects
+    }
+
+    /**
+     * Ham metin veya JSON dizisinden soru nesnelerini ayıklar.
+     */
+    fun extractQuestionObjects(text: String): List<String> {
+        val questionsArrayMatch = Regex(""""(?:questions|twinQuestions|sorular|kardesSorular)"\s*:\s*\[""", RegexOption.IGNORE_CASE).find(text)
+        val searchSubstr = if (questionsArrayMatch != null) {
+            text.substring(questionsArrayMatch.range.last)
+        } else {
+            text
+        }
+        val allObjs = extractTopLevelJsonObjects(searchSubstr)
+        return allObjs.filter { objStr ->
+            objStr.contains("questionText", ignoreCase = true) ||
+            objStr.contains("options", ignoreCase = true) ||
+            objStr.contains("correctAnswer", ignoreCase = true)
+        }
+    }
+
+    /**
+     * Düz metin halindeki çoklu soru çıktılarını ayrıştırır (Örn: 1. Soru: ... A) ... 2. Soru: ...).
+     */
+    fun parseTwinQuestionsPlainText(rawText: String): TwinQuestionsResult? {
+        val topicRegex = Regex("""(?m)(?:^|\n)\s*(?:\*\*)?(?:Konu|Topic|Kazanım|originalTopic)\s*(?:\*\*)?\s*[:：]?\s*([^\n\r]+)""", RegexOption.IGNORE_CASE)
+        val topic = topicRegex.find(rawText)?.groupValues?.get(1)?.trim().orEmpty()
+
+        val questionSplitRegex = Regex("""(?m)(?:^|\n)\s*(?:\*\*)?(?:[1-3][\.\)]\s*Soru|Soru\s*[1-3]|Kardeş\s*Soru\s*[1-3]|#+\s*[1-3][\.\)])\s*[:：]?""", RegexOption.IGNORE_CASE)
+        val matches = questionSplitRegex.findAll(rawText).toList()
+        if (matches.isEmpty()) return null
+
+        val questions = mutableListOf<TwinQuestion>()
+        for (i in matches.indices) {
+            val start = matches[i].range.first
+            val end = if (i + 1 < matches.size) matches[i + 1].range.first else rawText.length
+            val section = rawText.substring(start, end).trim()
+
+            val singleResult = parseSimilarQuestionFallback(section)
+            if (singleResult != null && (singleResult.questionText.isNotBlank() || singleResult.options.isNotEmpty())) {
+                val trapRegex = Regex("""(?:\*\*)?(?:Tuzak\s*Uyarısı|Tuzak\s*Analizi|Tuzak|Kavram\s*Tuzağı|Trap\s*Warning)\s*(?:\*\*)?\s*[:：]?\s*([^\n\r]+(?:\n(?!\s*(?:[A-E][\.\)]|Çözüm|Doğru\s*Cevap))[^\n\r]+)*)""", RegexOption.IGNORE_CASE)
+                val trapWarning = trapRegex.find(section)?.groupValues?.get(1)?.trim()
+
+                questions.add(
+                    TwinQuestion(
+                        id = i + 1,
+                        questionText = singleResult.questionText,
+                        options = singleResult.options,
+                        correctAnswer = singleResult.correctAnswer,
+                        solution = singleResult.solution,
+                        trapWarning = trapWarning
+                    )
+                )
+            }
+        }
+
+        if (questions.isNotEmpty()) {
+            return TwinQuestionsResult(originalTopic = topic, questions = questions)
+        }
+        return null
+    }
+
+    /**
+     * Regex ve yapısal analiz tabanlı TwinQuestionsResult kurtarma fallback'i.
+     */
+    fun parseTwinQuestionsFallback(rawText: String): TwinQuestionsResult? {
+        if (rawText.isBlank()) return null
+
+        val topicRegex = Regex(""""?(?:originalTopic|topic|konu|kazanim)"?\s*:\s*["']((?:[^"'\\]|\\.)*)["']""", RegexOption.IGNORE_CASE)
+        val originalTopic = topicRegex.find(rawText)?.groupValues?.get(1)?.let { normalizeSafeEscapes(it) }?.trim().orEmpty()
+
+        // 1. JSON nesnesi ayıklama yöntemi
+        val questionObjs = extractQuestionObjects(rawText)
+        if (questionObjs.isNotEmpty()) {
+            val questions = mutableListOf<TwinQuestion>()
+            for ((index, objStr) in questionObjs.withIndex()) {
+                val qId = Regex(""""?id"?\s*:\s*(\d+)""", RegexOption.IGNORE_CASE)
+                    .find(objStr)?.groupValues?.get(1)?.toIntOrNull() ?: (index + 1)
+
+                val similar = parseSimilarQuestionFallback(objStr)
+                val trapRegex = Regex(""""?(?:trapWarning|tuzak|tuzakUyarisi|tuzakAnalizi)"?\s*:\s*["']((?:[^"'\\]|\\.)*)["']""", RegexOption.IGNORE_CASE)
+                val trapWarning = trapRegex.find(objStr)?.groupValues?.get(1)?.let { normalizeSafeEscapes(it) }?.trim()
+
+                if (similar != null && (similar.questionText.isNotBlank() || similar.options.isNotEmpty())) {
+                    questions.add(
+                        TwinQuestion(
+                            id = qId,
+                            questionText = similar.questionText,
+                            options = similar.options,
+                            correctAnswer = similar.correctAnswer,
+                            solution = similar.solution,
+                            trapWarning = trapWarning
+                        )
+                    )
+                }
+            }
+            if (questions.isNotEmpty()) {
+                return TwinQuestionsResult(originalTopic = originalTopic, questions = questions)
+            }
+        }
+
+        // 2. Düz metin ayrıştırma yöntemi
+        val plainTextResult = parseTwinQuestionsPlainText(rawText)
+        if (plainTextResult != null && plainTextResult.questions.isNotEmpty()) {
+            return if (originalTopic.isNotBlank() && plainTextResult.originalTopic.isBlank()) {
+                plainTextResult.copy(originalTopic = originalTopic)
+            } else {
+                plainTextResult
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Yanlış Soru İkizi (3 Soruluk Kardeş Test) için AI JSON veya metin yanıtını ayrıştırır.
+     * Markdown kod bloklarını (```json ... ```), kaçışsız LaTeX komutlarını (\frac, \sqrt),
+     * eksik kapanış parantezlerini, trailing virgülleri ve serbest metin çıktılarını onararak
+     * dayanıklı (resilient) biçimde TwinQuestionsResult nesnesine dönüştürür.
+     */
+    fun parseTwinQuestionsResult(rawJson: String): Result<TwinQuestionsResult> {
+        if (rawJson.isBlank()) {
+            return Result.failure(
+                AiException(
+                    errorType = AiErrorType.PARSING_FAILED,
+                    userFriendlyMessage = "AI yanıtı boş geldi."
+                )
+            )
+        }
+
+        val cleanCandidate = extractJsonPayload(rawJson)
+
+        // 1. Standart cleanAndParseJson denemesi (LaTeX sanitization + standart decode)
+        val standardResult = cleanAndParseJson(
+            rawText = rawJson,
+            serializer = TwinQuestionsResult.serializer(),
+            fallbackParser = { parseTwinQuestionsFallback(it) }
+        )
+        if (standardResult.isSuccess && standardResult.getOrNull()?.questions?.isNotEmpty() == true) {
+            return standardResult
+        }
+
+        // 2. Yapısal onarım (repairJsonStructure: trailing comma, array sarma, eksik parantez) sonrası deneme
+        val repaired = repairJsonStructure(cleanCandidate)
+        val repairedResult = cleanAndParseJson(
+            rawText = repaired,
+            serializer = TwinQuestionsResult.serializer(),
+            fallbackParser = { parseTwinQuestionsFallback(it) }
+        )
+        if (repairedResult.isSuccess && repairedResult.getOrNull()?.questions?.isNotEmpty() == true) {
+            return repairedResult
+        }
+
+        // 3. Doğrudan fallback parser (Regex / Parantez dengeleyici / Düz metin)
+        val fallbackResult = parseTwinQuestionsFallback(rawJson)
+            ?: parseTwinQuestionsFallback(cleanCandidate)
+            ?: parseTwinQuestionsFallback(repaired)
+
+        if (fallbackResult != null && fallbackResult.questions.isNotEmpty()) {
+            return Result.success(postProcessDecoded(fallbackResult))
+        }
+
+        return standardResult.exceptionOrNull()?.let { Result.failure(it) }
+            ?: Result.failure(
+                AiException(
+                    errorType = AiErrorType.PARSING_FAILED,
+                    userFriendlyMessage = "3'lü kardeş soru JSON çıktısı çözümlenemedi. Ham yanıt: ${rawJson.take(150)}"
+                )
+            )
     }
 }

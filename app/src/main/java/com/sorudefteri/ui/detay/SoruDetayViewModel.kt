@@ -19,6 +19,8 @@ import com.sorudefteri.domain.model.toBenzerSoru
 import com.sorudefteri.domain.repository.SoruRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -74,6 +76,12 @@ data class SoruDetayUiState(
     val showExternalAiShareDialog: Boolean = false,
     val externalAiShareMode: com.sorudefteri.ui.detay.components.ExternalAiMode = com.sorudefteri.ui.detay.components.ExternalAiMode.SOLUTION,
     val showManualSimilarQuestionDialog: Boolean = false,
+    // 3 Soruluk Soru İkizi (Kardeş Test) State
+    val showManualTwinQuestionsDialog: Boolean = false,
+    val showTwinQuestionsTestDialog: Boolean = false,
+    val activeTwinQuestionsResult: com.sorudefteri.domain.model.TwinQuestionsResult? = null,
+    val isGeneratingTwinQuestions: Boolean = false,
+    val twinQuestionsError: String? = null,
     // Sokratik AI Chatbot
     val chatMessages: List<SoruChatMessageEntity> = emptyList(),
     val isChatSending: Boolean = false,
@@ -103,6 +111,7 @@ class SoruDetayViewModel @Inject constructor(
         listenCameraCapture()
         loadSavedSimilarQuestions()
         loadChatMessages()
+        observeBackgroundWork()
     }
 
     private fun listenCameraCapture() {
@@ -295,22 +304,48 @@ class SoruDetayViewModel @Inject constructor(
         }
     }
 
+    private fun observeBackgroundWork() {
+        if (soruId <= 0L) return
+        viewModelScope.launch {
+            WorkManager.getInstance(appContext)
+                .getWorkInfosByTagFlow(AiSolutionRetryWorker.tagForSoru(soruId))
+                .collectLatest { workInfos ->
+                    val hasActiveWork = workInfos.any {
+                        it.state == WorkInfo.State.ENQUEUED || it.state == WorkInfo.State.RUNNING
+                    }
+                    if (hasActiveWork) {
+                        _uiState.update {
+                            it.copy(
+                                isAiLoading = true,
+                                isAiQueuedForRetry = false
+                            )
+                        }
+                    } else if (_uiState.value.isAiLoading) {
+                        // Work tamamlandı (SUCCEEDED, FAILED, CANCELLED)
+                        val lastFailed = workInfos.firstOrNull { it.state == WorkInfo.State.FAILED }
+                        val errorMsg = lastFailed?.outputData?.getString(AiSolutionRetryWorker.KEY_ERROR_MESSAGE)
+                        _uiState.update { current ->
+                            current.copy(
+                                isAiLoading = false,
+                                aiError = if (current.soru?.aiExplanation.isNullOrBlank()) {
+                                    errorMsg ?: current.aiError
+                                } else null
+                            )
+                        }
+                    }
+                }
+        }
+    }
+
     /**
      * AI çözüm isteği (Koşullu OCR destekli: Görsel toggle'ı ve ayıklanan metin desteğiyle).
+     * ViewModelScope iptal olsa bile arka planda çalışması için WorkManager'a devredilir.
      */
     fun requestAiSolution() {
         if (_uiState.value.isAiLoading) return
         val currentSoru = _uiState.value.soru ?: return
 
         viewModelScope.launch {
-            _uiState.update {
-                it.copy(
-                    isAiLoading = true,
-                    aiError = null,
-                    isApiKeyMissing = false
-                )
-            }
-
             val hasKey = aiRepository.hasApiKey()
             if (!hasKey) {
                 _uiState.update {
@@ -335,64 +370,27 @@ class SoruDetayViewModel @Inject constructor(
                 return@launch
             }
 
-            val result = try {
-                aiRepository.getAiSolution(
-                    soru = currentSoru,
-                    sendImage = fresh.sendImageToAi,
+            _uiState.update {
+                it.copy(
+                    isAiLoading = true,
+                    aiError = null,
+                    isApiKeyMissing = false,
+                    isAiQueuedForRetry = false
+                )
+            }
+
+            try {
+                AiSolutionRetryWorker.enqueueManualSolve(
+                    context = appContext,
+                    soruId = currentSoru.id,
+                    sendImageToAi = fresh.sendImageToAi,
                     extractedText = fresh.extractedOcrText
                 )
             } catch (e: Exception) {
-                // Ensure loading flag cleared if repository throws (e.g., cancellation)
-                _uiState.update { it.copy(isAiLoading = false, aiError = e.localizedMessage) }
-                return@launch
-            }
-
-            result.onSuccess { explanation ->
-                val updated = currentSoru.copy(
-                    aiExplanation = explanation,
-                    updatedAt = System.currentTimeMillis()
-                )
-                soruRepository.soruGuncelle(updated)
                 _uiState.update {
                     it.copy(
                         isAiLoading = false,
-                        aiError = null,
-                        isApiKeyMissing = false,
-                        isAiQueuedForRetry = false
-                    )
-                }
-            }.onFailure { throwable ->
-                val errorMessage = throwable.localizedMessage
-                    ?: "Yapay zeka çözümü alınırken bir hata oluştu. Lütfen bağlantınızı veya API anahtarınızı kontrol edin."
-                val isAuthError = errorMessage.contains("API anahtarı", ignoreCase = true) || throwable is AiException && throwable.errorType == AiErrorType.INVALID_API_KEY
-                val isNetworkError = throwable is AiException && (throwable.errorType == AiErrorType.NETWORK_ERROR || throwable.errorType == AiErrorType.NETWORK_TIMEOUT)
-                        || errorMessage.contains("İnternet", ignoreCase = true) || errorMessage.contains("Ağ iletişim", ignoreCase = true)
-
-                // Çevrimdışı kuyruk: ağ hatası ise WorkManager ile otomatik yeniden dene
-                var queued = false
-                if (isNetworkError) {
-                    try {
-                        val fq = _uiState.value
-                        AiSolutionRetryWorker.enqueue(
-                            context = appContext,
-                            soruId = currentSoru.id,
-                            sendImageToAi = fq.sendImageToAi,
-                            extractedText = fq.extractedOcrText?.take(9000)
-                        )
-                        queued = true
-                    } catch (_: Exception) {}
-                }
-
-                val displayError = if (queued) {
-                    "$errorMessage\n\n📡 İnternet yok — çözüm çevrimdışı kuyruğa alındı. Bağlantı gelince otomatik denenecek ve bildirim alacaksınız."
-                } else errorMessage
-
-                _uiState.update {
-                    it.copy(
-                        isAiLoading = false,
-                        aiError = displayError,
-                        isApiKeyMissing = isAuthError,
-                        isAiQueuedForRetry = queued
+                        aiError = "Arka plan işlemi başlatılamadı: ${e.localizedMessage}"
                     )
                 }
             }
@@ -442,6 +440,82 @@ class SoruDetayViewModel @Inject constructor(
 
     fun setShowManualSimilarQuestionDialog(show: Boolean) {
         _uiState.update { it.copy(showManualSimilarQuestionDialog = show) }
+    }
+
+    fun setShowManualTwinQuestionsDialog(show: Boolean) {
+        _uiState.update { it.copy(showManualTwinQuestionsDialog = show) }
+    }
+
+    fun setShowTwinQuestionsTestDialog(show: Boolean, result: com.sorudefteri.domain.model.TwinQuestionsResult? = null) {
+        _uiState.update {
+            it.copy(
+                showTwinQuestionsTestDialog = show,
+                activeTwinQuestionsResult = result ?: it.activeTwinQuestionsResult
+            )
+        }
+    }
+
+    /**
+     * 3 Soruluk Kardeş Testi sorularını kütüphaneye bağımsız soru kayıtları olarak ekler.
+     */
+    fun saveTwinQuestionsToLibrary(
+        twinResult: com.sorudefteri.domain.model.TwinQuestionsResult,
+        onComplete: (Int) -> Unit = {}
+    ) {
+        val parent = _uiState.value.soru ?: return
+        viewModelScope.launch {
+            try {
+                var count = 0
+                twinResult.questions.forEachIndexed { index, q ->
+                    val optionsText = q.options.toSortedMap().entries
+                        .joinToString("\n") { (k, v) -> "$k) $v" }
+                    val noteBuilder = StringBuilder()
+                    val role = when (index) {
+                        0 -> "Sayı & Değer Varyasyonu"
+                        1 -> "Senaryo & Hikaye Varyasyonu"
+                        else -> "Tersine Akıl Yürütme & Kavram Tuzağı"
+                    }
+                    noteBuilder.append("🧩 Kaynak soru #${parent.id} ikizi (Soru ${index + 1}/3 - $role)\n")
+                    if (!q.trapWarning.isNullOrBlank()) {
+                        noteBuilder.append("⚠️ Dikkat Tuzağı: ${q.trapWarning}\n")
+                    }
+                    noteBuilder.append("\n")
+                    if (optionsText.isNotBlank()) {
+                        noteBuilder.append(optionsText).append("\n\n")
+                    }
+                    parent.note?.takeIf { it.isNotBlank() }?.let {
+                        noteBuilder.append("Kaynak notu: $it")
+                    }
+
+                    val newSoru = parent.copy(
+                        id = 0L,
+                        questionText = q.questionText.ifBlank { null },
+                        ocrMetni = q.questionText.ifBlank { parent.ocrMetni },
+                        correctAnswer = q.correctAnswer.ifBlank { null },
+                        aiExplanation = q.solution.ifBlank { null },
+                        note = noteBuilder.toString().trim().ifBlank { null },
+                        isSolved = false,
+                        solvedAt = null,
+                        isFavorite = false,
+                        reviewStage = 0,
+                        nextReviewDate = null,
+                        lastReviewedAt = null,
+                        createdAt = System.currentTimeMillis() + index,
+                        updatedAt = System.currentTimeMillis() + index
+                    )
+                    soruRepository.soruEkle(newSoru)
+                    count++
+                }
+                _uiState.update {
+                    it.copy(similarSaveMessage = "$count kardeş soru kütüphanenize eklendi ✓")
+                }
+                onComplete(count)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(similarSaveMessage = "Kütüphaneye kayıt başarısız: ${e.localizedMessage}")
+                }
+            }
+        }
     }
 
     /**
@@ -788,6 +862,70 @@ class SoruDetayViewModel @Inject constructor(
                     it.copy(
                         isGeneratingSimilar = false,
                         similarQuestionError = "Benzer soru üretilemedi: ${throwable.localizedMessage}"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Bu sorunun kazanımından 3 farklı kardeş soru (Soru İkizleri) türetir ve interaktif testi başlatır.
+     */
+    fun generateTwinQuestions() {
+        if (_uiState.value.isGeneratingTwinQuestions) return
+        val currentSoru = _uiState.value.soru ?: return
+
+        viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    isGeneratingTwinQuestions = true,
+                    twinQuestionsError = null
+                )
+            }
+
+            val hasKey = aiRepository.hasApiKey()
+            if (!hasKey) {
+                _uiState.update {
+                    it.copy(
+                        isGeneratingTwinQuestions = false,
+                        twinQuestionsError = "Soru ikizi üretmek için lütfen Ayarlar sayfasından API anahtarınızı girin veya harici AI kullanın."
+                    )
+                }
+                return@launch
+            }
+
+            val fresh = _uiState.value
+            val bytes = if (fresh.sendImageToAi) {
+                try { gorselDepo.getGorselBytes(currentSoru.imagePath) } catch (_: Exception) { null }
+            } else null
+
+            val dersAdi = com.sorudefteri.domain.DersTaksonomisi.getDersAdi(currentSoru.examType, currentSoru.subjectId)
+            val result = try {
+                aiRepository.generateTwinQuestions(
+                    imageBytes = bytes,
+                    dersAdi = dersAdi,
+                    konu = currentSoru.topic,
+                    soruMetni = fresh.extractedOcrText ?: currentSoru.ocrMetni
+                )
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isGeneratingTwinQuestions = false, twinQuestionsError = e.localizedMessage) }
+                return@launch
+            }
+
+            result.onSuccess { twinResult ->
+                _uiState.update {
+                    it.copy(
+                        isGeneratingTwinQuestions = false,
+                        twinQuestionsError = null,
+                        activeTwinQuestionsResult = twinResult,
+                        showTwinQuestionsTestDialog = true
+                    )
+                }
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        isGeneratingTwinQuestions = false,
+                        twinQuestionsError = err.message ?: "3 soru ikizi üretilemedi."
                     )
                 }
             }

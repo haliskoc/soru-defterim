@@ -518,6 +518,9 @@ private fun BezierNetTrendCanvas(
         maxOf(nets.maxOrNull() ?: 100f, targetNet) + 5f
     }
 
+    val bezierPath = remember { Path() }
+    val fillPath = remember { Path() }
+
     Canvas(modifier = modifier) {
         val w = size.width
         val h = size.height
@@ -552,23 +555,21 @@ private fun BezierNetTrendCanvas(
         }
 
         // Yumuşak Bezier Eğrisi
-        val bezierPath = Path().apply {
-            moveTo(points.first().x, points.first().y)
-            for (i in 0 until points.size - 1) {
-                val p0 = points[i]
-                val p1 = points[i + 1]
-                val controlX1 = (p0.x + p1.x) / 2f
-                val controlX2 = (p0.x + p1.x) / 2f
-                cubicTo(controlX1, p0.y, controlX2, p1.y, p1.x, p1.y)
-            }
+        bezierPath.reset()
+        bezierPath.moveTo(points.first().x, points.first().y)
+        for (i in 0 until points.size - 1) {
+            val p0 = points[i]
+            val p1 = points[i + 1]
+            val controlX1 = (p0.x + p1.x) / 2f
+            val controlX2 = (p0.x + p1.x) / 2f
+            bezierPath.cubicTo(controlX1, p0.y, controlX2, p1.y, p1.x, p1.y)
         }
 
-        val fillPath = Path().apply {
-            addPath(bezierPath)
-            lineTo(points.last().x, padTop + plotH)
-            lineTo(points.first().x, padTop + plotH)
-            close()
-        }
+        fillPath.reset()
+        fillPath.addPath(bezierPath)
+        fillPath.lineTo(points.last().x, padTop + plotH)
+        fillPath.lineTo(points.first().x, padTop + plotH)
+        fillPath.close()
 
         drawPath(
             path = fillPath,

@@ -11,6 +11,7 @@ import com.sorudefteri.domain.model.AiErrorType
 import com.sorudefteri.domain.model.AiException
 import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
+import com.sorudefteri.domain.model.TwinQuestionsResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -46,7 +47,7 @@ open class GroqProvider @Inject constructor(
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
 
     companion object {
-        const val FALLBACK_MODEL = "llama-3.2-11b-vision-preview"
+        const val FALLBACK_MODEL = "qwen/qwen3.8-27b"
         const val MAX_RETRIES = 3
     }
 
@@ -86,14 +87,13 @@ open class GroqProvider @Inject constructor(
 
                     val models = listResponse.data.orEmpty()
                         .filter { it.active != false }
-                        .filter { it.id.contains("vision", ignoreCase = true) || it.id.contains("llama", ignoreCase = true) }
+                        .filter { it.id.contains("vision", ignoreCase = true) || it.id.contains("llama", ignoreCase = true) || it.id.contains("qwen", ignoreCase = true) }
                         .map { item -> item.id to item.id }
 
                     if (models.isEmpty()) {
                         Result.success(
                             listOf(
-                                "llama-3.2-11b-vision-preview" to "llama-3.2-11b-vision-preview",
-                                "llama-3.2-90b-vision-preview" to "llama-3.2-90b-vision-preview",
+                                "qwen/qwen3.8-27b" to "qwen/qwen3.8-27b",
                                 "llama-3.3-70b-versatile" to "llama-3.3-70b-versatile",
                                 "llama-3.1-8b-instant" to "llama-3.1-8b-instant"
                             )
@@ -165,7 +165,13 @@ open class GroqProvider @Inject constructor(
             customTemplate = customPromptTemplate
         )
         val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
-        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) FALLBACK_MODEL else rawModel
+        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) {
+            FALLBACK_MODEL
+        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true) && !rawModel.contains("qwen", ignoreCase = true)) {
+            FALLBACK_MODEL
+        } else {
+            rawModel
+        }
         executeGroqWithRetry(imageBytes, prompt, effectiveModel, apiKey)
     }
 
@@ -186,7 +192,7 @@ open class GroqProvider @Inject constructor(
         val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
         val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) {
             FALLBACK_MODEL
-        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true)) {
+        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true) && !rawModel.contains("qwen", ignoreCase = true)) {
             FALLBACK_MODEL
         } else {
             rawModel
@@ -237,7 +243,7 @@ open class GroqProvider @Inject constructor(
         val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
         val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) {
             FALLBACK_MODEL
-        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true)) {
+        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true) && !rawModel.contains("qwen", ignoreCase = true)) {
             FALLBACK_MODEL
         } else {
             rawModel
@@ -251,6 +257,43 @@ open class GroqProvider @Inject constructor(
                 fallbackParser = { AiJsonParser.parseSimilarQuestionFallback(it) }
             )
             parseResult.getOrThrow()
+        }
+    }
+
+    /**
+     * Kaynak sorudan 3 farklı kardeş soru (Soru İkizleri) türetir:
+     * 1. Soru: Sayı & Değer Varyasyonu
+     * 2. Soru: Hikaye & Bağlam Varyasyonu
+     * 3. Soru: Tersine Akıl Yürütme & Kavram Tuzağı
+     */
+    open suspend fun generateTwinQuestions(
+        imageBytes: ByteArray?,
+        dersAdi: String,
+        konu: String,
+        soruMetni: String? = null,
+        modelName: String,
+        apiKey: String,
+        customPromptTemplate: String? = null
+    ): Result<TwinQuestionsResult> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Groq API anahtarı boş olamaz.")
+            )
+        }
+
+        val prompt = promptManager.buildKardesSorularPrompt(dersAdi, konu, soruMetni, customPromptTemplate)
+        val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
+        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) {
+            FALLBACK_MODEL
+        } else if (imageBytes != null && imageBytes.isNotEmpty() && !rawModel.contains("vision", ignoreCase = true) && !rawModel.contains("qwen", ignoreCase = true)) {
+            FALLBACK_MODEL
+        } else {
+            rawModel
+        }
+
+        val rawResult = executeGroqWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+        rawResult.mapCatching { rawText ->
+            AiJsonParser.parseTwinQuestionsResult(rawText).getOrThrow()
         }
     }
 
@@ -310,7 +353,11 @@ open class GroqProvider @Inject constructor(
         }
 
         val rawModel = modelName.trim().removePrefix("models/").ifBlank { FALLBACK_MODEL }
-        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick")) FALLBACK_MODEL else rawModel
+        val effectiveModel = if (rawModel.contains("llama-4-scout") || rawModel.contains("llama-4-maverick") || (!rawModel.contains("vision", ignoreCase = true) && !rawModel.contains("qwen", ignoreCase = true))) {
+            FALLBACK_MODEL
+        } else {
+            rawModel
+        }
         val prompt = """
             Görseldeki YKS (TYT veya AYT) sorusunu incele ve JSON formatında şu bilgileri çıkar:
             1. examType: "TYT" veya "AYT"
@@ -362,7 +409,8 @@ open class GroqProvider @Inject constructor(
             }
 
             val exception = lastResult.exceptionOrNull()
-            if (exception is AiException && exception.errorType == AiErrorType.MODEL_UNAVAILABLE && exception.message?.contains("404") == true) {
+            if (exception is AiException && exception.errorType == AiErrorType.MODEL_UNAVAILABLE &&
+                (exception.message?.contains("404") == true || exception.message?.contains("400") == true)) {
                 break
             }
             val isRetryable = isRetryableException(exception)
@@ -385,7 +433,7 @@ open class GroqProvider @Inject constructor(
         if (throwable is AiException) {
             return throwable.errorType == AiErrorType.NETWORK_TIMEOUT ||
                     throwable.errorType == AiErrorType.NETWORK_ERROR ||
-                    (throwable.errorType == AiErrorType.MODEL_UNAVAILABLE && !throwable.message.orEmpty().contains("404"))
+                    (throwable.errorType == AiErrorType.MODEL_UNAVAILABLE && !throwable.message.orEmpty().contains("404") && !throwable.message.orEmpty().contains("400"))
         }
         val msg = throwable.message.orEmpty().lowercase()
         return msg.contains("500") ||
@@ -493,10 +541,16 @@ open class GroqProvider @Inject constructor(
                         }
                     }
                     400 -> {
+                        val parsedError = try {
+                            json.decodeFromString<GroqChatResponse>(responseBodyString).error?.message
+                        } catch (_: Exception) {
+                            null
+                        }
+                        val errorDetail = parsedError ?: responseBodyString.take(200).ifBlank { "HTTP 400" }
                         Result.failure(
                             AiException(
-                                AiErrorType.UNKNOWN,
-                                "Geçersiz istek veya hatalı model parametresi (HTTP 400). Lütfen Groq model ayarlarınızı kontrol edin."
+                                AiErrorType.MODEL_UNAVAILABLE,
+                                "Groq API Hatası ($errorDetail)"
                             )
                         )
                     }

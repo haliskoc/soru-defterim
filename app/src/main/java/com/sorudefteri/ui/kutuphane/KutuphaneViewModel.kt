@@ -1,9 +1,12 @@
 package com.sorudefteri.ui.kutuphane
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.local.AyarlarDataStore
 import com.sorudefteri.data.repository.SoruRepository
+import com.sorudefteri.data.worker.AiSolutionRetryWorker
+import com.sorudefteri.data.worker.BatchSolveProgress
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.Alan
 import com.sorudefteri.domain.model.Ders
@@ -14,6 +17,7 @@ import com.sorudefteri.domain.model.TestFiltre
 import com.sorudefteri.domain.model.TestQuestion
 import com.sorudefteri.domain.repository.TestSessionManager
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -29,6 +33,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOn
@@ -93,8 +98,17 @@ class KutuphaneViewModel @Inject constructor(
     private val soruRepository: SoruRepository,
     private val ayarlarDataStore: AyarlarDataStore,
     private val testSessionManager: TestSessionManager,
-    private val defaultDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default
+    private val defaultDispatcher: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default,
+    @ApplicationContext private val appContext: Context? = null
 ) : ViewModel() {
+
+    val batchProgress: StateFlow<BatchSolveProgress> =
+        (appContext?.let { AiSolutionRetryWorker.observeBatchProgress(it) } ?: emptyFlow())
+            .stateIn(
+                scope = viewModelScope,
+                started = SharingStarted.WhileSubscribed(5000),
+                initialValue = BatchSolveProgress(0, 0, 0, false)
+            )
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -305,8 +319,12 @@ class KutuphaneViewModel @Inject constructor(
         _onlyDueReview.value = onlyDueReview
     }
 
+    fun setSortOrder(order: SortOrder) {
+        _sortOrder.value = order
+    }
+
     fun onSortOrderChange(sortOrder: SortOrder) {
-        _sortOrder.value = sortOrder
+        setSortOrder(sortOrder)
     }
 
     fun resetFilters() {
@@ -335,6 +353,20 @@ class KutuphaneViewModel @Inject constructor(
         } else {
             current.add(id)
         }
+        _selectedSoruIds.value = current
+        _isSelectionMode.value = current.isNotEmpty()
+    }
+
+    fun deselectSoru(id: Long) {
+        val current = _selectedSoruIds.value.toMutableSet()
+        current.remove(id)
+        _selectedSoruIds.value = current
+        _isSelectionMode.value = current.isNotEmpty()
+    }
+
+    fun selectSoru(id: Long) {
+        val current = _selectedSoruIds.value.toMutableSet()
+        current.add(id)
         _selectedSoruIds.value = current
         _isSelectionMode.value = current.isNotEmpty()
     }
@@ -436,6 +468,27 @@ class KutuphaneViewModel @Inject constructor(
         }
     }
 
+    fun solveSelectedWithAi() {
+        val ids = _selectedSoruIds.value.toList()
+        if (ids.isEmpty()) return
+        val context = appContext
+        if (context == null) {
+            clearSelection()
+            return
+        }
+        viewModelScope.launch {
+            val delay = ayarlarDataStore.getBatchSolveDelaySeconds()
+            val enqueuedCount = AiSolutionRetryWorker.enqueueBatch(context, ids, delay)
+            clearSelection()
+            _uiEvent.tryEmit("⚡ $enqueuedCount soru AI çözüm kuyruğuna alındı")
+        }
+    }
+
+    fun cancelBatchSolve() {
+        appContext?.let { AiSolutionRetryWorker.cancelBatch(it) }
+        _uiEvent.tryEmit("Toplu AI çözümü durduruldu")
+    }
+
     fun toggleSolved(soru: Soru) {
         viewModelScope.launch {
             val newSolvedState = !soru.isSolved
@@ -459,6 +512,9 @@ class KutuphaneViewModel @Inject constructor(
         viewModelScope.launch {
             lastDeletedSoru = soru
             soruRepository.soruSil(soru)
+            if (_selectedSoruIds.value.contains(soru.id)) {
+                deselectSoru(soru.id)
+            }
         }
     }
 

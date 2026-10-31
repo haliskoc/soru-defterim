@@ -346,10 +346,11 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override suspend fun regressReviewStageBatch(ids: List<Long>) = withContext(Dispatchers.IO) {
-        if (ids.isEmpty()) return@withContext
+        val distinctIds = ids.distinct()
+        if (distinctIds.isEmpty()) return@withContext
         val now = System.currentTimeMillis()
         val nextReviewTimestamp = now + (24 * 60 * 60 * 1000L) // +1 day
-        ids.chunked(500).forEach { chunk ->
+        distinctIds.chunked(500).forEach { chunk ->
             soruDao.regressReviewStageBatch(chunk, nextReviewTimestamp, now)
         }
     }
@@ -359,32 +360,38 @@ class SoruRepositoryImpl @Inject constructor(
      * batch sorgu. Usta-rozete (+50 XP) adaylar tek sorguyla bulunur.
      */
     override suspend fun advanceReviewStageBatch(ids: List<Long>) = withContext(Dispatchers.IO) {
-        if (ids.isEmpty()) return@withContext
+        val distinctIds = ids.distinct()
+        if (distinctIds.isEmpty()) return@withContext
         val now = System.currentTimeMillis()
         val nextReviewTimestamp = now + (30 * 24 * 60 * 60 * 1000L) // üst sınır +30 gün
-        ids.chunked(500).forEach { chunk ->
+        distinctIds.chunked(500).forEach { chunk ->
             soruDao.advanceReviewStageBatch(chunk, nextReviewTimestamp, now)
         }
     }
 
     override suspend fun deleteSorularByIds(ids: List<Long>) = withContext(Dispatchers.IO) {
-        if (ids.isEmpty()) return@withContext
-        // PERF: N ardışık dosya-silme yerine paralel IO (sınırlı eşzamanlılık).
-        ids.chunked(20).forEach { chunk ->
-            chunk.map { id ->
-                async {
-                    try {
-                        val soru = soruDao.getSoruByIdDirect(id)
-                        if (soru != null) cleanQuestionAssociatedFilesAndData(soru)
-                    } catch (_: Exception) {}
+        val distinctIds = ids.distinct()
+        if (distinctIds.isEmpty()) return@withContext
+        // PERF: N+1 tekil sorgu yerine chunked (500) okuma + paralel dosya temizleme
+        distinctIds.chunked(500).forEach { chunk ->
+            try {
+                val entities = soruDao.getSorularByIds(chunk)
+                entities.chunked(20).forEach { fileBatch ->
+                    fileBatch.map { entity ->
+                        async {
+                            try {
+                                cleanQuestionAssociatedFilesAndData(entity)
+                            } catch (_: Exception) {}
+                        }
+                    }.awaitAll()
                 }
-            }.awaitAll()
-        }
-        // SQLite IN clause limit (~999) aşılmaması için chunked
-        ids.chunked(500).forEach { chunk ->
+            } catch (_: Exception) {}
+            // SQLite IN clause limit (~999) aşılmaması için chunked silme
             soruDao.deleteSorularByIds(chunk)
         }
     }
+
+    suspend fun deleteSorularBatch(ids: List<Long>) = deleteSorularByIds(ids)
 
     override suspend fun updateSolvedStatusBatch(ids: List<Long>, isSolved: Boolean) = withContext(Dispatchers.IO) {
         if (ids.isEmpty()) return@withContext
@@ -404,6 +411,7 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override suspend fun insertAllSorular(sorular: List<Soru>): List<Long> = withContext(Dispatchers.IO) {
+        if (sorular.isEmpty()) return@withContext emptyList()
         val now = System.currentTimeMillis()
         val entities = sorular.map { s ->
             val hash = if (s.contentHash.isBlank()) SoruIcerikHash.hesapla(s) else s.contentHash
@@ -414,7 +422,9 @@ class SoruRepositoryImpl @Inject constructor(
                 updatedAt = if (s.updatedAt > 0) s.updatedAt else now
             ).toEntity()
         }
-        soruDao.insertAll(entities)
+        entities.chunked(500).flatMap { batch ->
+            soruDao.insertAll(batch)
+        }
     }
 
     /** Akıllı içe aktarma: içerik parmak izine göre var olan soruları topluca getir. */
@@ -509,27 +519,35 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override suspend fun tumVerileriTemizle(): Unit = withContext(Dispatchers.IO) {
+        // 1. Sokratik Koç sohbet geçmişi
         try {
             soruChatDao?.getAllMessagesDirect()?.map { it.soruId }?.distinct()?.forEach { soruId ->
                 soruChatDao.clearMessagesForSoru(soruId)
             }
         } catch (_: Exception) {}
+        // 2. Benzer sorular
         try {
-            benzerSoruDao.getAllBenzerSorularDirect().map { it.soruId }.distinct().forEach { soruId ->
+            benzerSoruDao.getAllBenzerSorularDirect().map { it.soruId }?.distinct()?.forEach { soruId ->
                 benzerSoruDao.deleteAllForSoru(soruId)
             }
         } catch (_: Exception) {}
+        // 3. Test sonuçları
         try {
             testSonucDao.deleteAllTestResults()
         } catch (_: Exception) {}
+        // 4. Deneme sınavları
         try {
             denemeSinaviDao?.clearAll()
         } catch (_: Exception) {}
+        // 5. Sorular (CASCADE tetikleyicileri ile bağlı kayıtlar çift güvencede)
         soruDao.clearAll()
+        // 6. Görsel ve dosya depoları
         gorselDepo.tumGorselleriSil()
         context?.let { ctx ->
             try { File(ctx.filesDir, "audio_memos").deleteRecursively() } catch (_: Exception) {}
             try { File(ctx.filesDir, "scratchpads").deleteRecursively() } catch (_: Exception) {}
+            try { File(ctx.cacheDir, "pdf").deleteRecursively() } catch (_: Exception) {}
+            try { File(ctx.cacheDir, "teacher_share").deleteRecursively() } catch (_: Exception) {}
         }
         Unit
     }
@@ -612,8 +630,14 @@ class SoruRepositoryImpl @Inject constructor(
     }
 
     override suspend fun getSorularByIds(ids: List<Long>): List<Soru> = withContext(Dispatchers.IO) {
-        if (ids.isEmpty()) emptyList()
-        else ids.distinct().chunked(500).flatMap { soruDao.getSorularByIds(it) }.map { it.toDomain() }
+        if (ids.isEmpty()) return@withContext emptyList()
+        val distinctIds = ids.distinct()
+        val entities = if (distinctIds.size <= 500) {
+            soruDao.getSorularByIds(distinctIds)
+        } else {
+            distinctIds.chunked(500).flatMap { batch -> soruDao.getSorularByIds(batch) }
+        }
+        entities.map { it.toDomain() }
     }
 
     override suspend fun getAllImagePaths(): List<String> = withContext(Dispatchers.IO) {

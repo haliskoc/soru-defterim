@@ -4,6 +4,8 @@ import com.sorudefteri.domain.model.AiErrorType
 import com.sorudefteri.domain.model.AiException
 import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
+import com.sorudefteri.domain.model.TwinQuestion
+import com.sorudefteri.domain.model.TwinQuestionsResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -336,5 +338,195 @@ class AiJsonParserTest {
         assertTrue(parsed.questionText.contains("\\rightarrow"))
         assertTrue(parsed.questionText.contains("\\right"))
         assertTrue(parsed.options["A"]!!.contains("\\frac{1}{2}"))
+    }
+
+    @Test
+    fun `parseTwinQuestionsResult should parse valid JSON wrapped in markdown fences`() {
+        val raw = """
+            Tabii ki, işte 3 kardeş soru:
+            ```json
+            {
+              "originalTopic": "İkinci Dereceden Denklemler",
+              "questions": [
+                {
+                  "id": 1,
+                  "questionText": "x^2 - 5x + 6 = 0 denkleminin kökleri çarpımı kaçtır?",
+                  "options": {
+                    "A": "6",
+                    "B": "5",
+                    "C": "-5",
+                    "D": "-6",
+                    "E": "1"
+                  },
+                  "correctAnswer": "A",
+                  "solution": "Kökler çarpımı c/a = 6/1 = 6'dır.",
+                  "trapWarning": "Kökler toplamı (-b/a) ile karıştırmayın."
+                },
+                {
+                  "id": 2,
+                  "questionText": "Bir tarlanın alanı (x^2 - 7x + 12) m² ise x'in alabileceği değerler...",
+                  "options": {
+                    "A": "3 ve 4",
+                    "B": "2 ve 6",
+                    "C": "-3 ve -4",
+                    "D": "1 ve 12",
+                    "E": "5 ve 7"
+                  },
+                  "correctAnswer": "A",
+                  "solution": "(x-3)(x-4)=0 kökler 3 ve 4.",
+                  "trapWarning": "Negatif çarpanları pozitif kökle karıştırmayın."
+                },
+                {
+                  "id": 3,
+                  "questionText": "Kökleri 2 ve -3 olan ikinci dereceden denklem hangisidir?",
+                  "options": {
+                    "A": "x^2 + x - 6 = 0",
+                    "B": "x^2 - x - 6 = 0",
+                    "C": "x^2 + 5x - 6 = 0",
+                    "D": "x^2 - 5x + 6 = 0",
+                    "E": "x^2 + x + 6 = 0"
+                  },
+                  "correctAnswer": "A",
+                  "solution": "x^2 - (x1+x2)x + x1*x2 = x^2 - (-1)x + (-6) = x^2 + x - 6 = 0.",
+                  "trapWarning": "Kökler toplamının ters işaretli formüldeki yerini unutmayın."
+                }
+              ]
+            }
+            ```
+            Başarılar dilerim!
+        """.trimIndent()
+
+        val result = AiJsonParser.parseTwinQuestionsResult(raw)
+        assertTrue(result.isSuccess)
+        val twinResult = result.getOrNull()
+        assertNotNull(twinResult)
+        assertEquals("İkinci Dereceden Denklemler", twinResult?.originalTopic)
+        assertEquals(3, twinResult?.questions?.size)
+
+        val q1 = twinResult?.questions?.get(0)
+        assertEquals(1, q1?.id)
+        assertEquals("A", q1?.correctAnswer)
+        assertEquals("6", q1?.options?.get("A"))
+        assertEquals("Kökler toplamı (-b/a) ile karıştırmayın.", q1?.trapWarning)
+
+        val q2 = twinResult?.questions?.get(1)
+        assertEquals(2, q2?.id)
+        assertEquals("A", q2?.correctAnswer)
+
+        val q3 = twinResult?.questions?.get(2)
+        assertEquals(3, q3?.id)
+        assertEquals("A", q3?.correctAnswer)
+    }
+
+    @Test
+    fun `parseTwinQuestionsResult should sanitize unescaped LaTeX backslashes like frac and sqrt`() {
+        val raw = """
+            {
+              "originalTopic": "Köklü Sayılar",
+              "questions": [
+                {
+                  "id": 1,
+                  "questionText": "İşlemin sonucu: \frac{\sqrt{18}}{\sqrt{2}} kaçtır?",
+                  "options": {
+                    "A": "3",
+                    "B": "\sqrt{3}",
+                    "C": "\frac{3}{2}",
+                    "D": "9",
+                    "E": "6"
+                  },
+                  "correctAnswer": "A",
+                  "solution": "\sqrt{\frac{18}{2}} = \sqrt{9} = 3",
+                  "trapWarning": "Kök içindeki bölmeyi dışarı çıkarmadan sadeleştirin."
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val result = AiJsonParser.parseTwinQuestionsResult(raw)
+        assertTrue(result.isSuccess)
+        val q1 = result.getOrNull()?.questions?.firstOrNull()
+        assertNotNull(q1)
+        assertEquals("A", q1?.correctAnswer)
+        assertTrue(q1!!.questionText.contains("\\frac"))
+        assertTrue(q1.questionText.contains("\\sqrt"))
+        assertTrue(q1.options["C"]!!.contains("\\frac{3}{2}"))
+    }
+
+    @Test
+    fun `parseTwinQuestionsResult should repair root array and trailing commas`() {
+        val raw = """
+            [
+              {
+                "id": 1,
+                "questionText": "Soru 1",
+                "options": {
+                  "A": "10",
+                  "B": "20",
+                },
+                "correctAnswer": "B",
+                "solution": "Çözüm 1",
+                "trapWarning": "Tuzak 1",
+              },
+              {
+                "id": 2,
+                "questionText": "Soru 2",
+                "options": {
+                  "A": "30",
+                  "B": "40",
+                },
+                "correctAnswer": "A",
+                "solution": "Çözüm 2",
+                "trapWarning": "Tuzak 2",
+              }
+            ]
+        """.trimIndent()
+
+        val result = AiJsonParser.parseTwinQuestionsResult(raw)
+        assertTrue(result.isSuccess)
+        val twinResult = result.getOrNull()
+        assertNotNull(twinResult)
+        assertEquals(2, twinResult?.questions?.size)
+        assertEquals("B", twinResult?.questions?.get(0)?.correctAnswer)
+        assertEquals("A", twinResult?.questions?.get(1)?.correctAnswer)
+    }
+
+    @Test
+    fun `parseTwinQuestionsResult should parse plain text fallback format`() {
+        val raw = """
+            Konu: Fonksiyon Grafikleri
+
+            1. Soru (Sayı & Değer Varyasyonu):
+            f(x) = 2x + 4 fonksiyonunun x eksenini kestiği noktanın apsisi kaçtır?
+            A) -2
+            B) 2
+            C) 4
+            D) 0
+            E) -4
+            Doğru Cevap: A
+            Çözüm: 2x + 4 = 0 => x = -2 bulunur.
+            Tuzak Uyarısı: y eksenini kestiği nokta (0, 4) ile karıştırılabilir.
+
+            2. Soru (Hikaye & Bağlam Varyasyonu):
+            Bir taksimetre açılışta 10 TL, her km için 5 TL yazmaktadır. 30 TL ödeyen müşteri kaç km gitmiştir?
+            A) 2
+            B) 4
+            C) 5
+            D) 6
+            E) 8
+            Doğru Cevap: B
+            Çözüm: 10 + 5x = 30 => 5x = 20 => x = 4 km.
+            Tuzak Uyarısı: Açılış ücretini toplamdan çıkarmayı unutmayın.
+        """.trimIndent()
+
+        val result = AiJsonParser.parseTwinQuestionsResult(raw)
+        assertTrue(result.isSuccess)
+        val twinResult = result.getOrNull()
+        assertNotNull(twinResult)
+        assertEquals("Fonksiyon Grafikleri", twinResult?.originalTopic)
+        assertEquals(2, twinResult?.questions?.size)
+        assertEquals("A", twinResult?.questions?.get(0)?.correctAnswer)
+        assertEquals("B", twinResult?.questions?.get(1)?.correctAnswer)
+        assertEquals("-2", twinResult?.questions?.get(0)?.options?.get("A"))
+        assertEquals("4", twinResult?.questions?.get(1)?.options?.get("B"))
     }
 }

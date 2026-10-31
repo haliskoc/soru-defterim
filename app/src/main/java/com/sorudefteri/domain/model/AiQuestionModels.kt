@@ -23,3 +23,25 @@ data class SimilarQuestionResult(
     val correctAnswer: String = "A",
     val solution: String = ""
 )
+
+/**
+ * Yanlış Soru İkizi (3 Soruluk Kardeş Test) için tekil soru modeli.
+ */
+@Serializable
+data class TwinQuestion(
+    val id: Int = 1,
+    val questionText: String = "",
+    val options: Map<String, String> = emptyMap(), // "A" -> "...", "B" -> "..."
+    val correctAnswer: String = "A",
+    val solution: String = "",
+    val trapWarning: String? = null
+)
+
+/**
+ * 3 Soruluk Kardeş Testi paketi.
+ */
+@Serializable
+data class TwinQuestionsResult(
+    val originalTopic: String = "",
+    val questions: List<TwinQuestion> = emptyList()
+)

@@ -11,6 +11,7 @@ import com.sorudefteri.domain.model.AiErrorType
 import com.sorudefteri.domain.model.AiException
 import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
+import com.sorudefteri.domain.model.TwinQuestionsResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -247,6 +248,36 @@ open class GeminiProvider @Inject constructor(
                 fallbackParser = { AiJsonParser.parseSimilarQuestionFallback(it) }
             )
             parseResult.getOrThrow()
+        }
+    }
+
+    /**
+     * Kaynak sorudan 3 farklı kardeş soru (Soru İkizleri) türetir:
+     * 1. Soru: Sayı & Değer Varyasyonu
+     * 2. Soru: Hikaye & Bağlam Varyasyonu
+     * 3. Soru: Tersine Akıl Yürütme & Kavram Tuzağı
+     */
+    open suspend fun generateTwinQuestions(
+        imageBytes: ByteArray?,
+        dersAdi: String,
+        konu: String,
+        soruMetni: String? = null,
+        modelName: String,
+        apiKey: String,
+        customPromptTemplate: String? = null
+    ): Result<TwinQuestionsResult> = withContext(Dispatchers.IO) {
+        if (apiKey.isBlank()) {
+            return@withContext Result.failure(
+                AiException(AiErrorType.INVALID_API_KEY, "Gemini API anahtarı boş olamaz.")
+            )
+        }
+
+        val prompt = promptManager.buildKardesSorularPrompt(dersAdi, konu, soruMetni, customPromptTemplate)
+        val effectiveModel = sanitizeModel(modelName)
+
+        val rawResult = executeGenerateContentWithRetry(imageBytes, prompt, effectiveModel, apiKey)
+        rawResult.mapCatching { rawText ->
+            AiJsonParser.parseTwinQuestionsResult(rawText).getOrThrow()
         }
     }
 

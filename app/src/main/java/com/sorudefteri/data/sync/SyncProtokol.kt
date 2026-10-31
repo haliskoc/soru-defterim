@@ -125,7 +125,12 @@ data class OzetSatir(val e: String, val u: Long = 0L, val h: String = "", val d:
 data class OzetPaket(val paket: Int = 0, val toplam: Int = 1, val liste: List<OzetSatir> = emptyList())
 
 @Serializable
-data class GorselBilgi(val tur: String = "soru", val dosyaId: String = "", val bayt: Int = 0)
+data class GorselBilgi(
+    val tur: String = "soru",
+    val dosyaId: String = "",
+    val bayt: Int = 0,
+    val base64Data: String? = null
+)
 
 @Serializable
 data class SoruPaket(

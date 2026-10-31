@@ -8,6 +8,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import okhttp3.Cache
 import okhttp3.CacheControl
@@ -39,14 +40,14 @@ object AppModule {
     fun provideDefaultDispatcher(): kotlinx.coroutines.CoroutineDispatcher =
         kotlinx.coroutines.Dispatchers.Default
 
+    @OptIn(ExperimentalSerializationApi::class)
     @Provides
     @Singleton
     fun provideJson(): Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
-        encodeDefaults = true
-        prettyPrint = false
         coerceInputValues = true
+        explicitNulls = false
     }
 
     @Provides

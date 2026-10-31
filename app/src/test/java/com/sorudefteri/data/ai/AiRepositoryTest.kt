@@ -7,6 +7,7 @@ import com.sorudefteri.domain.model.AiProviderType
 import com.sorudefteri.domain.model.QuestionMetadata
 import com.sorudefteri.domain.model.SimilarQuestionResult
 import com.sorudefteri.domain.model.Soru
+import com.sorudefteri.domain.model.TwinQuestionsResult
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
@@ -41,6 +42,7 @@ class AiRepositoryTest {
         var solutionResult: Result<String> = Result.success("Fake Gemini Solution")
         var metadataResult: Result<QuestionMetadata> = Result.success(QuestionMetadata())
         var liveModelsResult: Result<List<Pair<String, String>>> = Result.success(emptyList())
+        var twinQuestionsResult: Result<TwinQuestionsResult> = Result.success(TwinQuestionsResult())
 
         override suspend fun cozumIsteDetayli(
             imageBytes: ByteArray?,
@@ -61,11 +63,22 @@ class AiRepositoryTest {
         ): Result<QuestionMetadata> = metadataResult
 
         override suspend fun listModels(apiKey: String): Result<List<Pair<String, String>>> = liveModelsResult
+
+        override suspend fun generateTwinQuestions(
+            imageBytes: ByteArray?,
+            dersAdi: String,
+            konu: String,
+            soruMetni: String?,
+            modelName: String,
+            apiKey: String,
+            customPromptTemplate: String?
+        ): Result<TwinQuestionsResult> = twinQuestionsResult
     }
 
     class FakeGroqProvider : GroqProvider(mockk(relaxed = true), mockk(relaxed = true)) {
         var solutionResult: Result<String> = Result.success("Fake Groq Solution")
         var similarResult: Result<SimilarQuestionResult> = Result.success(SimilarQuestionResult("", emptyMap(), "A", ""))
+        var twinQuestionsResult: Result<TwinQuestionsResult> = Result.success(TwinQuestionsResult())
 
         override suspend fun cozumIsteDetayli(
             imageBytes: ByteArray?,
@@ -88,11 +101,22 @@ class AiRepositoryTest {
             apiKey: String,
             customPromptTemplate: String?
         ): Result<SimilarQuestionResult> = similarResult
+
+        override suspend fun generateTwinQuestions(
+            imageBytes: ByteArray?,
+            dersAdi: String,
+            konu: String,
+            soruMetni: String?,
+            modelName: String,
+            apiKey: String,
+            customPromptTemplate: String?
+        ): Result<TwinQuestionsResult> = twinQuestionsResult
     }
 
     class FakeNvidiaProvider : NvidiaProvider(mockk(relaxed = true), mockk(relaxed = true)) {
         var solutionResult: Result<String> = Result.success("Fake Nvidia Solution")
         var similarResult: Result<SimilarQuestionResult> = Result.success(SimilarQuestionResult("", emptyMap(), "A", ""))
+        var twinQuestionsResult: Result<TwinQuestionsResult> = Result.success(TwinQuestionsResult())
 
         override suspend fun cozumIsteDetayli(
             imageBytes: ByteArray?,
@@ -115,6 +139,16 @@ class AiRepositoryTest {
             apiKey: String,
             customPromptTemplate: String?
         ): Result<SimilarQuestionResult> = similarResult
+
+        override suspend fun generateTwinQuestions(
+            imageBytes: ByteArray?,
+            dersAdi: String,
+            konu: String,
+            soruMetni: String?,
+            modelName: String,
+            apiKey: String,
+            customPromptTemplate: String?
+        ): Result<TwinQuestionsResult> = twinQuestionsResult
     }
 
     @Before
@@ -249,6 +283,36 @@ class AiRepositoryTest {
         assertTrue(result.isSuccess)
         assertEquals("B", result.getOrNull()?.correctAnswer)
         assertEquals("Çözüm...", result.getOrNull()?.solution)
+    }
+
+    @Test
+    fun generateTwinQuestions_aktifSaglayiciyaYonlendirilir() = runTest {
+        val expected = TwinQuestionsResult(
+            originalTopic = "Üçgenler",
+            questions = listOf(
+                com.sorudefteri.domain.model.TwinQuestion(id = 1, questionText = "Soru 1", correctAnswer = "A"),
+                com.sorudefteri.domain.model.TwinQuestion(id = 2, questionText = "Soru 2", correctAnswer = "B"),
+                com.sorudefteri.domain.model.TwinQuestion(id = 3, questionText = "Soru 3", correctAnswer = "C")
+            )
+        )
+        fakeGroqProvider.twinQuestionsResult = Result.success(expected)
+
+        coEvery { mockAyarlarDataStore.getAiProvider() } returns AiProviderType.GROQ
+        coEvery { mockAyarlarDataStore.getGroqApiKey() } returns "groq_key"
+        coEvery { mockAyarlarDataStore.getGroqModel() } returns "llama-3.2-11b-vision-preview"
+
+        val soru = Soru(
+            id = 1,
+            examType = "TYT",
+            subjectId = "geometri",
+            topic = "Üçgenler",
+            imagePath = ""
+        )
+
+        val result = aiRepository.generateTwinQuestions(soru, sendImage = false, extractedText = "Örnek kaynak soru metni")
+        assertTrue(result.isSuccess)
+        assertEquals("Üçgenler", result.getOrNull()?.originalTopic)
+        assertEquals(3, result.getOrNull()?.questions?.size)
     }
 
     @Test

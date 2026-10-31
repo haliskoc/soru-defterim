@@ -68,30 +68,48 @@ class GorselDepo @Inject constructor(
             return File(parent, thumbName)
         }
 
+        private val thumbnailPathCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+        fun clearThumbnailCache() {
+            thumbnailPathCache.clear()
+        }
+
         /**
          * Verilen dosya yolu için küçük resim (thumbnail) dosya yolunu döner.
          * Küçük resim mevcutsa onun yolunu, henüz üretilmemişse originalPath'i döner.
+         * UI thread takılmalarını (disk stat I/O) önlemek için bellek önbelleği kullanır.
          */
         fun getThumbnailPath(originalPath: String?): String? {
             if (originalPath.isNullOrBlank()) return null
             if (originalPath.startsWith("http://") || originalPath.startsWith("https://") || originalPath.startsWith("content://")) {
                 return originalPath
             }
+            val cached = thumbnailPathCache[originalPath]
+            if (cached != null) return cached
+
             val file = File(originalPath)
             val name = file.name
             if (name.startsWith("thumb_")) {
+                thumbnailPathCache[originalPath] = originalPath
                 return originalPath
             }
-            val parent = file.parentFile ?: return originalPath
+            val parent = file.parentFile ?: run {
+                thumbnailPathCache[originalPath] = originalPath
+                return originalPath
+            }
 
             val expected = getExpectedThumbnailFile(file)
             if (expected.exists() && expected.isFile) {
-                return expected.absolutePath
+                val resolved = expected.absolutePath
+                thumbnailPathCache[originalPath] = resolved
+                return resolved
             }
 
             val altFile = File(parent, "thumb_" + file.nameWithoutExtension + ".webp")
             if (altFile.exists() && altFile.isFile) {
-                return altFile.absolutePath
+                val resolved = altFile.absolutePath
+                thumbnailPathCache[originalPath] = resolved
+                return resolved
             }
 
             return originalPath
@@ -269,6 +287,7 @@ class GorselDepo @Inject constructor(
                     compressBitmap(thumbBitmap, out, WEBP_QUALITY)
                     out.flush()
                 }
+                thumbnailPathCache[targetFile.absolutePath] = thumbFile.absolutePath
             } finally {
                 if (thumbBitmap !== bitmap && !thumbBitmap.isRecycled) {
                     thumbBitmap.recycle()
@@ -313,12 +332,15 @@ class GorselDepo @Inject constructor(
 
             // İlişkili thumbnail dosyasını da sil
             try {
+                thumbnailPathCache.remove(path)
                 val expectedThumb = getExpectedThumbnailFile(file)
+                thumbnailPathCache.remove(expectedThumb.absolutePath)
                 if (expectedThumb.exists() && expectedThumb.isFile) {
                     expectedThumb.delete()
                 }
                 val thumbPath = Companion.getThumbnailPath(path)
                 if (thumbPath != null && thumbPath != path) {
+                    thumbnailPathCache.remove(thumbPath)
                     val foundThumb = File(thumbPath)
                     if (foundThumb.exists() && foundThumb.isFile) {
                         foundThumb.delete()
@@ -529,6 +551,7 @@ class GorselDepo @Inject constructor(
                         compressBitmap(thumbBitmap, out, WEBP_QUALITY)
                         out.flush()
                     }
+                    thumbnailPathCache[targetFile.absolutePath] = thumbFile.absolutePath
                 } finally {
                     if (thumbBitmap !== finalBitmap && !thumbBitmap.isRecycled) {
                         try { thumbBitmap.recycle() } catch (_: Exception) {}

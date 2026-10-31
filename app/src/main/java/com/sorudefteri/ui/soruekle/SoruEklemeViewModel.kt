@@ -7,6 +7,9 @@ import androidx.lifecycle.viewModelScope
 import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.data.local.AyarlarDataStore
 import com.sorudefteri.data.ocr.OcrHelper
+import com.sorudefteri.data.worker.AiSolutionRetryWorker
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import com.sorudefteri.data.repository.SoruRepository
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.KonuKatalog
@@ -95,7 +98,8 @@ class SoruEklemeViewModel @Inject constructor(
     private val ayarlarDataStore: AyarlarDataStore,
     private val aiRepository: AiRepository,
     private val ocrHelper: OcrHelper,
-    private val badgeManager: BadgeManager? = null
+    private val badgeManager: BadgeManager? = null,
+    @ApplicationContext private val appContext: Context? = null
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SoruEklemeUiState())
@@ -844,8 +848,9 @@ class SoruEklemeViewModel @Inject constructor(
                     }
                     soruRepository.updateSoru(soru)
                 } else {
-                    soruRepository.soruEkle(soru)
+                    val newId = soruRepository.soruEkle(soru)
                     badgeManager?.onQuestionAdded()
+                    maybeEnqueueAutoSolve(newId, soru, state)
                 }
                 _uiState.update { it.copy(isSaving = false, isSaved = true) }
                 onSuccess()
@@ -859,6 +864,32 @@ class SoruEklemeViewModel @Inject constructor(
             } catch (oom: OutOfMemoryError) {
                 _uiState.update { it.copy(isSaving = false, errorMessage = "Bellek yetersiz, soru kaydedilemedi.") }
             }
+        }
+    }
+
+    /**
+     * "Kaydederken otomatik çöz" açıksa yeni eklenen soruyu arka planda AI çözüm kuyruğuna ekler.
+     * Hata olsa bile kaydetme akışını etkilemez; kullanıcı beklemez.
+     */
+    private suspend fun maybeEnqueueAutoSolve(newId: Long, soru: Soru, state: SoruEklemeUiState) {
+        val ctx = appContext ?: return
+        if (newId <= 0L) return
+        try {
+            if (ayarlarDataStore.getAutoSolveOnSave() &&
+                aiRepository.hasApiKey() &&
+                soru.aiExplanation.isNullOrBlank()
+            ) {
+                AiSolutionRetryWorker.enqueueAutoSolve(
+                    context = ctx,
+                    soruId = newId,
+                    sendImageToAi = state.sendImageToAi,
+                    extractedText = state.extractedText?.trim()?.ifBlank { null }
+                )
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("SoruEklemeViewModel", "Otomatik AI çözüm kuyruğa alınamadı", e)
         }
     }
 }

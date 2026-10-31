@@ -7,6 +7,8 @@ import com.sorudefteri.data.local.entity.SoruChatMessageEntity
 import com.sorudefteri.domain.model.AiErrorType
 import com.sorudefteri.domain.model.AiException
 import com.sorudefteri.domain.model.AiProviderType
+import com.sorudefteri.domain.model.AiTaskRoute
+import com.sorudefteri.domain.model.AiTaskType
 import kotlinx.coroutines.CancellationException
 import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
@@ -34,23 +36,29 @@ open class SmartAiRouter @Inject constructor(
 ) {
     companion object {
         private const val TAG = "SmartAiRouter"
-        const val FALLBACK_GROQ_MODEL = "llama-3.2-90b-vision-preview"
+        const val FALLBACK_GROQ_MODEL = "qwen/qwen3.8-27b"
         const val FALLBACK_NVIDIA_MODEL = "meta/llama-3.2-90b-vision-instruct"
         const val FALLBACK_GEMINI_MODEL = "gemini-3.7-flash"
     }
 
     /**
-     * Hatanın otomatik fallback gerektiren geçici bir sorun (429 kota, 5xx sunucu hatası, zaman aşımı)
-     * olup olmadığını belirler.
+     * Hatanın otomatik fallback gerektiren geçici bir sorun (429 kota, 5xx sunucu hatası, zaman aşımı,
+     * model hatası veya 400/404) olup olmadığını belirler.
      */
     fun isFallbackEligible(throwable: Throwable?): Boolean {
         if (throwable == null) return false
         if (throwable is CancellationException) return false
+        val msg = throwable.message.orEmpty().lowercase()
+        val isModelOrClientError = msg.contains("model") ||
+                msg.contains("decommissioned") ||
+                msg.contains("not found") ||
+                msg.contains("404") ||
+                msg.contains("400")
         if (throwable is AiException) {
             if (throwable.errorType == AiErrorType.QUOTA_EXCEEDED) return true
             if (throwable.errorType == AiErrorType.NETWORK_TIMEOUT) return true
             if (throwable.errorType == AiErrorType.MODEL_UNAVAILABLE) return true
-            val msg = throwable.message.orEmpty().lowercase()
+            if (isModelOrClientError) return true
             if (msg.contains("429") || msg.contains("500") || msg.contains("502") ||
                 msg.contains("503") || msg.contains("504") || msg.contains("timeout") ||
                 msg.contains("zaman aşımı") || msg.contains("kota") || msg.contains("rate limit")
@@ -58,8 +66,8 @@ open class SmartAiRouter @Inject constructor(
                 return true
             }
         }
-        val msg = throwable.message.orEmpty().lowercase()
-        return msg.contains("429") ||
+        return isModelOrClientError ||
+                msg.contains("429") ||
                 msg.contains("500") ||
                 msg.contains("502") ||
                 msg.contains("503") ||
@@ -72,14 +80,25 @@ open class SmartAiRouter @Inject constructor(
                 throwable is InterruptedIOException
     }
 
-    private data class ProviderTarget(
+    internal data class ProviderTarget(
         val provider: AiProviderType,
         val apiKey: String,
         val modelName: String,
         val isFallback: Boolean
     )
 
-    private suspend fun buildProviderChain(): List<ProviderTarget> {
+    private suspend fun apiKeyFor(provider: AiProviderType): String = when (provider) {
+        AiProviderType.GEMINI -> ayarlarDataStore.getGeminiApiKey()
+        AiProviderType.GROQ -> ayarlarDataStore.getGroqApiKey()
+        AiProviderType.NVIDIA -> ayarlarDataStore.getNvidiaApiKey()
+    }.trim()
+
+    /**
+     * Görev için sağlayıcı zincirini oluşturur.
+     * Görev route'u tanımlı ve o sağlayıcının API anahtarı doluysa zincirin başına
+     * route sağlayıcı + modeli konur; ardından mevcut sıralama (fallback olarak) gelir.
+     */
+    internal suspend fun buildProviderChain(task: AiTaskType = AiTaskType.COZUM): List<ProviderTarget> {
         val primary = ayarlarDataStore.getAiProvider()
         val order = when (primary) {
             AiProviderType.GEMINI -> listOf(AiProviderType.GEMINI, AiProviderType.GROQ, AiProviderType.NVIDIA)
@@ -87,31 +106,85 @@ open class SmartAiRouter @Inject constructor(
             AiProviderType.NVIDIA -> listOf(AiProviderType.NVIDIA, AiProviderType.GROQ, AiProviderType.GEMINI)
         }
 
-        val chain = mutableListOf<ProviderTarget>()
+        val defaultChain = mutableListOf<ProviderTarget>()
         for ((index, prov) in order.withIndex()) {
             val isFallback = index > 0
-            when (prov) {
-                AiProviderType.GEMINI -> {
-                    val key = ayarlarDataStore.getGeminiApiKey().trim()
-                    val model = if (isFallback) FALLBACK_GEMINI_MODEL
+            val key = apiKeyFor(prov)
+            val model = when (prov) {
+                AiProviderType.GEMINI -> if (isFallback) FALLBACK_GEMINI_MODEL
                     else ayarlarDataStore.getGeminiModel().trim().ifBlank { FALLBACK_GEMINI_MODEL }
-                    chain.add(ProviderTarget(prov, key, model, isFallback))
-                }
-                AiProviderType.GROQ -> {
-                    val key = ayarlarDataStore.getGroqApiKey().trim()
-                    val model = if (isFallback) FALLBACK_GROQ_MODEL
+                AiProviderType.GROQ -> if (isFallback) FALLBACK_GROQ_MODEL
                     else ayarlarDataStore.getGroqModel().trim().ifBlank { FALLBACK_GROQ_MODEL }
-                    chain.add(ProviderTarget(prov, key, model, isFallback))
-                }
-                AiProviderType.NVIDIA -> {
-                    val key = ayarlarDataStore.getNvidiaApiKey().trim()
-                    val model = if (isFallback) FALLBACK_NVIDIA_MODEL
+                AiProviderType.NVIDIA -> if (isFallback) FALLBACK_NVIDIA_MODEL
                     else ayarlarDataStore.getNvidiaModel().trim().ifBlank { FALLBACK_NVIDIA_MODEL }
-                    chain.add(ProviderTarget(prov, key, model, isFallback))
-                }
+            }
+            defaultChain.add(ProviderTarget(prov, key, model, isFallback))
+        }
+
+        val route: AiTaskRoute? = try {
+            ayarlarDataStore.getTaskRoute(task)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        if (route != null) {
+            val routeKey = apiKeyFor(route.provider)
+            if (routeKey.isNotBlank()) {
+                val routeModel = route.model.trim().ifBlank { route.provider.defaultModel }
+                val head = ProviderTarget(route.provider, routeKey, routeModel, isFallback = false)
+                val rest = defaultChain
+                    .filterNot { it.provider == head.provider && it.modelName == head.modelName }
+                    .map { it.copy(isFallback = true) }
+                return listOf(head) + rest
+            } else {
+                Log.i(TAG, "SmartAiRouter: ${task.name} route'u (${route.provider.name}) API anahtarı boş, varsayılan zincir kullanılıyor.")
             }
         }
-        return chain
+        return defaultChain
+    }
+
+    /**
+     * Generic görev yönlendirici: görev route'u + fallback zinciri üzerinde [block]'u dener.
+     * Birincil hedefin anahtarı boşsa INVALID_API_KEY; fallback'lerde boş anahtar atlanır.
+     * Başarısızlık [isFallbackEligible] ise sıradaki sağlayıcıya geçer.
+     */
+    open suspend fun <T> routeTask(
+        task: AiTaskType,
+        block: suspend (provider: AiProviderType, apiKey: String, model: String) -> Result<T>
+    ): Result<T> {
+        val chain = buildProviderChain(task)
+        var lastError: Throwable? = null
+        for (target in chain) {
+            if (target.apiKey.isBlank()) {
+                if (!target.isFallback) {
+                    return Result.failure(
+                        AiException(
+                            AiErrorType.INVALID_API_KEY,
+                            "API anahtarı bulunamadı. Lütfen Ayarlar sayfasından ${target.provider.name} API anahtarınızı girin."
+                        )
+                    )
+                }
+                continue
+            }
+            Log.d(TAG, "SmartAiRouter: ${task.name} deneniyor -> ${target.provider.name} (model: ${target.modelName}, fallback: ${target.isFallback})")
+            val result = try {
+                block(target.provider, target.apiKey, target.modelName)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+            if (result.isSuccess) return result
+            val exception = result.exceptionOrNull()
+            lastError = exception
+            if (isFallbackEligible(exception)) {
+                Log.w(TAG, "SmartAiRouter: ${task.name} ${target.provider.name} hatası (${exception?.localizedMessage}), fallback deneniyor...")
+                continue
+            }
+            return result
+        }
+        return Result.failure(lastError ?: AiException(AiErrorType.UNKNOWN, "Tüm AI sağlayıcıları başarısız oldu."))
     }
 
     /**
@@ -127,7 +200,7 @@ open class SmartAiRouter @Inject constructor(
         soruMetni: String?,
         customPromptTemplate: String? = null
     ): Result<String> {
-        val chain = buildProviderChain()
+        val chain = buildProviderChain(AiTaskType.COZUM)
         var lastError: Throwable? = null
 
         for (target in chain) {
@@ -225,7 +298,7 @@ open class SmartAiRouter @Inject constructor(
             userMessage = userMessage
         )
 
-        val chain = buildProviderChain()
+        val chain = buildProviderChain(AiTaskType.CHAT)
         var lastError: Throwable? = null
 
         for (target in chain) {

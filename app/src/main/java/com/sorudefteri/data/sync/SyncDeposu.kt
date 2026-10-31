@@ -397,13 +397,33 @@ class SyncDeposu @Inject constructor(
                 val soruJson = json.encodeToString(item)
                 val gorseller = mutableListOf<GorselBilgi>()
 
-                // Soru görseli
+                var toplamInlineBayt = 0
+                val inlineTekilLimit = 450 * 1024
+                val inlineToplamLimit = 700 * 1024
+
+                // Soru görseli (WebP inline veya PFD dosyası)
                 soru.imagePath.takeIf { it.isNotBlank() }?.let { yol ->
                     val f = File(yol)
                     if (f.exists() && f.isFile && f.length() > 0) {
-                        val payloadId = eslestirme.dosyaGonder(ep, f)
-                        if (payloadId >= 0L) {
-                            gorseller.add(GorselBilgi("soru", payloadId.toString(), f.length().toInt()))
+                        val len = f.length()
+                        if (len <= inlineTekilLimit && (toplamInlineBayt + len) <= inlineToplamLimit) {
+                            try {
+                                val bytes = f.readBytes()
+                                toplamInlineBayt += bytes.size
+                                val b64 = SyncProtokol.dosyaB64(bytes)
+                                gorseller.add(GorselBilgi("soru", "", bytes.size, b64))
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Soru görseli inline okunamadı, dosya ile gönderilecek", e)
+                                val payloadId = eslestirme.dosyaGonder(ep, f)
+                                if (payloadId >= 0L) {
+                                    gorseller.add(GorselBilgi("soru", payloadId.toString(), f.length().toInt()))
+                                }
+                            }
+                        } else {
+                            val payloadId = eslestirme.dosyaGonder(ep, f)
+                            if (payloadId >= 0L) {
+                                gorseller.add(GorselBilgi("soru", payloadId.toString(), f.length().toInt()))
+                            }
                         }
                     }
                 }
@@ -411,9 +431,25 @@ class SyncDeposu @Inject constructor(
                 soru.solutionImagePath?.takeIf { it.isNotBlank() }?.let { yol ->
                     val f = File(yol)
                     if (f.exists() && f.isFile && f.length() > 0) {
-                        val payloadId = eslestirme.dosyaGonder(ep, f)
-                        if (payloadId >= 0L) {
-                            gorseller.add(GorselBilgi("cozum", payloadId.toString(), f.length().toInt()))
+                        val len = f.length()
+                        if (len <= inlineTekilLimit && (toplamInlineBayt + len) <= inlineToplamLimit) {
+                            try {
+                                val bytes = f.readBytes()
+                                toplamInlineBayt += bytes.size
+                                val b64 = SyncProtokol.dosyaB64(bytes)
+                                gorseller.add(GorselBilgi("cozum", "", bytes.size, b64))
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Çözüm görseli inline okunamadı, dosya ile gönderilecek", e)
+                                val payloadId = eslestirme.dosyaGonder(ep, f)
+                                if (payloadId >= 0L) {
+                                    gorseller.add(GorselBilgi("cozum", payloadId.toString(), f.length().toInt()))
+                                }
+                            }
+                        } else {
+                            val payloadId = eslestirme.dosyaGonder(ep, f)
+                            if (payloadId >= 0L) {
+                                gorseller.add(GorselBilgi("cozum", payloadId.toString(), f.length().toInt()))
+                            }
                         }
                     }
                 }
@@ -424,9 +460,24 @@ class SyncDeposu @Inject constructor(
                         ?: File(File(anaDosyaDizini, "scratchpads"), "soru_${soru.id}.json")
                             .takeIf { it.exists() && it.isFile && it.length() > 0 }
                     if (cizimDosyasi != null) {
-                        val payloadId = eslestirme.dosyaGonder(ep, cizimDosyasi)
-                        if (payloadId >= 0L) {
-                            gorseller.add(GorselBilgi("cizim", payloadId.toString(), cizimDosyasi.length().toInt()))
+                        val len = cizimDosyasi.length()
+                        if (len <= 150 * 1024 && (toplamInlineBayt + len) <= inlineToplamLimit) {
+                            try {
+                                val bytes = cizimDosyasi.readBytes()
+                                toplamInlineBayt += bytes.size
+                                val b64 = SyncProtokol.dosyaB64(bytes)
+                                gorseller.add(GorselBilgi("cizim", "", bytes.size, b64))
+                            } catch (e: Exception) {
+                                val payloadId = eslestirme.dosyaGonder(ep, cizimDosyasi)
+                                if (payloadId >= 0L) {
+                                    gorseller.add(GorselBilgi("cizim", payloadId.toString(), cizimDosyasi.length().toInt()))
+                                }
+                            }
+                        } else {
+                            val payloadId = eslestirme.dosyaGonder(ep, cizimDosyasi)
+                            if (payloadId >= 0L) {
+                                gorseller.add(GorselBilgi("cizim", payloadId.toString(), cizimDosyasi.length().toInt()))
+                            }
                         }
                     }
                 }
@@ -436,9 +487,24 @@ class SyncDeposu @Inject constructor(
                         if (it.exists()) it else if (anaDosyaDizini != null) File(anaDosyaDizini, yol) else it
                     }
                     if (f.exists() && f.isFile && f.length() > 0) {
-                        val payloadId = eslestirme.dosyaGonder(ep, f)
-                        if (payloadId >= 0L) {
-                            gorseller.add(GorselBilgi("ses", payloadId.toString(), f.length().toInt()))
+                        val len = f.length()
+                        if (len <= 250 * 1024 && (toplamInlineBayt + len) <= inlineToplamLimit) {
+                            try {
+                                val bytes = f.readBytes()
+                                toplamInlineBayt += bytes.size
+                                val b64 = SyncProtokol.dosyaB64(bytes)
+                                gorseller.add(GorselBilgi("ses", "", bytes.size, b64))
+                            } catch (e: Exception) {
+                                val payloadId = eslestirme.dosyaGonder(ep, f)
+                                if (payloadId >= 0L) {
+                                    gorseller.add(GorselBilgi("ses", payloadId.toString(), f.length().toInt()))
+                                }
+                            }
+                        } else {
+                            val payloadId = eslestirme.dosyaGonder(ep, f)
+                            if (payloadId >= 0L) {
+                                gorseller.add(GorselBilgi("ses", payloadId.toString(), f.length().toInt()))
+                            }
                         }
                     }
                 }
@@ -580,13 +646,30 @@ class SyncDeposu @Inject constructor(
                 ?: context.cacheDir?.takeIf { !it.path.isNullOrBlank() }
         } catch (_: Exception) { null }
 
-            // Görselleri, ses notunu ve çizimi bekleyen dosyalardan al
+            // Görselleri, ses notunu ve çizimi al (öncelik doğrudan inline Base64, fallback PFD dosyası)
             var soruYolu = ""
             var cozumYolu: String? = null
             var sesYolu: String? = null
             for (g in paket.gorseller) {
                 try {
-                    val dosya = bekleDosya(g.dosyaId)
+                    val dosya = if (!g.base64Data.isNullOrBlank()) {
+                        try {
+                            val bytes = SyncProtokol.b64Coz(g.base64Data)
+                            val uzanti = when (g.tur) {
+                                "ses" -> "m4a"
+                                "cizim" -> "json"
+                                else -> "webp"
+                            }
+                            val tempFile = File(context.cacheDir, "nearby_inline_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}.$uzanti")
+                            tempFile.writeBytes(bytes)
+                            tempFile
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Inline Base64 çözülemedi: ${g.tur}", e)
+                            null
+                        }
+                    } else {
+                        bekleDosya(g.dosyaId)
+                    }
                     if (dosya != null && dosya.exists() && dosya.length() > 0) {
                         when (g.tur) {
                             "cozum" -> {

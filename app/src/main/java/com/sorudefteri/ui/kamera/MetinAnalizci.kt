@@ -10,6 +10,8 @@ import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.sorudefteri.domain.kamera.Kutu
 import com.sorudefteri.domain.kamera.TarananSatir
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asExecutor
 import java.util.concurrent.Executor
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
@@ -41,7 +43,7 @@ class MetinAnalizci(
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
 
-    private val guvenliExecutor: Executor? = callbackExecutor?.let { raw ->
+    private val guvenliExecutor: Executor = (callbackExecutor ?: Dispatchers.Default.asExecutor()).let { raw ->
         Executor { komuta ->
             try {
                 raw.execute(komuta)
@@ -102,35 +104,20 @@ class MetinAnalizci(
                 hataOldu()
             }
 
-            if (guvenliExecutor != null) {
-                gorev
-                    .addOnSuccessListener(guvenliExecutor) { metin ->
-                        try {
-                            basariIsle(metin)
-                        } catch (t: Throwable) {
-                            Log.w(TAG, "Sonuç işleme hatası: ${t.localizedMessage}")
-                        }
+            gorev
+                .addOnSuccessListener(guvenliExecutor) { metin ->
+                    try {
+                        basariIsle(metin)
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Sonuç işleme hatası: ${t.localizedMessage}")
                     }
-                    .addOnFailureListener(guvenliExecutor) { hata ->
-                        hataIsle(hata)
-                    }
-                    .addOnCompleteListener(guvenliExecutor) {
-                        tamam(imageProxy)
-                    }
-            } else {
-                gorev
-                    .addOnSuccessListener { metin ->
-                        try {
-                            basariIsle(metin)
-                        } finally {
-                            tamam(imageProxy)
-                        }
-                    }
-                    .addOnFailureListener { hata ->
-                        hataIsle(hata)
-                        tamam(imageProxy)
-                    }
-            }
+                }
+                .addOnFailureListener(guvenliExecutor) { hata ->
+                    hataIsle(hata)
+                }
+                .addOnCompleteListener(guvenliExecutor) {
+                    tamam(imageProxy)
+                }
         } catch (t: Throwable) {
             Log.w(TAG, "Analiz hatası: ${t.localizedMessage}")
             tamam(imageProxy)

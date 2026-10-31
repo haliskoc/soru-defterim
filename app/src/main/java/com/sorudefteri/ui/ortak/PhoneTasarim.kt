@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
+import coil3.request.crossfade
 import com.sorudefteri.data.images.GorselDepo
 import com.sorudefteri.domain.DersTaksonomisi
 import com.sorudefteri.domain.model.Ders
@@ -376,6 +377,60 @@ fun PhoneHizliFiltreler(
     }
 }
 
+/**
+ * ModalBottomSheet ile detaylı filtreleme sayfası (PhoneFiltreSheet).
+ * Adım 4 ve Adım 5 içeriği uzun olduğunda dikey kaydırılabilir (verticalScroll).
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun PhoneFiltreSheet(
+    onDismiss: () -> Unit,
+    selectedExamType: String?,
+    onExamTypeSelected: (String?) -> Unit,
+    selectedSubjectId: String?,
+    availableSubjects: List<Ders>,
+    onSubjectSelected: (String?) -> Unit,
+    selectedMistakeType: HataTipi?,
+    onMistakeTypeSelected: (HataTipi?) -> Unit,
+    selectedPublisher: String?,
+    availablePublishers: List<String>,
+    onPublisherSelected: (String?) -> Unit,
+    selectedExamName: String?,
+    availableExamNames: List<String>,
+    onExamNameSelected: (String?) -> Unit,
+    onlyUnsolved: Boolean,
+    onOnlyUnsolvedToggle: (Boolean) -> Unit,
+    onlyFavorites: Boolean,
+    onOnlyFavoritesToggle: (Boolean) -> Unit,
+    onlyDueReview: Boolean,
+    onOnlyDueReviewToggle: (Boolean) -> Unit,
+    onResetFilters: () -> Unit
+) {
+    PhoneFiltreDetaySayfasi(
+        onDismiss = onDismiss,
+        selectedExamType = selectedExamType,
+        onExamTypeSelected = onExamTypeSelected,
+        selectedSubjectId = selectedSubjectId,
+        availableSubjects = availableSubjects,
+        onSubjectSelected = onSubjectSelected,
+        selectedMistakeType = selectedMistakeType,
+        onMistakeTypeSelected = onMistakeTypeSelected,
+        selectedPublisher = selectedPublisher,
+        availablePublishers = availablePublishers,
+        onPublisherSelected = onPublisherSelected,
+        selectedExamName = selectedExamName,
+        availableExamNames = availableExamNames,
+        onExamNameSelected = onExamNameSelected,
+        onlyUnsolved = onlyUnsolved,
+        onOnlyUnsolvedToggle = onOnlyUnsolvedToggle,
+        onlyFavorites = onlyFavorites,
+        onOnlyFavoritesToggle = onOnlyFavoritesToggle,
+        onlyDueReview = onlyDueReview,
+        onOnlyDueReviewToggle = onOnlyDueReviewToggle,
+        onResetFilters = onResetFilters
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PhoneFiltreDetaySayfasi(
@@ -681,13 +736,18 @@ fun PhoneSoruListeKarti(
                     if (displayPath.startsWith("http") || displayPath.startsWith("content://")) displayPath
                     else File(displayPath)
                 }
-                // PERF: Izgarada SubcomposeAsyncImage yerine AsyncImage.
-                AsyncImage(
-                    model = ImageRequest.Builder(LocalContext.current)
+                val context = LocalContext.current
+                val imageRequest = remember(context, imageModel, soru.id) {
+                    ImageRequest.Builder(context)
                         .data(imageModel)
                         .size(240, 240)
                         .memoryCacheKey("liste_${soru.id}")
-                        .build(),
+                        .crossfade(false)
+                        .build()
+                }
+                // PERF: Izgarada SubcomposeAsyncImage yerine AsyncImage (crossfade kapalı, remember'lanmış request).
+                AsyncImage(
+                    model = imageRequest,
                     contentDescription = null,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier.matchParentSize()
@@ -850,18 +910,20 @@ fun PhoneSecimAltBar(
     onPdf: () -> Unit,
     onAnki: () -> Unit,
     onSil: () -> Unit,
+    onAiCoz: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var overflowAcik by rememberSaveable { mutableStateOf(false) }
     Surface(
         tonalElevation = 8.dp,
         shadowElevation = 8.dp,
-        modifier = modifier.fillMaxWidth()
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
@@ -870,6 +932,37 @@ fun PhoneSecimAltBar(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            if (onAiCoz != null) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 44.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onAiCoz() }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "⚡ AI ile Çöz ($seciliSayi)",
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)

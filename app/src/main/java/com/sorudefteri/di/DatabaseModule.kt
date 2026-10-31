@@ -44,6 +44,11 @@ object DatabaseModule {
                 SoruDatabase.MIGRATION_12_13
             )
             .addCallback(object : RoomDatabase.Callback() {
+                override fun onCreate(db: SupportSQLiteDatabase) {
+                    super.onCreate(db)
+                    db.execSQL("PRAGMA foreign_keys = ON;")
+                }
+
                 override fun onOpen(db: SupportSQLiteDatabase) {
                     super.onOpen(db)
                     db.execSQL("PRAGMA foreign_keys = ON;")
